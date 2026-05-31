@@ -2347,6 +2347,51 @@ static int test_compiler_rejects_unary_call_helper_wrapped_ternary_call_plus_int
     return 1;
 }
 
+static int test_compiler_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "int main(){ if(pick() + 1) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float helper-wrapped ternary call condition plus int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "int main(float x){ if(pick(x) + 1) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call helper-wrapped ternary call condition plus int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
 static int test_compiler_rejects_float_helper_wrapped_ternary_call_compare_int_under_extension(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -3068,16 +3113,19 @@ static int test_compiler_rejects_capdefer_outside_extension_mode(void) {
     return ok;
 }
 
-static int test_compiler_rejects_pair_parameter_under_extension_with_honest_diagnostic(void) {
-    static const char *source = "pair id(pair x){ return x; }\nint main(){ return 0; }\n";
+static int test_compiler_accepts_pair_parameter_under_extension(void) {
+    static const char *source =
+        "int sum(pair x){ return x.first + x.second; }\n"
+        "int main(){ pair p={4,5}; putint(sum(p)); return 0; }\n";
     CompilerError error;
     char *output = NULL;
     int ok = 1;
 
     memset(&error, 0, sizeof(error));
-    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
-        strstr(error.message, "'pair' parameters/returns are not supported in this extension slice") == NULL) {
-        fprintf(stderr, "[compiler] FAIL: pair parameter diagnostic mismatch: %s\n", error.message);
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair parameter should compile under extension: %s\n", error.message);
         ok = 0;
     }
 
@@ -3085,19 +3133,41 @@ static int test_compiler_rejects_pair_parameter_under_extension_with_honest_diag
     return ok;
 }
 
-static int test_compiler_rejects_struct_parameter_under_extension_with_honest_diagnostic(void) {
+static int test_compiler_accepts_struct_parameter_under_extension(void) {
     static const char *source =
         "struct Point { int x; int y; };\n"
-        "struct Point id(struct Point x){ return x; }\n"
-        "int main(){ return 0; }\n";
+        "int sum(struct Point p){ return p.x + p.y; }\n"
+        "int main(){ struct Point p={6,7}; putint(sum(p)); return 0; }\n";
     CompilerError error;
     char *output = NULL;
     int ok = 1;
 
     memset(&error, 0, sizeof(error));
-    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
-        strstr(error.message, "'struct' parameters/returns are not supported in this extension slice") == NULL) {
-        fprintf(stderr, "[compiler] FAIL: struct parameter diagnostic mismatch: %s\n", error.message);
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: struct parameter should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_nested_struct_parameter_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "int sum(struct Mid m){ return m.p.first + m.p.second + m.z; }\n"
+        "int main(){ struct Mid m={{1,2},3}; putint(sum(m)); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested struct parameter should compile under extension: %s\n", error.message);
         ok = 0;
     }
 
@@ -3211,6 +3281,712 @@ static int test_compiler_rejects_plain_pair_value_under_extension(void) {
     return ok;
 }
 
+static int test_compiler_rejects_local_pair_as_scalar_call_argument_under_extension(void) {
+    static const char *source =
+        "int sink(int x){ return x; }\n"
+        "int main(){ pair a={1,2}; return sink(a); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: local pair scalar call-arg should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_struct_as_scalar_call_argument_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "int sink(int x){ return x; }\n"
+        "int main(){ struct Point p={1,2}; return sink(p); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: local struct scalar call-arg should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_pair_scalar_initializer_under_extension(void) {
+    static const char *source =
+        "int main(){ pair a={1,2}; int x = a; return x; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: local pair scalar initializer should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_struct_scalar_initializer_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "int main(){ struct Point p={1,2}; int x = p; return x; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: local struct scalar initializer should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_pair_scalar_assignment_under_extension(void) {
+    static const char *source =
+        "int main(){ pair a={1,2}; int x = 0; x = a; return x; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: local pair scalar assignment should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_struct_scalar_assignment_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "int main(){ struct Point p={1,2}; int x = 0; x = p; return x; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: local struct scalar assignment should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_pair_control_condition_under_extension(void) {
+    static const char *source =
+        "int main(){ pair a={1,2}; if(a) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-004") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: local pair control condition should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_struct_control_condition_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "int main(){ struct Point p={1,2}; if(p) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-004") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: local struct control condition should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_pair_return_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "\nmk:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair return should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_struct_return_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Point mk(){ struct Point p={1,2}; return p; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "\nmk:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: struct return should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_pair_call_result_copy_init_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ pair q = mk(); return q.second; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call mk") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair call-result copy-init should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_struct_call_result_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Point mk(){ struct Point p={1,2}; return p; }\n"
+        "int main(){ struct Point q = mk(); return q.y; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call mk") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: struct call-result copy-init should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_pair_call_result_assignment_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ pair q={7,8}; q = mk(); return q.second; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call mk") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair call-result assignment should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_struct_call_result_assignment_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Point mk(){ struct Point p={1,2}; return p; }\n"
+        "int main(){ struct Point q={7,8}; q = mk(); return q.y; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call mk") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: struct call-result assignment should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_pair_parameter_to_return_forwarding_under_extension(void) {
+    static const char *source =
+        "pair id(pair p){ return p; }\n"
+        "int main(){ pair q={1,2}; pair r=id(q); return r.second; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "\nid:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair parameter-to-return forwarding should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_struct_parameter_to_return_forwarding_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Point id(struct Point p){ return p; }\n"
+        "int main(){ struct Point q={1,2}; struct Point r=id(q); return r.y; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "\nid:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: struct parameter-to-return forwarding should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_nested_struct_return_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "int main(){ struct Mid q=mk(); return q.p.second + q.z; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "\nmk:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested struct return should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_pair_call_result_as_aggregate_call_argument_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int main(){ return sum(mk()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "\nsum:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair call-result aggregate call-arg should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_struct_call_result_as_aggregate_call_argument_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Point mk(){ struct Point p={1,2}; return p; }\n"
+        "int sum(struct Point p){ return p.x + p.y; }\n"
+        "int main(){ return sum(mk()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "\nsum:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: struct call-result aggregate call-arg should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_nested_struct_call_result_as_aggregate_call_argument_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "int sum(struct Mid m){ return m.p.first + m.p.second + m.z; }\n"
+        "int main(){ return sum(mk()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "\nsum:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested struct call-result aggregate call-arg should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_pair_multi_hop_return_chain_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair id(pair p){ return p; }\n"
+        "pair wrap(){ return id(mk()); }\n"
+        "int main(){ pair q=wrap(); return q.second; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "\nwrap:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair multi-hop aggregate return chain should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_nested_struct_multi_hop_return_chain_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "struct Mid id(struct Mid m){ return m; }\n"
+        "struct Mid wrap(){ return id(mk()); }\n"
+        "int main(){ struct Mid q=wrap(); return q.p.second + q.z; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "\nwrap:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested struct multi-hop aggregate return chain should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_pair_call_result_as_scalar_call_argument_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int sink(int x){ return x; }\n"
+        "int main(){ return sink(mk()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair call-result scalar call-arg should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_pair_multi_hop_return_chain_as_scalar_call_argument_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair wrap(){ return mk(); }\n"
+        "int sink(int x){ return x; }\n"
+        "int main(){ return sink(wrap()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair multi-hop scalar call-arg should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_pair_call_result_scalar_initializer_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ int x = mk(); return x; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair call-result scalar initializer should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_pair_call_result_scalar_assignment_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ int x = 0; x = mk(); return x; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair call-result scalar assignment should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_pair_multi_hop_return_chain_scalar_initializer_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair wrap(){ return mk(); }\n"
+        "int main(){ int x = wrap(); return x; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair multi-hop scalar initializer should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_nested_struct_multi_hop_return_chain_scalar_initializer_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "struct Mid id(struct Mid m){ return m; }\n"
+        "struct Mid wrap(){ return id(mk()); }\n"
+        "int main(){ int x = wrap(); return x; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested struct multi-hop scalar initializer should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_pair_multi_hop_return_chain_control_condition_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair wrap(){ return mk(); }\n"
+        "int main(){ if(wrap()) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-004") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair multi-hop control condition should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_nested_struct_multi_hop_return_chain_control_condition_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "struct Mid id(struct Mid m){ return m; }\n"
+        "struct Mid wrap(){ return id(mk()); }\n"
+        "int main(){ if(wrap()) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-004") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested struct multi-hop control condition should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_pair_call_result_direct_member_access_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ return mk().second; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-003") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair call-result direct member access should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_struct_call_result_direct_member_access_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Point mk(){ struct Point p={1,2}; return p; }\n"
+        "int main(){ return mk().y; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-003") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: struct call-result direct member access should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_parenthesized_pair_call_result_direct_member_access_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ return (mk()).second; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-003") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: parenthesized pair call-result direct member access should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_parenthesized_struct_call_result_direct_member_access_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Point mk(){ struct Point p={1,2}; return p; }\n"
+        "int main(){ return ((mk())).y; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-003") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: parenthesized struct call-result direct member access should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_nested_struct_call_result_direct_member_chain_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "int main(){ return mk().p.second; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-003") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested struct call-result direct member chain should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_accepts_struct_copy_under_extension(void) {
     static const char *source =
         "struct Point { int x; int y; int z; };\n"
@@ -3310,6 +4086,341 @@ static int test_compiler_rejects_pair_struct_assignment_mismatch_under_extension
     return ok;
 }
 
+static int test_compiler_accepts_nested_pair_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Outer { pair p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; putint(o.p.first); putint(o.p.second); return o.z; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested pair field lookup should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_nested_struct_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Outer { struct Point p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; putint(o.p.x); putint(o.p.y); return o.z; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested struct field lookup should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_nested_pair_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Outer { pair p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; pair q=o.p; putint(q.first); return q.second; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested pair copy init should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_nested_struct_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Outer { struct Point p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; struct Point q=o.p; putint(q.x); return q.y; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested struct copy init should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_nested_pair_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Outer { pair p; int z; };\n"
+        "int main(){ pair q={4,5}; struct Outer o={{1,2},3}; q=o.p; putint(q.first); return q.second; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested pair assignment from member should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_nested_struct_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Outer { struct Point p; int z; };\n"
+        "int main(){ struct Point q={4,5}; struct Outer o={{1,2},3}; q=o.p; putint(q.x); return q.y; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested struct assignment from member should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_deep_nested_struct_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; putint(o.m.p.x); putint(o.m.p.y); return o.m.z + o.w; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: deep nested struct field lookup should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_deep_nested_struct_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; struct Mid m=o.m; putint(m.p.x); return m.p.y + m.z; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: deep nested struct copy init should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_deep_nested_struct_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Mid m={{7,8},9}; struct Outer o={{{1,2},3},4}; m=o.m; putint(m.p.x); return m.p.y + m.z; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: deep nested struct assignment from member should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_deep_nested_pair_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; putint(o.m.p.first); putint(o.m.p.second); return o.m.z + o.w; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: deep nested pair field lookup should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_deep_nested_pair_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; struct Mid m=o.m; putint(m.p.first); return m.p.second + m.z; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: deep nested pair copy init should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_deep_nested_pair_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Mid m={{7,8},9}; struct Outer o={{{1,2},3},4}; m=o.m; putint(m.p.first); return m.p.second + m.z; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: deep nested pair assignment from member should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_deep_nested_struct_assignment_mismatch_under_extension(void) {
+    static const char *source =
+        "struct P { int x; int y; };\n"
+        "struct Q { int x; int y; };\n"
+        "struct Outer { struct P p; int z; };\n"
+        "int main(){ struct Q q={4,5}; struct Outer o={{{1,2},3}}; q=o.p; return q.x; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-006") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: deep nested struct assignment mismatch should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_deep_nested_pair_struct_assignment_mismatch_under_extension(void) {
+    static const char *source =
+        "struct A { pair p; int z; };\n"
+        "struct B { pair p; int z; };\n"
+        "struct Outer { struct A a; int w; };\n"
+        "int main(){ struct B b={{7,8},9}; struct Outer o={{{1,2},3},4}; b=o.a; return b.z; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-006") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: deep nested pair/struct assignment mismatch should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_deep_nested_pair_initializer_too_many_items_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2,3},4},5}; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-002") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: deep nested pair initializer too many items should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_deep_nested_struct_initializer_too_many_items_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2,3},4},5}; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-002") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: deep nested struct initializer too many items should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_rejects_function_valued_parameter_outside_extension_mode(void) {
     static const char *source =
         "int add1(int x){ return x+1; }\n"
@@ -3374,6 +4485,797 @@ static int test_compiler_accepts_unused_function_valued_parameter_declaration_un
         strstr(output, ".globl main\n.type main, @function\nmain:\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: unused function-valued parameter declaration should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_function_valued_return_declaration_extension_slice_for_now(void) {
+    static const char *source =
+        "int make(int x)(int);\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: function-valued return declaration should parse and pass semantic compatibility under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_compatible_function_valued_return_redeclaration_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int);\n"
+        "int make(int x)(int);\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: compatible function-valued return redeclaration should pass under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_mismatched_function_valued_return_redeclaration_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int);\n"
+        "void make(int x)(int);\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TOP-005") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: mismatched function-valued return redeclaration should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_function_valued_return_definition_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl make__retclosure_") == NULL ||
+        strstr(output, ".globl make\n.type make, @function\nmake:\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: function-valued return definition should compile through lowering under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_function_valued_return_definition_with_mismatched_closure_signature_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int) { return closure [x] void () { return; }; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-045") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: function-valued return definition with mismatched closure signature should be rejected in semantic checking: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_function_valued_return_definition_with_multiple_closure_return_sites_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int) { if (x) return closure [x] int (int y) { return x + y; }; return closure [x] int (int y) { return x - y; }; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-049") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: function-valued return definition with multiple closure return sites should be rejected in semantic checking: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_local_function_value_initialization_from_function_valued_return_call_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ int f(int)=make(3); return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call make\n") == NULL ||
+        strstr(output, "  call make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value initialization from function-valued return call should compile through lowering under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_immediate_call_of_function_valued_return_call_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ return make(3)(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call make\n") == NULL ||
+        strstr(output, "  call make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: immediate call of function-valued return call should compile through lowering under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_closure_function_valued_return_immediate_call_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ return make(3)(1.25); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: closure function-valued return immediate call scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_closure_function_valued_return_immediate_call_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ return make(3)(1, 2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: closure function-valued return immediate call arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_local_closure_function_valued_return_bind_and_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x)(int) { int f(int)=closure [x] int (int y) { return x + y; }; return f; }\n"
+        "int main(){ int h(int)=pick(3); return h(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl pick__closure_f_") == NULL ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call pick__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local closure function-valued return bind-and-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_local_closure_function_valued_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x)(int) { int f(int)=closure [x] int (int y) { return x + y; }; return f; }\n"
+        "int main(){ return pick(3)(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl pick__closure_f_") == NULL ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call pick__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local closure function-valued return immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_local_closure_function_valued_return_bind_and_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ int h(int)=pick(3, 1); return h(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl pick__closure_f_") == NULL ||
+        strstr(output, ".globl pick__closure_g_") == NULL ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic local closure function-valued return bind-and-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_local_closure_function_valued_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ return pick(3, 1)(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl pick__closure_f_") == NULL ||
+        strstr(output, ".globl pick__closure_g_") == NULL ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic local closure function-valued return immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_local_closure_function_valued_return_forward_into_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ return apply(pick(5, 1), 3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl pick__closure_f_") == NULL ||
+        strstr(output, ".globl pick__closure_g_") == NULL ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call pick__closure_f_") == NULL ||
+        strstr(output, "  call pick__closure_g_") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic local closure function-valued return forwarding into parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_multi_capture_closure_forward_into_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int,int), int a, int b){ return f(a,b); }\n"
+        "int main(){ int x=3; int y=4; int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; return apply(f, 5, 6); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: multi-capture closure forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_multi_capture_local_closure_bind_and_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x,int y)(int,int) { int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; return f; }\n"
+        "int main(){ int h(int,int)=pick(3,4); return h(5,6); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl pick__closure_f_") == NULL ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "call pick__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned multi-capture local closure bind-and-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_multi_capture_local_closure_forward_into_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int,int), int a, int b){ return f(a,b); }\n"
+        "int pick(int x, int y, int c)(int,int) { int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; int g(int,int)=closure [x,y] int (int a, int b) { return x + y - a - b; }; if(c) f=g; return f; }\n"
+        "int main(){ return apply(pick(5, 7, 1), 3, 2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply__fv_0_pick__closure_f_") == NULL ||
+        strstr(output, ".globl apply__fv_0_pick__closure_g_") == NULL ||
+        strstr(output, ".globl pick__closure_f_") == NULL ||
+        strstr(output, ".globl pick__closure_g_") == NULL ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call apply__fv_0_pick__closure_f_") == NULL ||
+        strstr(output, "  call apply__fv_0_pick__closure_g_") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned multi-capture local closure forwarding into parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_noncapturing_function_valued_return_bind_and_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int) { return add1; }\n"
+        "int main(){ int f(int)=pick(); return f(41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: noncapturing function-valued return bind-and-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_noncapturing_function_valued_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int) { return add1; }\n"
+        "int main(){ return pick()(41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: noncapturing function-valued return immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_noncapturing_function_valued_return_immediate_call_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int addf(float x){ return 1; }\n"
+        "int pick()(float) { return addf; }\n"
+        "int main(){ return pick()(0); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: noncapturing function-valued return immediate call scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_noncapturing_function_valued_return_immediate_call_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int) { return add1; }\n"
+        "int main(){ return pick()(1, 2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: noncapturing function-valued return immediate call arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_noncapturing_function_valued_return_immediate_call_pair_argument_scalar_mismatch_under_extension(void) {
+    static const char *source =
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int pick()(pair) { return sum; }\n"
+        "int main(){ return pick()(1); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-005") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: noncapturing function-valued return immediate call pair argument scalar mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_noncapturing_function_valued_return_immediate_call_struct_argument_kind_mismatch_under_extension(void) {
+    static const char *source =
+        "struct P { int x; int y; };\n"
+        "struct Q { int x; int y; };\n"
+        "int sum(struct P p){ return p.x + p.y; }\n"
+        "int pick()(struct P) { return sum; }\n"
+        "int main(){ struct Q q={1,2}; return pick()(q); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-006") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: noncapturing function-valued return immediate call struct argument kind mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_zero_arg_function_valued_return_immediate_call_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int next(){ return 9; }\n"
+        "int pick()(){ return next; }\n"
+        "int main(){ return pick()(1); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg function-valued return immediate call arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_local_noncapturing_function_value_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int) { int f(int)=add1; return f; }\n"
+        "int main(){ return pick()(41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local noncapturing function-value return immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_rebound_local_noncapturing_function_value_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick()(int) { int f(int)=add1; f=add2; return f; }\n"
+        "int main(){ return pick()(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: rebound local noncapturing function-value return immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_noncapturing_function_valued_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int) { int f(int)=add1; if(c) f=add2; return f; }\n"
+        "int main(){ return pick(1)(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic noncapturing function-valued return immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_noncapturing_function_valued_return_bind_and_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int) { int f(int)=add1; if(c) f=add2; return f; }\n"
+        "int main(){ int g(int)=pick(1); return g(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL ||
+        strstr(output, "lw a0, 0(sp)\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic noncapturing function-valued return bind-and-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_noncapturing_function_value_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ return pick(1)(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary noncapturing function-value return immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_noncapturing_function_value_return_bind_and_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=pick(1); return h(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary noncapturing function-value return bind-and-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_closure_function_value_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ return pick(1)(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "pick__closure_f_") == NULL ||
+        strstr(output, "pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary closure function-value return immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_closure_function_value_return_bind_and_call_under_extension(void) {
+    static const char *source =
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=pick(1); return h(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "pick__closure_f_") == NULL ||
+        strstr(output, "pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary closure function-value return bind-and-call should compile under extension: %s\n",
             error.message);
         ok = 0;
     }
@@ -3477,6 +5379,50 @@ static int test_compiler_accepts_direct_call_of_function_valued_parameter_with_m
         strstr(output, "  call double1\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: function-valued parameter specialization should support multiple top-level bindings: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_direct_call_of_function_valued_parameter_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return apply(add1, 0); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct call of function-valued parameter scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_direct_call_of_function_valued_parameter_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(1, 2); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return apply(add1, 0); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct call of function-valued parameter arity mismatch should be rejected under extension: %s\n",
             error.message);
         ok = 0;
     }
@@ -3607,6 +5553,3517 @@ static int test_compiler_accepts_zero_arg_void_function_valued_parameter_with_sp
         strstr(output, "  call ping\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: zero-arg void function-valued parameter should compile with specialization lowering: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_zero_arg_function_valued_parameter_direct_call_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(1); }\n"
+        "int next(){ return 9; }\n"
+        "int main(){ return apply0(next); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg function-valued parameter direct call arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_zero_arg_void_function_valued_parameter_direct_call_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(1); }\n"
+        "void ping(){ return; }\n"
+        "int main(){ apply0(ping); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg void function-valued parameter direct call arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_local_function_value_direct_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int f(int)=add1; return f(41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_function_value_direct_call_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int addf(float x){ return 1; }\n"
+        "int main(){ int f(float)=addf; return f(0); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value direct call scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_function_value_direct_call_pair_argument_scalar_mismatch_under_extension(void) {
+    static const char *source =
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int main(){ int f(pair)=sum; return f(1); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-005") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value direct call pair argument scalar mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_function_value_direct_call_struct_argument_kind_mismatch_under_extension(void) {
+    static const char *source =
+        "struct P { int x; int y; };\n"
+        "struct Q { int x; int y; };\n"
+        "int sum(struct P p){ return p.x + p.y; }\n"
+        "int main(){ struct Q q={1,2}; int f(struct P)=sum; return f(q); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-006") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value direct call struct argument kind mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_local_zero_arg_function_value_direct_call_under_extension(void) {
+    static const char *source =
+        "int next(){ return 9; }\n"
+        "int main(){ int f()=next; return f(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call next\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local zero-arg function value direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_zero_arg_function_value_direct_call_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int next(){ return 9; }\n"
+        "int main(){ int f()=next; return f(1); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local zero-arg function value direct call arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_local_zero_arg_void_function_value_direct_call_under_extension(void) {
+    static const char *source =
+        "void ping(){ putint(1); return; }\n"
+        "int main(){ void f()=ping; f(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call ping\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local zero-arg void function value direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_local_builtin_function_value_direct_call_under_extension(void) {
+    static const char *source =
+        "int main(){ void f(int)=putint; f(7); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local builtin function value direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_function_value_nonfunction_initializer_under_extension(void) {
+    static const char *source =
+        "int main(){ int f(int)=0; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-018") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value non-function initializer should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_function_value_signature_mismatch_initializer_under_extension(void) {
+    static const char *source =
+        "int next(){ return 9; }\n"
+        "int main(){ int f(int)=next; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-018") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value signature mismatch initializer should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_function_value_alias_chain_parameter_kind_mismatch_under_extension(void) {
+    static const char *source =
+        "int addf(float x){ return 1; }\n"
+        "int main(){ int f(float)=addf; int g(int)=f; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-018") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value alias chain parameter-kind mismatch initializer should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_function_value_alias_chain_expected_parameter_kind_mismatch_under_extension(void) {
+    static const char *source =
+        "int addi(int x){ return x+1; }\n"
+        "int main(){ int f(int)=addi; int g(float)=f; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-018") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value alias chain expected-parameter-kind mismatch initializer should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_local_function_value_assignment_parameter_kind_mismatch_under_extension(void) {
+    static const char *source =
+        "int addf(float x){ return 1; }\n"
+        "int addi(int x){ return x+1; }\n"
+        "int main(){ int f(float)=addf; int g(int)=addi; g=f; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-019") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value assignment parameter-kind mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_local_function_value_reassignment_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int f(int)=add1; f=add2; return f(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value reassignment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_local_function_value_dispatch_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=0; int f(int)=add1; if((putint(0), c)) f=add2; return f(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic local function value dispatch should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_local_two_arg_function_value_dispatch_under_extension(void) {
+    static const char *source =
+        "int add(int x,int y){ return x+y; }\n"
+        "int sub(int x,int y){ return x-y; }\n"
+        "int main(){ int c=0; int f(int,int)=add; if((putint(0), c)) f=sub; return f(9, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add\n") == NULL ||
+        strstr(output, "  call sub\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic local two-arg function value dispatch should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_local_function_value_alias_dispatch_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=0; int f(int)=add1; if((putint(0), c)) f=add2; int g(int)=f; return g(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL ||
+        strstr(output, "lw a0, 4(sp)\n  sw a0, 8(sp)\n") == NULL ||
+        strstr(output, "lw a0, 8(sp)\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic local function value alias dispatch should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_non_function_local_void_declaration_under_extension(void) {
+    static const char *source =
+        "int main(){ void x; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "Local 'void' declarations must use a function declarator") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: non-function local void declaration should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_local_function_value_forwarding_into_function_parameter_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int g(int)=add1; return apply(g, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "apply__fv_0_add1") == NULL ||
+        strstr(output, "  call apply__fv_0_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_local_function_value_forwarding_into_function_parameter_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int g(int)=add1; if((putint(0), c)) g=add2; return apply(g, 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_add1\n.type __fnwrap_add1, @function\n__fnwrap_add1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add2\n.type __fnwrap_add2, @function\n__fnwrap_add2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic local function value forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_function_value_forwarding_into_function_parameter_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c)(int) { int f(int)=add1; if(c) f=add2; return f; }\n"
+        "int main(){ int g(int)=pick(1); return apply(g, 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_add1\n.type __fnwrap_add1, @function\n__fnwrap_add1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add2\n.type __fnwrap_add2, @function\n__fnwrap_add2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned function value forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_local_zero_arg_function_value_forwarding_into_function_parameter_under_extension(void) {
+    static const char *source =
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int main(){ int c=1; int g()=next1; if((putint(0), c)) g=next2; return apply0(g); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_next1\n.type __fnwrap_next1, @function\n__fnwrap_next1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_next2\n.type __fnwrap_next2, @function\n__fnwrap_next2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_next1\n") == NULL ||
+        strstr(output, "  call __fnwrap_next2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic local zero-arg function value forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_local_zero_arg_void_function_value_forwarding_into_function_parameter_under_extension(void) {
+    static const char *source =
+        "void ping1(){ putint(1); }\n"
+        "void ping2(){ putint(2); }\n"
+        "void apply0(void f()){ f(); }\n"
+        "int main(){ int c=1; void g()=ping1; if((putint(0), c)) g=ping2; apply0(g); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_ping1\n.type __fnwrap_ping1, @function\n__fnwrap_ping1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_ping2\n.type __fnwrap_ping2, @function\n__fnwrap_ping2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_ping1\n") == NULL ||
+        strstr(output, "  call __fnwrap_ping2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic local zero-arg void function value forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_function_value_forwarding_into_function_parameter_under_extension(void) {
+    static const char *source =
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int pick(int c)(){ int g()=next1; if(c) g=next2; return g; }\n"
+        "int main(){ int g()=pick(1); return apply0(g); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_next1\n.type __fnwrap_next1, @function\n__fnwrap_next1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_next2\n.type __fnwrap_next2, @function\n__fnwrap_next2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_next1\n") == NULL ||
+        strstr(output, "  call __fnwrap_next2\n") == NULL ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg function value forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_function_value_assignment_then_direct_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int h(int)=add1; if((putint(0), c)) f=add2; h=f; return h(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "lw a0, 4(sp)\n  sw a0, 8(sp)\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic function value assignment then direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_function_value_assignment_then_direct_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; int h(int)=add1; h=((putint(0), c) ? f : g); return h(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary function-value assignment then direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_closure_assignment_then_direct_call_under_extension(void) {
+    static const char *source =
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; int h(int)=f; h=((putint(0), c) ? f : g); return h(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "main__closure_g_") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary closure assignment then direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_function_value_assignment_then_forward_into_function_parameter_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int f(int)=add1; int h(int)=add1; if((putint(0), c)) f=add2; h=f; return apply(h, 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "lw a0, 4(sp)\n  sw a0, 8(sp)\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add1\n.type __fnwrap_add1, @function\n__fnwrap_add1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add2\n.type __fnwrap_add2, @function\n__fnwrap_add2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic function value assignment then forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_function_value_assignment_then_return_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int h(int)=add1; if(c) f=add2; h=f; return h; }\n"
+        "int main(){ return pick(1)(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "lw a0, 8(sp)\n  sw a0, 12(sp)\n") == NULL ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic function value assignment then return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_comma_wrapped_function_value_direct_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int g(int)=add1; return (0, g)(41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: comma-wrapped function value direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_comma_wrapped_function_value_direct_call_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int addf(float x){ return 1; }\n"
+        "int main(){ int f(float)=addf; return (0, f)(0); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: comma-wrapped function value direct call scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_assignment_result_function_value_direct_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int f(int)=add1; int h(int)=add1; return (h=f)(41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "lw a0, 0(sp)\n  sw a0, 4(sp)\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: assignment-result function value direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_assignment_result_function_value_direct_call_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int addf(float x){ return 1; }\n"
+        "int main(){ int f(float)=addf; int h(float)=addf; return (h=f)(0); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: assignment-result function value direct call scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_function_value_local_initializer_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int f(int)=add1; int h(int)=(0, f); return h(41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped function-value local initializer should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_function_value_local_initializer_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; int h(int)=c ? f : g; return h(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary function value local initializer should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_ternary_function_value_local_initializer_parameter_kind_mismatch_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; int h(float)=c ? f : g; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-018") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary function value local initializer parameter-kind mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_function_valued_return_call_local_initializer_parameter_kind_mismatch_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int){ return add1; }\n"
+        "int main(){ int h(float)=pick(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-018") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: function-valued return call local initializer parameter-kind mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_function_value_return_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick()(int){ int f(int)=add1; int h(int)=add1; return (h=f); }\n"
+        "int main(){ return pick()(41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "lw a0, 4(sp)\n  sw a0, 8(sp)\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped function-value return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_wrapped_function_value_return_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int h(int)=add1; if(c) f=add2; return (h=f); }\n"
+        "int main(){ return pick(1)(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "lw a0, 8(sp)\n  sw a0, 12(sp)\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic wrapped function-value return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_comma_wrapped_function_value_forwarding_into_parameter_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int g(int)=add1; if((putint(0), c)) g=add2; return apply((0, g), 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add1\n.type __fnwrap_add1, @function\n__fnwrap_add1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add2\n.type __fnwrap_add2, @function\n__fnwrap_add2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic comma-wrapped function value forwarding into parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_dynamic_comma_wrapped_function_value_forwarding_into_parameter_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int main(){ int c=1; int g(int)=add1; if(c) g=add2; return apply((0, g), 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic comma-wrapped function value forwarding into parameter scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_assignment_result_function_value_forwarding_into_parameter_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int f(int)=add1; int h(int)=add1; if((putint(0), c)) f=add2; return apply((h=f), 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "lw a0, 4(sp)\n  sw a0, 8(sp)\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add1\n.type __fnwrap_add1, @function\n__fnwrap_add1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add2\n.type __fnwrap_add2, @function\n__fnwrap_add2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic assignment-result function value forwarding into parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_dynamic_assignment_result_function_value_forwarding_into_parameter_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int main(){ int c=1; int f(int)=add1; int h(int)=add1; if(c) f=add2; return apply((h=f), 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic assignment-result function value forwarding into parameter scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_closure_forwarding_into_function_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ int f(int)=make(3); return apply(f, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl make__retclosure_") == NULL ||
+        strstr(output, "  call make\n") == NULL ||
+        strstr(output, "  lw a0, 4(sp)\n") == NULL ||
+        strstr(output, "  sw a0, 0(sp)\n") == NULL ||
+        strstr(output, "  sw t6, 8(sp)\n") == NULL ||
+        strstr(output, "  call make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned closure forwarding into function-valued parameter should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "(null)");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_zero_arg_returned_closure_forwarding_into_function_parameter_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int make(int x)() { return closure [x] int () { return x; }; }\n"
+        "int main(){ int f()=make(3); return apply0(f); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl make__retclosure_") == NULL ||
+        strstr(output, "  call make\n") == NULL ||
+        strstr(output, "  lw a0, 4(sp)\n") == NULL ||
+        strstr(output, "  sw a0, 0(sp)\n") == NULL ||
+        strstr(output, "  sw t6, 8(sp)\n") == NULL ||
+        strstr(output, "  call make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg returned closure forwarding into function-valued parameter should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "(null)");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_void_returned_closure_forwarding_into_function_parameter_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void make(int x)() { return closure [x] void () { putint(x); return; }; }\n"
+        "int main(){ void f()=make(7); apply0(f); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl make__retclosure_") == NULL ||
+        strstr(output, "  call make\n") == NULL ||
+        strstr(output, "  lw a0, 4(sp)\n") == NULL ||
+        strstr(output, "  sw a0, 0(sp)\n") == NULL ||
+        strstr(output, "  sw t6, 8(sp)\n") == NULL ||
+        strstr(output, "  call make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: void returned closure forwarding into function-valued parameter should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "(null)");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_returned_noncapturing_function_value_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int){ return add1; }\n"
+        "int main(){ return apply(pick(), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply__fv_0_add1") == NULL ||
+        strstr(output, "  call apply__fv_0_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct returned noncapturing function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return id(add1)(41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_add1") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned function-value parameter immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_returned_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return id(add1)(1.25); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned function-value parameter immediate call scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_returned_function_value_parameter_immediate_call_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return id(add1)(1, 2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned function-value parameter immediate call arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_function_value_parameter_bind_and_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int g(int)=id(add1); return g(41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl add1") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "id__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned function-value parameter bind-and-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; if(c) f=add2; return id(f)(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_add2") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned function-value parameter immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_dynamic_returned_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; if(c) f=add2; return id(f)(1.25); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned function-value parameter immediate call scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_dynamic_returned_function_value_parameter_immediate_call_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; if(c) f=add2; return id(f)(1, 2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned function-value parameter immediate call arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_function_value_parameter_bind_and_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; if(c) f=add2; int g(int)=id(f); return g(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl add2") == NULL ||
+        strstr(output, "  call add2\n") == NULL ||
+        strstr(output, "id__fv_0_add2") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned function-value parameter bind-and-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_closure_backed_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; return id(f)(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned closure-backed function-value parameter immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_returned_closure_backed_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; return id(f)(1.25); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned closure-backed function-value parameter immediate call scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_returned_closure_backed_function_value_parameter_immediate_call_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; return id(f)(1, 2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned closure-backed function-value parameter immediate call arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_closure_backed_function_value_parameter_bind_and_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=id(f); return g(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL ||
+        strstr(output, "id__fv_0_main__closure_f_") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned closure-backed function-value parameter bind-and-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_backed_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; return id(f)(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl main__closure_g_") == NULL ||
+        strstr(output, "  call main__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure-backed function-value parameter immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_dynamic_returned_closure_backed_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; return id(f)(1.25); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure-backed function-value parameter immediate call scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_dynamic_returned_closure_backed_function_value_parameter_immediate_call_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; return id(f)(1, 2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure-backed function-value parameter immediate call arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_backed_function_value_parameter_bind_and_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; int h(int)=id(f); return h(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl main__closure_g_") == NULL ||
+        strstr(output, "  call main__closure_g_") == NULL ||
+        strstr(output, "id__fv_0_main__closure_g_") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure-backed function-value parameter bind-and-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_returned_noncapturing_zero_arg_function_value_argument_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int next(){ return 9; }\n"
+        "int pick()(){ return next; }\n"
+        "int main(){ return apply0(pick()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply0__fv_0_next") == NULL ||
+        strstr(output, "  call apply0__fv_0_next\n") == NULL ||
+        strstr(output, "  call next\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct returned noncapturing zero-arg function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_returned_noncapturing_zero_arg_void_function_value_argument_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void ping(){ putint(7); }\n"
+        "void pick()(){ return ping; }\n"
+        "int main(){ apply0(pick()); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply0__fv_0_ping") == NULL ||
+        strstr(output, "  call apply0__fv_0_ping\n") == NULL ||
+        strstr(output, "  call ping\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct returned noncapturing zero-arg void function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_returned_closure_function_value_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ return apply(make(3), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply__fv_0_make__retclosure_") == NULL ||
+        strstr(output, "  call apply__fv_0_make__retclosure_") == NULL ||
+        strstr(output, "  call make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct returned closure function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_returned_closure_zero_arg_function_value_argument_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int make(int x)() { return closure [x] int () { return x; }; }\n"
+        "int main(){ return apply0(make(3)); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply0__fv_0_make__retclosure_") == NULL ||
+        strstr(output, "  call apply0__fv_0_make__retclosure_") == NULL ||
+        strstr(output, "  call make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct returned closure zero-arg function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_direct_returned_closure_zero_arg_function_value_argument_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(1); }\n"
+        "int make(int x)() { return closure [x] int () { return x; }; }\n"
+        "int main(){ return apply0(make(3)); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct returned closure zero-arg function-value argument arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_returned_closure_zero_arg_void_function_value_argument_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void make(int x)() { return closure [x] void () { putint(x); return; }; }\n"
+        "int main(){ apply0(make(7)); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply0__fv_0_make__retclosure_") == NULL ||
+        strstr(output, "  call apply0__fv_0_make__retclosure_") == NULL ||
+        strstr(output, "  call make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct returned closure zero-arg void function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_direct_returned_closure_zero_arg_void_function_value_argument_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(1); }\n"
+        "void make(int x)() { return closure [x] void () { putint(x); return; }; }\n"
+        "int main(){ apply0(make(7)); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct returned closure zero-arg void function-value argument arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_dynamic_returned_noncapturing_function_value_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; if(c) f=add2; return f; }\n"
+        "int main(){ return apply(pick(1), 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_add1\n.type __fnwrap_add1, @function\n__fnwrap_add1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add2\n.type __fnwrap_add2, @function\n__fnwrap_add2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct dynamic returned noncapturing function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_dynamic_returned_noncapturing_two_arg_function_value_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int,int), int x, int y){ return f(x,y); }\n"
+        "int add(int x,int y){ return x+y; }\n"
+        "int sub(int x,int y){ return x-y; }\n"
+        "int pick(int c)(int,int){ int f(int,int)=add; if(c) f=sub; return f; }\n"
+        "int main(){ return apply(pick(1), 9, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_add\n.type __fnwrap_add, @function\n__fnwrap_add:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_sub\n.type __fnwrap_sub, @function\n__fnwrap_sub:\n") == NULL ||
+        strstr(output, "  call __fnwrap_add\n") == NULL ||
+        strstr(output, "  call __fnwrap_sub\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct dynamic returned noncapturing two-arg function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_dynamic_returned_noncapturing_zero_arg_function_value_argument_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int g()=next1; if(c) g=next2; return g; }\n"
+        "int main(){ return apply0(pick(1)); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_next1\n.type __fnwrap_next1, @function\n__fnwrap_next1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_next2\n.type __fnwrap_next2, @function\n__fnwrap_next2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_next1\n") == NULL ||
+        strstr(output, "  call __fnwrap_next2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct dynamic returned noncapturing zero-arg function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_dynamic_returned_noncapturing_zero_arg_void_function_value_argument_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void ping1(){ putint(1); }\n"
+        "void ping2(){ putint(2); }\n"
+        "void pick(int c)(){ void g()=ping1; if(c) g=ping2; return g; }\n"
+        "int main(){ apply0(pick(1)); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_ping1\n.type __fnwrap_ping1, @function\n__fnwrap_ping1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_ping2\n.type __fnwrap_ping2, @function\n__fnwrap_ping2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_ping1\n") == NULL ||
+        strstr(output, "  call __fnwrap_ping2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct dynamic returned noncapturing zero-arg void function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_closure_alias_forwarding_into_function_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ int f(int)=make(3); int g(int)=f; return apply(g, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl make__retclosure_") == NULL ||
+        strstr(output, "  call make\n") == NULL ||
+        strstr(output, "  lw a0, 4(sp)\n") == NULL ||
+        strstr(output, "  sw a0, 0(sp)\n") == NULL ||
+        strstr(output, "  sw t6, 8(sp)\n") == NULL ||
+        strstr(output, "  lw a0, 8(sp)\n  sw a0, 12(sp)\n") == NULL ||
+        strstr(output, "  call make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned closure alias forwarding into function-valued parameter should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "(null)");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_function_value_actual_argument_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return apply(((putint(0), c) ? f : g), 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_add1\n.type __fnwrap_add1, @function\n__fnwrap_add1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add2\n.type __fnwrap_add2, @function\n__fnwrap_add2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary function value actual argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_ternary_function_value_actual_argument_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return apply(((putint(0), c) ? f : g), 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary function value actual argument scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_ternary_function_value_actual_argument_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(1, 2); }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return apply(((putint(0), c) ? f : g), 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary function value actual argument arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_closure_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return apply(((putint(0), c) ? f : g), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "main__closure_g_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_g_") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary closure actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "(null)");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_ternary_closure_actual_argument_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return apply(((putint(0), c) ? f : g), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary closure actual argument scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_ternary_closure_actual_argument_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(1, 2); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return apply(((putint(0), c) ? f : g), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary closure actual argument arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_function_value_callee_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return (((putint(0), c) ? f : g))(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary function value callee should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_two_arg_function_value_callee_under_extension(void) {
+    static const char *source =
+        "int add(int x,int y){ return x+y; }\n"
+        "int sub(int x,int y){ return x-y; }\n"
+        "int main(){ int c=1; int f(int,int)=add; int g(int,int)=sub; return (((putint(0), c) ? f : g))(9, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add\n") == NULL ||
+        strstr(output, "  call sub\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary two-arg function value callee should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_ternary_function_value_callee_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return (((putint(0), c) ? f : g))(1.25); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary function value callee scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_ternary_function_value_callee_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return (((putint(0), c) ? f : g))(1, 2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary function value callee arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_closure_callee_under_extension(void) {
+    static const char *source =
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return (((putint(0), c) ? f : g))(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "main__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary closure callee should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_ternary_closure_callee_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return (((putint(0), c) ? f : g))(1.25); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary closure callee scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_ternary_closure_callee_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return (((putint(0), c) ? f : g))(1, 2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary closure callee arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_closure_assignment_then_direct_call_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; g=f; return g(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: closure assignment then direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_closure_assignment_then_forward_into_function_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int y=5; int x=3; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; g=f; return apply(g, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: closure assignment then forward into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_closure_assignment_then_direct_call_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ int f(int)=make(3); int g(int)=make(5); g=f; return g(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "make__retclosure_") == NULL ||
+        strstr(output, "  call make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned closure assignment then direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_closure_assignment_then_return_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int pick()(int){ int f(int)=make(3); int g(int)=make(5); g=f; return g; }\n"
+        "int main(){ return pick()(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl pick\n.type pick, @function\npick:\n") == NULL ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned closure assignment then return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_closure_local_dispatch_under_extension(void) {
+    static const char *source =
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "main__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic closure local dispatch should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_closure_local_initializer_under_extension(void) {
+    static const char *source =
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; int h(int)=c ? f : g; return h(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "main__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary closure local initializer should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_closure_local_forward_into_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; return apply(f, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "main__closure_g_") == NULL ||
+        strstr(output, "apply__fv_0_main__closure_") == NULL ||
+        strstr(output, "  call apply__fv_0_main__closure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic closure local forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_runtime_closure_local_forward_into_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if((putint(0), c)) f=g; return apply(f, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "main__closure_g_") == NULL ||
+        strstr(output, "apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic runtime closure local forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_runtime_zero_arg_void_closure_local_forward_into_parameter_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "int main(){ int c=1; int x=7; int y=9; void f()=closure [x] void () { putint(x); return; }; void g()=closure [y] void () { putint(y); return; }; if((putint(0), c)) f=g; apply0(f); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "main__closure_g_") == NULL ||
+        strstr(output, "apply0__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  call apply0__fv_0_main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic runtime zero-arg void closure local forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_local_function_value_alias_chain_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int f(int)=add1; int g(int)=f; return g(41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: local function value alias chain should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_closure_literal_outside_extension_mode(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-039") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: closure literal should be rejected outside extension mode: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_closure_literal_direct_local_call_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: closure literal direct local call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_closure_literal_alias_chain_under_extension(void) {
+    static const char *source =
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; int g(int)=f; return g(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: closure literal alias chain should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_closure_literal_alias_chain_two_hops_under_extension(void) {
+    static const char *source =
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; int g(int)=f; int h(int)=g; return h(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: two-hop closure literal alias chain should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_zero_arg_closure_alias_chain_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f()=closure [x] int () { return x; }; int g()=f; return g(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg closure alias chain should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_void_closure_alias_chain_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=7; void f()=closure [x] void () { putint(x); return; }; void g()=f; g(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: void closure alias chain should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_closure_literal_forward_into_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; int g(int)=f; return apply(g, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: closure literal forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_zero_arg_closure_forward_into_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int main(){ int y=3; int f()=closure [y] int () { return y; }; return apply0(f); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "apply0__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call apply0__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg closure forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_zero_arg_closure_forward_into_function_value_parameter_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(1); }\n"
+        "int main(){ int y=3; int f()=closure [y] int () { return y; }; return apply0(f); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg closure forwarding into function-valued parameter arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_void_closure_forward_into_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "int main(){ int y=7; void f()=closure [y] void () { putint(y); return; }; apply0(f); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "apply0__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call apply0__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: void closure forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_void_closure_forward_into_function_value_parameter_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(1); }\n"
+        "int main(){ int y=7; void f()=closure [y] void () { putint(y); return; }; apply0(f); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: void closure forwarding into function-valued parameter arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_two_hop_closure_forward_into_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; int g(int)=f; int h(int)=g; return apply(h, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: two-hop closure forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_zero_arg_alias_closure_forward_into_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int main(){ int y=3; int f()=closure [y] int () { return y; }; int g()=f; return apply0(g); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "apply0__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call apply0__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg alias closure forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_void_alias_closure_forward_into_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "int main(){ int y=7; void f()=closure [y] void () { putint(y); return; }; void g()=f; apply0(g); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "apply0__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call apply0__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: void alias closure forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_closure_literal_argument_to_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int y=3; return apply(closure [y] int (int z) { return y + z; }, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "apply__fv_0_main__closure___argclosure_") == NULL ||
+        strstr(output, "  call apply__fv_0_main__closure___argclosure_") == NULL ||
+        strstr(output, "  call main__closure___argclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct closure literal argument to function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_direct_closure_literal_argument_to_function_value_parameter_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int main(){ int y=3; return apply(closure [y] int (int z) { return y + z; }, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct closure literal argument to function-valued parameter scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_zero_arg_direct_closure_literal_argument_to_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int main(){ int y=3; return apply0(closure [y] int () { return y; }); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "apply0__fv_0_main__closure___argclosure_") == NULL ||
+        strstr(output, "  call apply0__fv_0_main__closure___argclosure_") == NULL ||
+        strstr(output, "  call main__closure___argclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg direct closure literal argument to function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_zero_arg_direct_closure_literal_argument_to_function_value_parameter_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(1); }\n"
+        "int main(){ int y=3; return apply0(closure [y] int () { return y; }); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg direct closure literal argument to function-valued parameter arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_void_direct_closure_literal_argument_to_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "int main(){ int y=7; apply0(closure [y] void () { putint(y); return; }); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "apply0__fv_0_main__closure___argclosure_") == NULL ||
+        strstr(output, "  call apply0__fv_0_main__closure___argclosure_") == NULL ||
+        strstr(output, "  call main__closure___argclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: void direct closure literal argument to function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_void_direct_closure_literal_argument_to_function_value_parameter_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(1); }\n"
+        "int main(){ int y=7; apply0(closure [y] void () { putint(y); return; }); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: void direct closure literal argument to function-valued parameter arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_comma_wrapped_closure_forward_into_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; return apply((f, f), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: comma-wrapped closure forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_comma_wrapped_closure_forward_into_function_value_parameter_scalar_type_mismatch_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; return apply((f, f), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: comma-wrapped closure forwarding into function-valued parameter scalar type mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_assignment_result_closure_forward_into_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; return apply((f = f), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: assignment-result closure forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_comma_wrapped_closure_forward_into_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return apply(((putint(0), c), f), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic comma-wrapped closure forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_assignment_result_closure_forward_into_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; int h(int)=f; if((putint(0), c)) h=g; return apply((f=h), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic assignment-result closure forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_assignment_of_closure_literal_after_function_local_declaration_under_extension(void) {
+    static const char *source =
+        "int main(){ int y=3; int f(int); f = closure [y] int (int z) { return y + z; }; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-040") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: assigning closure literal after function local declaration should still be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_zero_arg_closure_direct_local_call_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f()=closure [x] int () { return x; }; return f(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg closure direct local call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_zero_arg_closure_direct_local_call_arity_mismatch_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f()=closure [x] int () { return x; }; return f(1); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg closure direct local call arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_multi_capture_closure_direct_local_call_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int y=4; int f()=closure [x,y] int () { return x + y; }; return f(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: multi-capture closure direct local call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_multi_capture_two_arg_closure_direct_local_call_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int y=4; int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; return f(5,6); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "call __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: multi-capture two-arg closure direct local call should compile through callable-object path under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_void_closure_direct_local_call_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=7; void f()=closure [x] void () { putint(x); return; }; f(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: void closure direct local call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_expression_statement_prefix_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { putint(x); return x + y; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with expression-statement prefix should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_local_decl_prefix_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z = x + y; return z; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with local decl prefix should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_parameter_assignment_prefix_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { y = y + 1; return x + y; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with parameter assignment prefix should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_local_assignment_prefix_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z = y; z = z + 1; return x + z; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with local assignment prefix should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_uninitialized_local_prefix_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z; z = y + 1; return x + z; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with uninitialized local prefix should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_multi_declarator_local_prefix_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int a, b; a = y; b = a + 1; return x + b; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with multi-declarator local prefix should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_parameter_compound_assignment_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { y += 1; return x + y; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with parameter compound assignment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_local_compound_assignment_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z = y; z += 1; return x + z; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with local compound assignment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_parameter_prefix_increment_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { ++y; return x + y; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with parameter prefix increment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_local_postfix_increment_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z = y; z++; return x + z; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with local postfix increment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_bitwise_expression_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=6; int f(int)=closure [x] int (int y) { return (x & y) ^ 1; }; return f(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with bitwise expression should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_logical_expression_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=0; int f(int)=closure [x] int (int y) { return (x || y) && 1; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with logical expression should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_shift_expression_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return (x << 1) + (y >> 1); }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with shift expression should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_bitwise_compound_assignment_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { y &= 7; return x + y; }; return f(12); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with bitwise compound assignment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_bitwise_not_expression_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return ~x + y; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure with bitwise not expression should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_return_assignment_expression_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return (y = y + 1); }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure return assignment expression should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_return_prefix_increment_expression_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return ++y; }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure return prefix increment expression should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_int_closure_return_comma_expression_under_extension(void) {
+    static const char *source =
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return (y = y + 1, x + y); }; return f(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: int closure return comma expression should compile under extension: %s\n",
             error.message);
         ok = 0;
     }
@@ -7063,6 +12520,48 @@ int main(void) {
         if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
             return test_compiler_accepts_unary_call_ternary_value_call_argument_to_float_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-DYNAMIC-FNVAL-RETURN-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_noncapturing_function_valued_return_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-FNVAL-RETURN-BIND", filter) != NULL) {
+            return test_compiler_accepts_dynamic_noncapturing_function_valued_return_bind_and_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_dynamic_local_function_value_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-FNVAL-ZERO-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_dynamic_local_zero_arg_function_value_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-FNVAL-ZERO-VOID-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_dynamic_local_zero_arg_void_function_value_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-WRAPPED-FNVAL-RETURN", filter) != NULL) {
+            return test_compiler_accepts_dynamic_wrapped_function_value_return_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-TERNARY-FNVAL-CALLEE", filter) != NULL) {
+            return test_compiler_accepts_ternary_function_value_callee_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-TERNARY-CLOSURE-ACTUAL-ARGUMENT", filter) != NULL) {
+            return test_compiler_accepts_ternary_closure_actual_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-ASSIGNMENT-RESULT-CLOSURE-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_assignment_result_closure_forward_into_function_value_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-COMMA-WRAPPED-CLOSURE-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_dynamic_comma_wrapped_closure_forward_into_function_value_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-ASSIGNMENT-RESULT-CLOSURE-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_dynamic_assignment_result_closure_forward_into_function_value_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-CLOSURE-LOCAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_dynamic_closure_local_forward_into_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-RETURNED-CLOSURE-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_returned_closure_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-RETURNED-CLOSURE-ALIAS-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_returned_closure_alias_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-FLOAT-CHAIN-ADD-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
             return test_compiler_accepts_chained_float_addition_call_argument_to_float_under_extension() ? 0 : 1;
         }
@@ -7086,6 +12585,12 @@ int main(void) {
         }
         if (strstr("COMPILER-FLOAT-UNARY-HELPER-TERNARY-CALL-PLUS-INT-REJECT", filter) != NULL) {
             return test_compiler_rejects_unary_call_helper_wrapped_ternary_call_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension() ? 0 : 1;
         }
         if (strstr("COMPILER-FLOAT-HELPER-TERNARY-CALL-COMPARE-INT-REJECT", filter) != NULL) {
             return test_compiler_rejects_float_helper_wrapped_ternary_call_compare_int_under_extension() ? 0 : 1;
@@ -7249,6 +12754,7 @@ int main(void) {
     ok &= test_compiler_rejects_float_ternary_value_plus_float_call_argument_under_extension();
     ok &= test_compiler_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension();
     ok &= test_compiler_rejects_float_ternary_value_assignment_to_int_under_extension();
+    ok &= test_compiler_rejects_unary_call_ternary_value_assignment_to_int_under_extension();
     ok &= test_compiler_accepts_float_ternary_value_assignment_to_float_under_extension();
     ok &= test_compiler_accepts_unary_call_float_ternary_value_assignment_to_float_under_extension();
     ok &= test_compiler_accepts_chained_float_addition_assignment_to_float_under_extension();
@@ -7256,9 +12762,14 @@ int main(void) {
     ok &= test_compiler_accepts_float_ternary_value_initializer_to_float_under_extension();
     ok &= test_compiler_accepts_chained_float_addition_initializer_to_float_under_extension();
     ok &= test_compiler_accepts_nested_float_mul_div_initializer_to_float_under_extension();
+    ok &= test_compiler_rejects_float_ternary_value_initializer_to_int_under_extension();
+    ok &= test_compiler_rejects_unary_call_ternary_value_initializer_to_int_under_extension();
     ok &= test_compiler_rejects_float_ternary_value_compare_against_int_under_extension();
+    ok &= test_compiler_rejects_unary_call_ternary_value_compare_against_int_under_extension();
     ok &= test_compiler_rejects_float_ternary_value_compare_against_float_under_extension();
     ok &= test_compiler_rejects_unary_call_ternary_value_compare_against_float_under_extension();
+    ok &= test_compiler_rejects_float_ternary_value_return_to_int_under_extension();
+    ok &= test_compiler_rejects_unary_call_ternary_value_return_to_int_under_extension();
     ok &= test_compiler_rejects_float_ternary_value_call_argument_to_int_under_extension();
     ok &= test_compiler_rejects_unary_call_ternary_value_call_argument_to_int_under_extension();
     ok &= test_compiler_accepts_float_ternary_value_call_argument_to_float_under_extension();
@@ -7271,8 +12782,18 @@ int main(void) {
     ok &= test_compiler_accepts_unary_call_helper_wrapped_ternary_call_compare_under_extension();
     ok &= test_compiler_rejects_float_helper_wrapped_ternary_call_plus_int_under_extension();
     ok &= test_compiler_rejects_unary_call_helper_wrapped_ternary_call_plus_int_under_extension();
+    ok &= test_compiler_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension();
+    ok &= test_compiler_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension();
     ok &= test_compiler_rejects_float_helper_wrapped_ternary_call_compare_int_under_extension();
     ok &= test_compiler_rejects_unary_call_helper_wrapped_ternary_call_compare_int_under_extension();
+    ok &= test_compiler_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension();
+    ok &= test_compiler_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension();
+    ok &= test_compiler_rejects_float_helper_wrapped_ternary_call_initializer_to_int_under_extension();
+    ok &= test_compiler_rejects_unary_call_helper_wrapped_ternary_call_initializer_to_int_under_extension();
+    ok &= test_compiler_rejects_float_helper_wrapped_ternary_call_assignment_to_int_under_extension();
+    ok &= test_compiler_rejects_unary_call_helper_wrapped_ternary_call_assignment_to_int_under_extension();
+    ok &= test_compiler_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension();
+    ok &= test_compiler_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension();
     ok &= test_compiler_accepts_explicit_int_from_float_conversion_on_direct_root_under_extension();
     ok &= test_compiler_accepts_explicit_float_from_int_conversion_under_extension();
     ok &= test_compiler_rejects_redundant_explicit_same_type_conversion_for_now();
@@ -7295,31 +12816,270 @@ int main(void) {
     ok &= test_compiler_rejects_capdefer_inside_loop_registration_under_extension();
     ok &= test_compiler_accepts_capdefer_multiple_bindings_under_extension();
     ok &= test_compiler_rejects_capdefer_outside_extension_mode();
-    ok &= test_compiler_rejects_pair_parameter_under_extension_with_honest_diagnostic();
-    ok &= test_compiler_rejects_struct_parameter_under_extension_with_honest_diagnostic();
+    ok &= test_compiler_accepts_pair_parameter_under_extension();
+    ok &= test_compiler_accepts_struct_parameter_under_extension();
+    ok &= test_compiler_accepts_nested_struct_parameter_under_extension();
     ok &= test_compiler_rejects_pair_outside_extension_mode();
     ok &= test_compiler_accepts_pair_under_extension();
     ok &= test_compiler_accepts_pair_copy_under_extension();
     ok &= test_compiler_rejects_pair_init_from_scalar_under_extension();
     ok &= test_compiler_rejects_invalid_pair_field_under_extension();
     ok &= test_compiler_rejects_plain_pair_value_under_extension();
+    ok &= test_compiler_rejects_local_pair_as_scalar_call_argument_under_extension();
+    ok &= test_compiler_rejects_local_struct_as_scalar_call_argument_under_extension();
+    ok &= test_compiler_rejects_local_pair_scalar_initializer_under_extension();
+    ok &= test_compiler_rejects_local_struct_scalar_initializer_under_extension();
+    ok &= test_compiler_rejects_local_pair_scalar_assignment_under_extension();
+    ok &= test_compiler_rejects_local_struct_scalar_assignment_under_extension();
+    ok &= test_compiler_rejects_local_pair_control_condition_under_extension();
+    ok &= test_compiler_rejects_local_struct_control_condition_under_extension();
+    ok &= test_compiler_accepts_pair_return_under_extension();
+    ok &= test_compiler_accepts_struct_return_under_extension();
+    ok &= test_compiler_accepts_pair_call_result_copy_init_under_extension();
+    ok &= test_compiler_accepts_struct_call_result_copy_init_under_extension();
+    ok &= test_compiler_accepts_pair_call_result_assignment_under_extension();
+    ok &= test_compiler_accepts_struct_call_result_assignment_under_extension();
+    ok &= test_compiler_accepts_pair_parameter_to_return_forwarding_under_extension();
+    ok &= test_compiler_accepts_struct_parameter_to_return_forwarding_under_extension();
+    ok &= test_compiler_accepts_nested_struct_return_under_extension();
+    ok &= test_compiler_accepts_pair_call_result_as_aggregate_call_argument_under_extension();
+    ok &= test_compiler_accepts_struct_call_result_as_aggregate_call_argument_under_extension();
+    ok &= test_compiler_accepts_nested_struct_call_result_as_aggregate_call_argument_under_extension();
+    ok &= test_compiler_accepts_pair_multi_hop_return_chain_under_extension();
+    ok &= test_compiler_accepts_nested_struct_multi_hop_return_chain_under_extension();
+    ok &= test_compiler_rejects_pair_call_result_as_scalar_call_argument_under_extension();
+    ok &= test_compiler_rejects_pair_multi_hop_return_chain_as_scalar_call_argument_under_extension();
+    ok &= test_compiler_rejects_pair_call_result_scalar_initializer_under_extension();
+    ok &= test_compiler_rejects_pair_call_result_scalar_assignment_under_extension();
+    ok &= test_compiler_rejects_pair_multi_hop_return_chain_scalar_initializer_under_extension();
+    ok &= test_compiler_rejects_nested_struct_multi_hop_return_chain_scalar_initializer_under_extension();
+    ok &= test_compiler_rejects_pair_multi_hop_return_chain_control_condition_under_extension();
+    ok &= test_compiler_rejects_nested_struct_multi_hop_return_chain_control_condition_under_extension();
+    ok &= test_compiler_rejects_pair_call_result_direct_member_access_under_extension();
+    ok &= test_compiler_rejects_struct_call_result_direct_member_access_under_extension();
+    ok &= test_compiler_rejects_parenthesized_pair_call_result_direct_member_access_under_extension();
+    ok &= test_compiler_rejects_parenthesized_struct_call_result_direct_member_access_under_extension();
+    ok &= test_compiler_rejects_nested_struct_call_result_direct_member_chain_under_extension();
     ok &= test_compiler_accepts_struct_copy_under_extension();
     ok &= test_compiler_rejects_struct_init_from_scalar_under_extension();
     ok &= test_compiler_rejects_mismatched_struct_copy_init_under_extension();
     ok &= test_compiler_rejects_invalid_struct_field_under_extension();
     ok &= test_compiler_rejects_pair_struct_assignment_mismatch_under_extension();
+    ok &= test_compiler_accepts_nested_pair_field_lookup_under_extension();
+    ok &= test_compiler_accepts_nested_struct_field_lookup_under_extension();
+    ok &= test_compiler_accepts_nested_pair_copy_init_under_extension();
+    ok &= test_compiler_accepts_nested_struct_copy_init_under_extension();
+    ok &= test_compiler_accepts_nested_pair_assignment_from_member_under_extension();
+    ok &= test_compiler_accepts_nested_struct_assignment_from_member_under_extension();
+    ok &= test_compiler_accepts_deep_nested_struct_field_lookup_under_extension();
+    ok &= test_compiler_accepts_deep_nested_struct_copy_init_under_extension();
+    ok &= test_compiler_accepts_deep_nested_struct_assignment_from_member_under_extension();
+    ok &= test_compiler_accepts_deep_nested_pair_field_lookup_under_extension();
+    ok &= test_compiler_accepts_deep_nested_pair_copy_init_under_extension();
+    ok &= test_compiler_accepts_deep_nested_pair_assignment_from_member_under_extension();
+    ok &= test_compiler_rejects_deep_nested_struct_assignment_mismatch_under_extension();
+    ok &= test_compiler_rejects_deep_nested_pair_struct_assignment_mismatch_under_extension();
+    ok &= test_compiler_rejects_deep_nested_pair_initializer_too_many_items_under_extension();
+    ok &= test_compiler_rejects_deep_nested_struct_initializer_too_many_items_under_extension();
     ok &= test_compiler_rejects_function_valued_parameter_outside_extension_mode();
     ok &= test_compiler_rejects_function_valued_parameter_extension_slice_for_now();
     ok &= test_compiler_accepts_unused_function_valued_parameter_declaration_under_extension();
+    ok &= test_compiler_accepts_function_valued_return_declaration_extension_slice_for_now();
+    ok &= test_compiler_accepts_compatible_function_valued_return_redeclaration_under_extension();
+    ok &= test_compiler_rejects_mismatched_function_valued_return_redeclaration_under_extension();
+    ok &= test_compiler_accepts_function_valued_return_definition_under_extension();
+    ok &= test_compiler_rejects_function_valued_return_definition_with_mismatched_closure_signature_under_extension();
+    ok &= test_compiler_rejects_function_valued_return_definition_with_multiple_closure_return_sites_under_extension();
+    ok &= test_compiler_accepts_local_function_value_initialization_from_function_valued_return_call_under_extension();
+    ok &= test_compiler_accepts_immediate_call_of_function_valued_return_call_under_extension();
+    ok &= test_compiler_rejects_closure_function_valued_return_immediate_call_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_rejects_closure_function_valued_return_immediate_call_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_local_closure_function_valued_return_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_local_closure_function_valued_return_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_local_closure_function_valued_return_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_local_closure_function_valued_return_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_local_closure_function_valued_return_forward_into_parameter_under_extension();
+    ok &= test_compiler_accepts_returned_multi_capture_local_closure_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_multi_capture_local_closure_forward_into_parameter_under_extension();
+    ok &= test_compiler_accepts_noncapturing_function_valued_return_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_noncapturing_function_valued_return_immediate_call_under_extension();
+    ok &= test_compiler_rejects_noncapturing_function_valued_return_immediate_call_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_rejects_noncapturing_function_valued_return_immediate_call_arity_mismatch_under_extension();
+    ok &= test_compiler_rejects_noncapturing_function_valued_return_immediate_call_pair_argument_scalar_mismatch_under_extension();
+    ok &= test_compiler_rejects_noncapturing_function_valued_return_immediate_call_struct_argument_kind_mismatch_under_extension();
+    ok &= test_compiler_rejects_zero_arg_function_valued_return_immediate_call_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_local_noncapturing_function_value_return_immediate_call_under_extension();
+    ok &= test_compiler_accepts_rebound_local_noncapturing_function_value_return_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_noncapturing_function_valued_return_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_noncapturing_function_valued_return_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_ternary_noncapturing_function_value_return_immediate_call_under_extension();
+    ok &= test_compiler_accepts_ternary_noncapturing_function_value_return_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_ternary_closure_function_value_return_immediate_call_under_extension();
+    ok &= test_compiler_accepts_ternary_closure_function_value_return_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_ternary_function_value_assignment_then_direct_call_under_extension();
+    ok &= test_compiler_accepts_ternary_closure_assignment_then_direct_call_under_extension();
     ok &= test_compiler_accepts_passing_top_level_function_value_to_unused_function_parameter_under_extension();
     ok &= test_compiler_rejects_top_level_function_value_in_plain_value_position_under_extension_for_now();
     ok &= test_compiler_accepts_direct_call_of_function_valued_parameter_with_specialization_lowering();
     ok &= test_compiler_accepts_direct_call_of_function_valued_parameter_with_multiple_specialized_bindings();
+    ok &= test_compiler_rejects_direct_call_of_function_valued_parameter_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_rejects_direct_call_of_function_valued_parameter_arity_mismatch_under_extension();
     ok &= test_compiler_accepts_forwarding_function_valued_parameter_with_specialization_lowering();
     ok &= test_compiler_accepts_multiple_function_valued_parameters_with_specialization_lowering();
     ok &= test_compiler_accepts_void_function_valued_parameter_with_builtin_binding();
     ok &= test_compiler_accepts_zero_arg_function_valued_parameter_with_specialization_lowering();
+    ok &= test_compiler_rejects_zero_arg_function_valued_parameter_direct_call_arity_mismatch_under_extension();
     ok &= test_compiler_accepts_zero_arg_void_function_valued_parameter_with_specialization_lowering();
+    ok &= test_compiler_rejects_zero_arg_void_function_valued_parameter_direct_call_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_local_function_value_direct_call_under_extension();
+    ok &= test_compiler_rejects_local_function_value_direct_call_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_rejects_local_function_value_direct_call_pair_argument_scalar_mismatch_under_extension();
+    ok &= test_compiler_rejects_local_function_value_direct_call_struct_argument_kind_mismatch_under_extension();
+    ok &= test_compiler_accepts_local_zero_arg_function_value_direct_call_under_extension();
+    ok &= test_compiler_rejects_local_zero_arg_function_value_direct_call_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_local_zero_arg_void_function_value_direct_call_under_extension();
+    ok &= test_compiler_accepts_local_builtin_function_value_direct_call_under_extension();
+    ok &= test_compiler_rejects_local_function_value_nonfunction_initializer_under_extension();
+    ok &= test_compiler_rejects_local_function_value_signature_mismatch_initializer_under_extension();
+    ok &= test_compiler_rejects_local_function_value_alias_chain_parameter_kind_mismatch_under_extension();
+    ok &= test_compiler_rejects_local_function_value_alias_chain_expected_parameter_kind_mismatch_under_extension();
+    ok &= test_compiler_rejects_local_function_value_assignment_parameter_kind_mismatch_under_extension();
+    ok &= test_compiler_accepts_local_function_value_reassignment_under_extension();
+    ok &= test_compiler_accepts_dynamic_local_function_value_dispatch_under_extension();
+    ok &= test_compiler_accepts_dynamic_local_two_arg_function_value_dispatch_under_extension();
+    ok &= test_compiler_accepts_dynamic_local_function_value_alias_dispatch_under_extension();
+    ok &= test_compiler_rejects_non_function_local_void_declaration_under_extension();
+    ok &= test_compiler_accepts_local_function_value_forwarding_into_function_parameter_under_extension();
+    ok &= test_compiler_accepts_dynamic_local_function_value_forwarding_into_function_parameter_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_function_value_forwarding_into_function_parameter_under_extension();
+    ok &= test_compiler_accepts_dynamic_local_zero_arg_function_value_forwarding_into_function_parameter_under_extension();
+    ok &= test_compiler_accepts_dynamic_local_zero_arg_void_function_value_forwarding_into_function_parameter_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_function_value_forwarding_into_function_parameter_under_extension();
+    ok &= test_compiler_accepts_dynamic_function_value_assignment_then_direct_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_function_value_assignment_then_forward_into_function_parameter_under_extension();
+    ok &= test_compiler_accepts_dynamic_function_value_assignment_then_return_under_extension();
+    ok &= test_compiler_accepts_comma_wrapped_function_value_direct_call_under_extension();
+    ok &= test_compiler_rejects_comma_wrapped_function_value_direct_call_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_accepts_assignment_result_function_value_direct_call_under_extension();
+    ok &= test_compiler_rejects_assignment_result_function_value_direct_call_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_accepts_wrapped_function_value_local_initializer_under_extension();
+    ok &= test_compiler_accepts_ternary_function_value_local_initializer_under_extension();
+    ok &= test_compiler_rejects_ternary_function_value_local_initializer_parameter_kind_mismatch_under_extension();
+    ok &= test_compiler_rejects_function_valued_return_call_local_initializer_parameter_kind_mismatch_under_extension();
+    ok &= test_compiler_accepts_wrapped_function_value_return_under_extension();
+    ok &= test_compiler_accepts_dynamic_wrapped_function_value_return_under_extension();
+    ok &= test_compiler_accepts_dynamic_comma_wrapped_function_value_forwarding_into_parameter_under_extension();
+    ok &= test_compiler_rejects_dynamic_comma_wrapped_function_value_forwarding_into_parameter_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_accepts_dynamic_assignment_result_function_value_forwarding_into_parameter_under_extension();
+    ok &= test_compiler_rejects_dynamic_assignment_result_function_value_forwarding_into_parameter_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_accepts_ternary_function_value_actual_argument_under_extension();
+    ok &= test_compiler_rejects_ternary_function_value_actual_argument_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_rejects_ternary_function_value_actual_argument_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_ternary_closure_actual_argument_under_extension();
+    ok &= test_compiler_rejects_ternary_closure_actual_argument_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_rejects_ternary_closure_actual_argument_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_ternary_function_value_callee_under_extension();
+    ok &= test_compiler_accepts_ternary_two_arg_function_value_callee_under_extension();
+    ok &= test_compiler_rejects_ternary_function_value_callee_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_rejects_ternary_function_value_callee_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_ternary_closure_callee_under_extension();
+    ok &= test_compiler_rejects_ternary_closure_callee_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_rejects_ternary_closure_callee_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_returned_closure_forwarding_into_function_parameter_under_extension();
+    ok &= test_compiler_accepts_zero_arg_returned_closure_forwarding_into_function_parameter_under_extension();
+    ok &= test_compiler_accepts_void_returned_closure_forwarding_into_function_parameter_under_extension();
+    ok &= test_compiler_accepts_direct_returned_noncapturing_function_value_argument_under_extension();
+    ok &= test_compiler_accepts_returned_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_rejects_returned_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_rejects_returned_function_value_parameter_immediate_call_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_returned_function_value_parameter_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_rejects_dynamic_returned_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_rejects_dynamic_returned_function_value_parameter_immediate_call_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_function_value_parameter_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_returned_closure_backed_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_rejects_returned_closure_backed_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_rejects_returned_closure_backed_function_value_parameter_immediate_call_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_returned_closure_backed_function_value_parameter_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_backed_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_rejects_dynamic_returned_closure_backed_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_rejects_dynamic_returned_closure_backed_function_value_parameter_immediate_call_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_backed_function_value_parameter_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_direct_returned_noncapturing_zero_arg_function_value_argument_under_extension();
+    ok &= test_compiler_accepts_direct_returned_noncapturing_zero_arg_void_function_value_argument_under_extension();
+    ok &= test_compiler_accepts_direct_returned_closure_function_value_argument_under_extension();
+    ok &= test_compiler_accepts_direct_returned_closure_zero_arg_function_value_argument_under_extension();
+    ok &= test_compiler_rejects_direct_returned_closure_zero_arg_function_value_argument_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_direct_returned_closure_zero_arg_void_function_value_argument_under_extension();
+    ok &= test_compiler_rejects_direct_returned_closure_zero_arg_void_function_value_argument_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_direct_dynamic_returned_noncapturing_function_value_argument_under_extension();
+    ok &= test_compiler_accepts_direct_dynamic_returned_noncapturing_two_arg_function_value_argument_under_extension();
+    ok &= test_compiler_accepts_direct_dynamic_returned_noncapturing_zero_arg_function_value_argument_under_extension();
+    ok &= test_compiler_accepts_direct_dynamic_returned_noncapturing_zero_arg_void_function_value_argument_under_extension();
+    ok &= test_compiler_accepts_direct_closure_literal_argument_to_function_value_parameter_under_extension();
+    ok &= test_compiler_accepts_zero_arg_direct_closure_literal_argument_to_function_value_parameter_under_extension();
+    ok &= test_compiler_accepts_void_direct_closure_literal_argument_to_function_value_parameter_under_extension();
+    ok &= test_compiler_accepts_returned_closure_alias_forwarding_into_function_parameter_under_extension();
+    ok &= test_compiler_accepts_closure_assignment_then_direct_call_under_extension();
+    ok &= test_compiler_accepts_closure_assignment_then_forward_into_function_parameter_under_extension();
+    ok &= test_compiler_accepts_returned_closure_assignment_then_direct_call_under_extension();
+    ok &= test_compiler_accepts_returned_closure_assignment_then_return_under_extension();
+    ok &= test_compiler_accepts_dynamic_closure_local_dispatch_under_extension();
+    ok &= test_compiler_accepts_ternary_closure_local_initializer_under_extension();
+    ok &= test_compiler_accepts_dynamic_closure_local_forward_into_parameter_under_extension();
+    ok &= test_compiler_accepts_dynamic_runtime_closure_local_forward_into_parameter_under_extension();
+    ok &= test_compiler_accepts_dynamic_runtime_zero_arg_void_closure_local_forward_into_parameter_under_extension();
+    ok &= test_compiler_accepts_multi_capture_closure_forward_into_parameter_under_extension();
+    ok &= test_compiler_accepts_local_function_value_alias_chain_under_extension();
+    ok &= test_compiler_rejects_closure_literal_outside_extension_mode();
+    ok &= test_compiler_accepts_closure_literal_direct_local_call_under_extension();
+    ok &= test_compiler_accepts_closure_literal_alias_chain_under_extension();
+    ok &= test_compiler_accepts_closure_literal_alias_chain_two_hops_under_extension();
+    ok &= test_compiler_accepts_zero_arg_closure_direct_local_call_under_extension();
+    ok &= test_compiler_rejects_zero_arg_closure_direct_local_call_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_multi_capture_closure_direct_local_call_under_extension();
+    ok &= test_compiler_accepts_multi_capture_two_arg_closure_direct_local_call_under_extension();
+    ok &= test_compiler_accepts_void_closure_direct_local_call_under_extension();
+    ok &= test_compiler_accepts_zero_arg_closure_alias_chain_under_extension();
+    ok &= test_compiler_accepts_void_closure_alias_chain_under_extension();
+    ok &= test_compiler_accepts_closure_literal_forward_into_function_value_parameter_under_extension();
+    ok &= test_compiler_accepts_zero_arg_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_compiler_rejects_zero_arg_closure_forward_into_function_value_parameter_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_void_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_compiler_rejects_void_closure_forward_into_function_value_parameter_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_two_hop_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_compiler_accepts_zero_arg_alias_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_compiler_accepts_void_alias_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_compiler_accepts_direct_closure_literal_argument_to_function_value_parameter_under_extension();
+    ok &= test_compiler_rejects_direct_closure_literal_argument_to_function_value_parameter_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_accepts_zero_arg_direct_closure_literal_argument_to_function_value_parameter_under_extension();
+    ok &= test_compiler_rejects_zero_arg_direct_closure_literal_argument_to_function_value_parameter_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_void_direct_closure_literal_argument_to_function_value_parameter_under_extension();
+    ok &= test_compiler_rejects_void_direct_closure_literal_argument_to_function_value_parameter_arity_mismatch_under_extension();
+    ok &= test_compiler_accepts_comma_wrapped_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_compiler_rejects_comma_wrapped_closure_forward_into_function_value_parameter_scalar_type_mismatch_under_extension();
+    ok &= test_compiler_accepts_assignment_result_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_compiler_accepts_dynamic_comma_wrapped_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_compiler_accepts_dynamic_assignment_result_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_compiler_rejects_assignment_of_closure_literal_after_function_local_declaration_under_extension();
+    ok &= test_compiler_accepts_int_closure_expression_statement_prefix_under_extension();
+    ok &= test_compiler_accepts_int_closure_local_decl_prefix_under_extension();
+    ok &= test_compiler_accepts_int_closure_parameter_assignment_prefix_under_extension();
+    ok &= test_compiler_accepts_int_closure_local_assignment_prefix_under_extension();
+    ok &= test_compiler_accepts_int_closure_uninitialized_local_prefix_under_extension();
+    ok &= test_compiler_accepts_int_closure_multi_declarator_local_prefix_under_extension();
+    ok &= test_compiler_accepts_int_closure_parameter_compound_assignment_under_extension();
+    ok &= test_compiler_accepts_int_closure_local_compound_assignment_under_extension();
+    ok &= test_compiler_accepts_int_closure_parameter_prefix_increment_under_extension();
+    ok &= test_compiler_accepts_int_closure_local_postfix_increment_under_extension();
+    ok &= test_compiler_accepts_int_closure_bitwise_expression_under_extension();
+    ok &= test_compiler_accepts_int_closure_logical_expression_under_extension();
+    ok &= test_compiler_accepts_int_closure_shift_expression_under_extension();
+    ok &= test_compiler_accepts_int_closure_bitwise_compound_assignment_under_extension();
+    ok &= test_compiler_accepts_int_closure_bitwise_not_expression_under_extension();
+    ok &= test_compiler_accepts_int_closure_return_assignment_expression_under_extension();
+    ok &= test_compiler_accepts_int_closure_return_prefix_increment_expression_under_extension();
+    ok &= test_compiler_accepts_int_closure_return_comma_expression_under_extension();
     ok &= test_compiler_builds_riscv_backend_dump_from_source();
     ok &= test_compiler_builds_perf_backend_dump_from_source();
     ok &= test_compiler_builds_extension_backend_dump_with_defer_return_order();

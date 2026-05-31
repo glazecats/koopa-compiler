@@ -59,6 +59,7 @@ typedef enum {
     LOWER_IR_INSTR_MOV = 0,
     LOWER_IR_INSTR_BINARY,
     LOWER_IR_INSTR_CALL,
+    LOWER_IR_INSTR_ADDR_FUNCTION,
     LOWER_IR_INSTR_ADDR_LOCAL,
     LOWER_IR_INSTR_ADDR_GLOBAL,
     LOWER_IR_INSTR_LOAD_LOCAL,
@@ -103,6 +104,7 @@ typedef struct {
             LowerIrValueRef *args;
             size_t arg_count;
         } call;
+        char *addr_function_name;
         LowerIrSlotRef addr_slot;
         LowerIrSlotRef load_slot;
         struct {

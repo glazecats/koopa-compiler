@@ -51,11 +51,23 @@ typedef enum {
     IR_INSTR_MOV = 0,
     IR_INSTR_BINARY,
     IR_INSTR_CALL,
+    IR_INSTR_FN_MAKE,
+    IR_INSTR_FN_CODE,
+    IR_INSTR_FN_ENV,
+    IR_INSTR_FN_SHAPE,
+    IR_INSTR_CALL_INDIRECT,
     IR_INSTR_ADDR_LOCAL,
     IR_INSTR_ADDR_GLOBAL,
     IR_INSTR_LOAD_INDIRECT,
     IR_INSTR_STORE_INDIRECT,
 } IrInstructionKind;
+
+typedef struct {
+    size_t id;
+    AstFunctionReturnType return_type;
+    AstFunctionReturnType *parameter_types;
+    size_t parameter_count;
+} IrFunctionShape;
 
 typedef struct {
     size_t id;
@@ -92,6 +104,17 @@ typedef struct {
             IrValueRef *args;
             size_t arg_count;
         } call;
+        struct {
+            char *callee_name;
+            IrValueRef env;
+            size_t shape_id;
+        } fn_make;
+        IrValueRef fn_project_operand;
+        struct {
+            IrValueRef callee;
+            IrValueRef *args;
+            size_t arg_count;
+        } call_indirect;
         size_t addr_local_id;
         size_t addr_global_id;
         IrValueRef load_indirect_addr;
@@ -146,6 +169,9 @@ typedef struct {
 } IrFunction;
 
 typedef struct {
+    IrFunctionShape *function_shapes;
+    size_t function_shape_count;
+    size_t function_shape_capacity;
     IrGlobal *globals;
     size_t global_count;
     size_t global_capacity;

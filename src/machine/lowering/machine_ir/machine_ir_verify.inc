@@ -323,6 +323,16 @@ int machine_ir_verify_program(const MachineIrProgram *program, MachineIrError *e
                         }
                         break;
                     }
+                    case MACHINE_IR_INSTR_ADDR_FUNCTION:
+                        if (!instruction->has_result ||
+                            !machine_ir_verify_result_operand(program, function, instruction->result, "addr_function", error) ||
+                            !instruction->as.addr_function_name ||
+                            instruction->as.addr_function_name[0] == '\0' ||
+                            machine_ir_find_function_index_by_name(program, instruction->as.addr_function_name) == (size_t)-1) {
+                            machine_ir_set_error(error, 0, 0, "MACHINE-IR-135A: invalid addr_function instruction");
+                            return 0;
+                        }
+                        break;
                     case MACHINE_IR_INSTR_ADDR_LOCAL:
                         if (!instruction->has_result ||
                             !machine_ir_verify_result_operand(program, function, instruction->result, "addr_local", error) ||

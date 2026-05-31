@@ -49,6 +49,69 @@ static int lower_ir_call_returns_void(const IrProgram *program, const IrInstruct
     return 0;
 }
 
+static int lower_ir_fn_make_target_returns_void(const IrProgram *program, const IrInstruction *instruction) {
+    size_t function_index;
+
+    if (!instruction || instruction->kind != IR_INSTR_FN_MAKE ||
+        !instruction->as.fn_make.callee_name || instruction->as.fn_make.callee_name[0] == '\0') {
+        return 0;
+    }
+    if (!program || !program->functions) {
+        return 0;
+    }
+    for (function_index = 0u; function_index < program->function_count; ++function_index) {
+        const IrFunction *callee = &program->functions[function_index];
+
+        if (!callee->name || strcmp(callee->name, instruction->as.fn_make.callee_name) != 0) {
+            continue;
+        }
+        return callee->return_type == AST_FUNCTION_RETURN_VOID;
+    }
+    return 0;
+}
+
+static const IrInstruction *lower_ir_find_temp_definition_instruction(const IrFunction *function,
+    size_t temp_id) {
+    size_t block_index;
+
+    if (!function || !function->blocks) {
+        return NULL;
+    }
+
+    for (block_index = 0u; block_index < function->block_count; ++block_index) {
+        const IrBasicBlock *block = &function->blocks[block_index];
+        size_t instruction_index;
+
+        if (!block->instructions) {
+            continue;
+        }
+        for (instruction_index = 0u;
+             instruction_index < block->instruction_count;
+             ++instruction_index) {
+            const IrInstruction *instruction = &block->instructions[instruction_index];
+
+            if (instruction->result.kind == IR_VALUE_TEMP &&
+                instruction->result.id == temp_id) {
+                return instruction;
+            }
+        }
+    }
+
+    return NULL;
+}
+
+static const IrInstruction *lower_ir_resolve_callable_object_producer_instruction(const IrFunction *function,
+    size_t temp_id) {
+    const IrInstruction *producer = lower_ir_find_temp_definition_instruction(function, temp_id);
+
+    while (producer && producer->kind == IR_INSTR_MOV &&
+           producer->as.mov_value.kind == IR_VALUE_TEMP) {
+        producer = lower_ir_find_temp_definition_instruction(function, producer->as.mov_value.id);
+    }
+
+    return producer;
+}
+
 static int lower_ir_lower_value_ref(const IrValueRef *value,
     LowerIrFunction *out_function,
     LowerIrBasicBlock *out_block,
@@ -153,8 +216,27 @@ static int lower_ir_lower_store_like_mov(const IrInstruction *instruction,
     }
 }
 
+static int lower_ir_emit_temp_placeholder(LowerIrBasicBlock *out_block,
+    size_t temp_id,
+    LowerIrError *error) {
+    LowerIrInstruction lowered_instruction;
+
+    if (!out_block) {
+        lower_ir_set_error(error, 0, 0, "LOWER-IR-046: invalid placeholder-lowering contract");
+        return 0;
+    }
+
+    memset(&lowered_instruction, 0, sizeof(lowered_instruction));
+    lowered_instruction.kind = LOWER_IR_INSTR_MOV;
+    lowered_instruction.has_result = 1;
+    lowered_instruction.result = lower_ir_value_temp(temp_id);
+    lowered_instruction.as.mov_value = lower_ir_value_immediate(0);
+    return lower_ir_block_append_instruction(out_block, &lowered_instruction, error);
+}
+
 static int lower_ir_lower_instruction(const IrInstruction *instruction,
     const IrProgram *program,
+    const IrFunction *source_function,
     LowerIrFunction *out_function,
     LowerIrBasicBlock *out_block,
     LowerIrError *error) {
@@ -233,6 +315,178 @@ static int lower_ir_lower_instruction(const IrInstruction *instruction,
         free(lowered_instruction.as.call.args);
         lowered_instruction.as.call.args = NULL;
         return 1;
+    case IR_INSTR_FN_MAKE:
+        if (instruction->result.kind == IR_VALUE_TEMP) {
+            return lower_ir_emit_temp_placeholder(out_block, instruction->result.id, error);
+        }
+        return 1;
+    case IR_INSTR_FN_CODE:
+        {
+            const IrInstruction *producer;
+
+            if (instruction->as.fn_project_operand.kind != IR_VALUE_TEMP) {
+                lower_ir_set_error(error,
+                    0,
+                    0,
+                    "LOWER-IR-048: fn_code operand must be a temp before lower-IR bridge");
+                return 0;
+            }
+            producer = lower_ir_resolve_callable_object_producer_instruction(
+                source_function,
+                instruction->as.fn_project_operand.id);
+            if (!producer || producer->kind != IR_INSTR_FN_MAKE ||
+                !producer->as.fn_make.callee_name || producer->as.fn_make.callee_name[0] == '\0') {
+                lower_ir_set_error(error,
+                    0,
+                    0,
+                    "LOWER-IR-049: fn_code bridge requires operand resolving to named fn_make");
+                return 0;
+            }
+
+            memset(&lowered_instruction, 0, sizeof(lowered_instruction));
+            lowered_instruction.kind = LOWER_IR_INSTR_ADDR_FUNCTION;
+            lowered_instruction.has_result = 1;
+            lowered_instruction.result = lower_ir_value_temp(instruction->result.id);
+            lowered_instruction.as.addr_function_name =
+                lower_ir_strdup(producer->as.fn_make.callee_name);
+            if (!lowered_instruction.as.addr_function_name) {
+                lower_ir_set_error(error,
+                    0,
+                    0,
+                    "LOWER-IR-050: out of memory lowering fn_code function name");
+                return 0;
+            }
+            if (!lower_ir_block_append_instruction(out_block, &lowered_instruction, error)) {
+                free(lowered_instruction.as.addr_function_name);
+                lowered_instruction.as.addr_function_name = NULL;
+                return 0;
+            }
+            free(lowered_instruction.as.addr_function_name);
+            lowered_instruction.as.addr_function_name = NULL;
+            return 1;
+        }
+    case IR_INSTR_FN_ENV:
+    case IR_INSTR_FN_SHAPE:
+        {
+            const IrInstruction *producer;
+
+            if (instruction->as.fn_project_operand.kind != IR_VALUE_TEMP) {
+                lower_ir_set_error(error,
+                    0,
+                    0,
+                    "LOWER-IR-046: callable projection operand must be a temp before lower-IR bridge");
+                return 0;
+            }
+
+            producer = lower_ir_resolve_callable_object_producer_instruction(
+                source_function,
+                instruction->as.fn_project_operand.id);
+            if (!producer || producer->kind != IR_INSTR_FN_MAKE) {
+                lower_ir_set_error(error,
+                    0,
+                    0,
+                    "LOWER-IR-047: callable projection bridge requires operand resolving to fn_make");
+                return 0;
+            }
+
+            memset(&lowered_instruction, 0, sizeof(lowered_instruction));
+            lowered_instruction.kind = LOWER_IR_INSTR_MOV;
+            lowered_instruction.has_result = 1;
+            lowered_instruction.result = lower_ir_value_temp(instruction->result.id);
+
+            if (instruction->kind == IR_INSTR_FN_ENV) {
+                if (!lower_ir_lower_value_ref(&producer->as.fn_make.env,
+                        out_function,
+                        out_block,
+                        &lowered_instruction.as.mov_value,
+                        error)) {
+                    return 0;
+                }
+            } else {
+                lowered_instruction.as.mov_value =
+                    lower_ir_value_immediate((long long)producer->as.fn_make.shape_id);
+            }
+
+            return lower_ir_block_append_instruction(out_block, &lowered_instruction, error);
+        }
+    case IR_INSTR_CALL_INDIRECT:
+        {
+            const IrInstruction *producer;
+            size_t lowered_arg_count;
+
+            if (instruction->as.call_indirect.callee.kind != IR_VALUE_TEMP) {
+                lower_ir_set_error(error,
+                    0,
+                    0,
+                    "LOWER-IR-043: call_indirect callee must be a temp before lower-IR bridge");
+                return 0;
+            }
+
+            producer = lower_ir_resolve_callable_object_producer_instruction(
+                source_function,
+                instruction->as.call_indirect.callee.id);
+            if (!producer || producer->kind != IR_INSTR_FN_MAKE) {
+                lower_ir_set_error(error,
+                    0,
+                    0,
+                    "LOWER-IR-044: call_indirect bridge requires callee resolving to fn_make");
+                return 0;
+            }
+
+            memset(&lowered_instruction, 0, sizeof(lowered_instruction));
+            lowered_instruction.kind = LOWER_IR_INSTR_CALL;
+            lowered_instruction.has_result =
+                lower_ir_fn_make_target_returns_void(program, producer) ? 0 : 1;
+            if (lowered_instruction.has_result) {
+                lowered_instruction.result = lower_ir_value_temp(instruction->result.id);
+            }
+            lowered_instruction.as.call.callee_name = producer->as.fn_make.callee_name;
+            lowered_instruction.as.call.arg_count = instruction->as.call_indirect.arg_count + 1u;
+
+            lowered_instruction.as.call.args = (LowerIrValueRef *)malloc(
+                lowered_instruction.as.call.arg_count * sizeof(LowerIrValueRef));
+            if (!lowered_instruction.as.call.args) {
+                lower_ir_set_error(error,
+                    0,
+                    0,
+                    "LOWER-IR-045: out of memory lowering bridged call_indirect args");
+                return 0;
+            }
+
+            if (!lower_ir_lower_value_ref(&producer->as.fn_make.env,
+                    out_function,
+                    out_block,
+                    &lowered_instruction.as.call.args[0],
+                    error)) {
+                free(lowered_instruction.as.call.args);
+                lowered_instruction.as.call.args = NULL;
+                return 0;
+            }
+
+            for (lowered_arg_count = 0u;
+                 lowered_arg_count < instruction->as.call_indirect.arg_count;
+                 ++lowered_arg_count) {
+                if (!lower_ir_lower_value_ref(&instruction->as.call_indirect.args[lowered_arg_count],
+                        out_function,
+                        out_block,
+                        &lowered_instruction.as.call.args[lowered_arg_count + 1u],
+                        error)) {
+                    free(lowered_instruction.as.call.args);
+                    lowered_instruction.as.call.args = NULL;
+                    return 0;
+                }
+            }
+
+            if (!lower_ir_block_append_instruction(out_block, &lowered_instruction, error)) {
+                free(lowered_instruction.as.call.args);
+                lowered_instruction.as.call.args = NULL;
+                return 0;
+            }
+
+            free(lowered_instruction.as.call.args);
+            lowered_instruction.as.call.args = NULL;
+            return 1;
+        }
     case IR_INSTR_ADDR_LOCAL:
         memset(&lowered_instruction, 0, sizeof(lowered_instruction));
         lowered_instruction.kind = LOWER_IR_INSTR_ADDR_LOCAL;
@@ -473,6 +727,7 @@ int lower_ir_lower_from_ir(const IrProgram *program,
                 }
                 if (!lower_ir_lower_instruction(&source_block->instructions[instruction_index],
                         program,
+                        source_function,
                         target_function,
                         target_block,
                         error)) {

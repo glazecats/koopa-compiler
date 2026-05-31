@@ -240,6 +240,9 @@ static TokenType keyword_or_identifier(const char *start, size_t len) {
     if (len == 6 && strncmp(start, "struct", 6) == 0) {
         return TOKEN_KW_STRUCT;
     }
+    if (len == 7 && strncmp(start, "closure", 7) == 0) {
+        return TOKEN_KW_CLOSURE;
+    }
     return TOKEN_IDENTIFIER;
 }
 
@@ -668,6 +671,8 @@ const char *lexer_token_type_name(TokenType type) {
         return "KW_PAIR";
     case TOKEN_KW_STRUCT:
         return "KW_STRUCT";
+    case TOKEN_KW_CLOSURE:
+        return "KW_CLOSURE";
     case TOKEN_PLUS:
         return "PLUS";
     case TOKEN_MINUS:

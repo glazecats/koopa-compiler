@@ -5443,6 +5443,47 @@ static int compiler_frontend_lower_to_lower_ir(const char *source,
     return 1;
 }
 
+int compiler_frontend_lower_to_ir_for_testing(const char *source,
+    CompilerMode mode,
+    const CompilerOptions *options,
+    TokenArray *tokens,
+    AstProgram *ast_program,
+    IrProgram *ir_program,
+    CompilerError *error) {
+    LowerIrProgram lower_program;
+    int ok;
+
+    lower_ir_program_init(&lower_program);
+    ok = compiler_frontend_lower_to_lower_ir(source,
+        mode,
+        options,
+        tokens,
+        ast_program,
+        ir_program,
+        &lower_program,
+        error);
+    lower_ir_program_free(&lower_program);
+    return ok;
+}
+
+int compiler_frontend_lower_to_lower_ir_for_testing(const char *source,
+    CompilerMode mode,
+    const CompilerOptions *options,
+    TokenArray *tokens,
+    AstProgram *ast_program,
+    IrProgram *ir_program,
+    LowerIrProgram *lower_program,
+    CompilerError *error) {
+    return compiler_frontend_lower_to_lower_ir(source,
+        mode,
+        options,
+        tokens,
+        ast_program,
+        ir_program,
+        lower_program,
+        error);
+}
+
 static int compiler_build_value_ssa_translation_core(const LowerIrProgram *lower_program,
     CompilerMode mode,
     ValueSsaProgram *value_program,

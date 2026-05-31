@@ -1,4 +1,5 @@
 #include "ast.h"
+#include "compiler.h"
 #include "ir.h"
 #include "lexer.h"
 #include "parser.h"
@@ -90,7 +91,113 @@ static int lower_source_to_ir_text(const char *source, char **out_text) {
 }
 
 static int lower_extension_source_to_ir_text(const char *source, char **out_text) {
-    return lower_source_to_ir_text_with_options(source, 0, 1, out_text);
+    TokenArray tokens;
+    AstProgram program;
+    IrProgram ir_program;
+    CompilerError error;
+    CompilerOptions options;
+
+    if (!source || !out_text) {
+        return 0;
+    }
+
+    *out_text = NULL;
+    memset(&error, 0, sizeof(error));
+    memset(&options, 0, sizeof(options));
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+    ir_program_init(&ir_program);
+    options.skip_all_paths_return_check = 1;
+
+    if (!compiler_frontend_lower_to_ir_for_testing(
+            source,
+            COMPILER_MODE_EXTENSION,
+            &options,
+            &tokens,
+            &program,
+            &ir_program,
+            &error)) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR lowering failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        ir_program_free(&ir_program);
+        return 0;
+    }
+
+    if (!ir_dump_program(&ir_program, out_text)) {
+        fprintf(stderr, "[ir-reg] FAIL: IR dump failed\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        ir_program_free(&ir_program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    ir_program_free(&ir_program);
+    return 1;
+}
+
+static int lower_extension_source_to_ir_text_without_semantic(const char *source, char **out_text) {
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    IrProgram ir_program;
+    IrError ir_err;
+
+    if (!source || !out_text) {
+        return 0;
+    }
+
+    *out_text = NULL;
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+    ir_program_init(&ir_program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[ir-reg] FAIL: lexer failed for extension input without semantic\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &parse_err)) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: parser failed at %d:%d: %s\n",
+            parse_err.line,
+            parse_err.column,
+            parse_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (!ir_lower_program(&program, NULL, &ir_program, &ir_err)) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR lowering failed at %d:%d: %s\n",
+            ir_err.line,
+            ir_err.column,
+            ir_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        ir_program_free(&ir_program);
+        return 0;
+    }
+
+    if (!ir_dump_program(&ir_program, out_text)) {
+        fprintf(stderr, "[ir-reg] FAIL: IR dump failed\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        ir_program_free(&ir_program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    ir_program_free(&ir_program);
+    return 1;
 }
 
 static int expect_ir_dump(const char *case_id,
@@ -132,6 +239,34 @@ static int expect_extension_ir_dump(const char *case_id,
     }
 
     if (!lower_extension_source_to_ir_text(source, &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = strcmp(actual_text, expected_text) == 0;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: %s IR mismatch\nexpected:\n%s\nactual:\n%s\n",
+            case_id,
+            expected_text,
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int expect_extension_ir_dump_without_semantic(const char *case_id,
+    const char *source,
+    const char *expected_text) {
+    char *actual_text = NULL;
+    int ok;
+
+    if (!case_id || !source || !expected_text) {
+        return 0;
+    }
+
+    if (!lower_extension_source_to_ir_text_without_semantic(source, &actual_text)) {
         free(actual_text);
         return 0;
     }
@@ -419,6 +554,170 @@ static int test_ir_lowers_return_parameter(void) {
         "func id(a.0) {\n"
         "  bb.0:\n"
         "    ret a.0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_pair_return_via_hidden_result_slots_under_extension(void) {
+    return expect_extension_ir_dump_without_semantic("IR-AGGRET-PAIR-LOCAL",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ return 0; }\n",
+        "func mk(__ret0.0, __ret1.1) {\n"
+        "  bb.0:\n"
+        "    p$first.2 = mov 1\n"
+        "    p$second.3 = mov 2\n"
+        "    0 = store_indirect __ret0.0, p$first.2\n"
+        "    0 = store_indirect __ret1.1, p$second.3\n"
+        "    ret\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_pair_call_init_via_hidden_result_slots_under_extension(void) {
+    return expect_extension_ir_dump_without_semantic("IR-AGGRET-PAIR-CALL-INIT",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ pair q = mk(); return q.second; }\n",
+        "func mk(__ret0.0, __ret1.1) {\n"
+        "  bb.0:\n"
+        "    p$first.2 = mov 1\n"
+        "    p$second.3 = mov 2\n"
+        "    0 = store_indirect __ret0.0, p$first.2\n"
+        "    0 = store_indirect __ret1.1, p$second.3\n"
+        "    ret\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = addr_local local.0\n"
+        "    tmp.1 = addr_local local.1\n"
+        "    tmp.2 = call mk(tmp.0, tmp.1)\n"
+        "    tmp.3 = mov q$second.1\n"
+        "    ret tmp.3\n"
+        "}\n");
+}
+
+static int test_ir_lowers_pair_call_result_as_aggregate_call_argument_under_extension(void) {
+    return expect_extension_ir_dump("IR-AGGCALL-PAIR-CALLARG",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int main(){ return sum(mk()); }\n",
+        "func mk(__ret0.0, __ret1.1) {\n"
+        "  bb.0:\n"
+        "    p$first.2 = mov 1\n"
+        "    p$second.3 = mov 2\n"
+        "    0 = store_indirect __ret0.0, p$first.2\n"
+        "    0 = store_indirect __ret1.1, p$second.3\n"
+        "    ret\n"
+        "}\n"
+        "\n"
+        "func sum(p.0, p.1) {\n"
+        "  bb.0:\n"
+        "    tmp.0 = mov p.0\n"
+        "    tmp.1 = mov p.1\n"
+        "    tmp.2 = add tmp.0, tmp.1\n"
+        "    ret tmp.2\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = addr_local local.0\n"
+        "    tmp.1 = addr_local local.1\n"
+        "    tmp.2 = call mk(tmp.0, tmp.1)\n"
+        "    tmp.3 = call sum(__aggarg_tmp_0.0, __aggarg_tmp_1.1)\n"
+        "    ret tmp.3\n"
+        "}\n");
+}
+
+static int test_ir_lowers_pair_multi_hop_return_chain_under_extension(void) {
+    return expect_extension_ir_dump("IR-AGGRET-PAIR-MULTIHOP",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair id(pair p){ return p; }\n"
+        "pair wrap(){ return id(mk()); }\n"
+        "int main(){ pair q=wrap(); return q.second; }\n",
+        "func mk(__ret0.0, __ret1.1) {\n"
+        "  bb.0:\n"
+        "    p$first.2 = mov 1\n"
+        "    p$second.3 = mov 2\n"
+        "    0 = store_indirect __ret0.0, p$first.2\n"
+        "    0 = store_indirect __ret1.1, p$second.3\n"
+        "    ret\n"
+        "}\n"
+        "\n"
+        "func id(__ret0.0, __ret1.1, p.2, p.3) {\n"
+        "  bb.0:\n"
+        "    0 = store_indirect __ret0.0, p.2\n"
+        "    0 = store_indirect __ret1.1, p.3\n"
+        "    ret\n"
+        "}\n"
+        "\n"
+        "func wrap(__ret0.0, __ret1.1) {\n"
+        "  bb.0:\n"
+        "    tmp.0 = addr_local local.2\n"
+        "    tmp.1 = addr_local local.3\n"
+        "    tmp.2 = call mk(tmp.0, tmp.1)\n"
+        "    tmp.3 = call id(__ret0.0, __ret1.1, __aggarg_tmp_2.2, __aggarg_tmp_3.3)\n"
+        "    ret\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = addr_local local.0\n"
+        "    tmp.1 = addr_local local.1\n"
+        "    tmp.2 = call wrap(tmp.0, tmp.1)\n"
+        "    tmp.3 = mov q$second.1\n"
+        "    ret tmp.3\n"
+        "}\n");
+}
+
+static int test_ir_lowers_nested_struct_multi_hop_return_chain_under_extension(void) {
+    return expect_extension_ir_dump("IR-AGGRET-NESTED-STRUCT-MULTIHOP",
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "struct Mid id(struct Mid m){ return m; }\n"
+        "struct Mid wrap(){ return id(mk()); }\n"
+        "int main(){ struct Mid q=wrap(); return q.p.second + q.z; }\n",
+        "func mk(__ret0.0, __ret1.1, __ret2.2) {\n"
+        "  bb.0:\n"
+        "    m$p$0.3 = mov 1\n"
+        "    m$p$1.4 = mov 2\n"
+        "    m$z.5 = mov 3\n"
+        "    0 = store_indirect __ret0.0, m$p$0.3\n"
+        "    0 = store_indirect __ret1.1, m$p$1.4\n"
+        "    0 = store_indirect __ret2.2, m$z.5\n"
+        "    ret\n"
+        "}\n"
+        "\n"
+        "func id(__ret0.0, __ret1.1, __ret2.2, m.3, m.4, m.5) {\n"
+        "  bb.0:\n"
+        "    0 = store_indirect __ret0.0, m.3\n"
+        "    0 = store_indirect __ret1.1, m.4\n"
+        "    0 = store_indirect __ret2.2, m.5\n"
+        "    ret\n"
+        "}\n"
+        "\n"
+        "func wrap(__ret0.0, __ret1.1, __ret2.2) {\n"
+        "  bb.0:\n"
+        "    tmp.0 = addr_local local.3\n"
+        "    tmp.1 = addr_local local.4\n"
+        "    tmp.2 = addr_local local.5\n"
+        "    tmp.3 = call mk(tmp.0, tmp.1, tmp.2)\n"
+        "    tmp.4 = call id(__ret0.0, __ret1.1, __ret2.2, __aggarg_tmp_3.3, __aggarg_tmp_4.4, __aggarg_tmp_5.5)\n"
+        "    ret\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = addr_local local.0\n"
+        "    tmp.1 = addr_local local.1\n"
+        "    tmp.2 = addr_local local.2\n"
+        "    tmp.3 = call wrap(tmp.0, tmp.1, tmp.2)\n"
+        "    tmp.4 = mov q$p$1.1\n"
+        "    tmp.5 = mov q$z.2\n"
+        "    tmp.6 = add tmp.4, tmp.5\n"
+        "    ret tmp.6\n"
         "}\n");
 }
 
@@ -2102,6 +2401,8 @@ static int test_ir_lowers_zero_arg_function_valued_parameter_specialization_unde
         "int next(){ return 9; }\n"
         "int apply0(int f()){ return f(); }\n"
         "int main(){ return apply0(next); }\n",
+        "shape shape.0() -> int\n"
+        "\n"
         "func next() {\n"
         "  bb.0:\n"
         "    ret 9\n"
@@ -2111,11 +2412,18 @@ static int test_ir_lowers_zero_arg_function_valued_parameter_specialization_unde
         "\n"
         "func main() {\n"
         "  bb.0:\n"
-        "    tmp.0 = call apply0__fv_0_next(0)\n"
+        "    tmp.0 = call apply0__fv_0_next()\n"
         "    ret tmp.0\n"
         "}\n"
         "\n"
-        "func apply0__fv_0_next(f.0) {\n"
+        "func apply0__fv_0_next() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = fn_make __fnwrap_next, 0, shape.0\n"
+        "    tmp.1 = call_indirect tmp.0()\n"
+        "    ret tmp.1\n"
+        "}\n"
+        "\n"
+        "func __fnwrap_next(__env.0) {\n"
         "  bb.0:\n"
         "    tmp.0 = call next()\n"
         "    ret tmp.0\n"
@@ -2127,6 +2435,8 @@ static int test_ir_lowers_zero_arg_void_function_valued_parameter_specialization
         "void ping(){ putint(1); }\n"
         "void apply0(void f()){ f(); }\n"
         "int main(){ apply0(ping); return 0; }\n",
+        "shape shape.0() -> void\n"
+        "\n"
         "declare putint(param0.0)\n"
         "\n"
         "func ping() {\n"
@@ -2139,11 +2449,18 @@ static int test_ir_lowers_zero_arg_void_function_valued_parameter_specialization
         "\n"
         "func main() {\n"
         "  bb.0:\n"
-        "    tmp.0 = call apply0__fv_0_ping(0)\n"
+        "    tmp.0 = call apply0__fv_0_ping()\n"
         "    ret 0\n"
         "}\n"
         "\n"
-        "func apply0__fv_0_ping(f.0) {\n"
+        "func apply0__fv_0_ping() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = fn_make __fnwrap_ping, 0, shape.0\n"
+        "    tmp.1 = call_indirect tmp.0()\n"
+        "    ret\n"
+        "}\n"
+        "\n"
+        "func __fnwrap_ping(__env.0) {\n"
         "  bb.0:\n"
         "    tmp.0 = call ping()\n"
         "    ret\n"
@@ -2471,6 +2788,164 @@ static int test_ir_lowers_float_local_call_chain_transport_under_extension(void)
         "  bb.0:\n"
         "    ret 0\n"
         "}\n");
+}
+
+static int test_ir_lowers_returned_function_value_parameter_immediate_call_under_extension(void) {
+    return expect_extension_ir_dump("IR-RETURNED-FUNCTION-VALUE-PARAM-IMMEDIATE-CALL",
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return id(add1)(41); }\n",
+        "shape shape.0(int) -> int\n"
+        "\n"
+        "declare id(__ret0.0, f.1)\n"
+        "\n"
+        "func add1(x.0) {\n"
+        "  bb.0:\n"
+        "    tmp.0 = add x.0, 1\n"
+        "    ret tmp.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = fn_make __fnwrap_add1, 0, shape.0\n"
+        "    tmp.1 = call_indirect tmp.0(41)\n"
+        "    ret tmp.1\n"
+        "}\n"
+        "\n"
+        "func __fnwrap_add1(__env.0, x.1) {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call add1(x.1)\n"
+        "    ret tmp.0\n"
+        "}\n");
+}
+
+static int test_ir_accepts_returned_closure_backed_function_value_parameter_immediate_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int id(int f(int))(int) { return f; }\n"
+            "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; return id(f)(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func main() {\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.1 = mov x.0\n") != NULL &&
+        strstr(actual_text, "f$ftag.2 = mov 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "tmp.0 = fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "tmp.1 = call_indirect tmp.0(4)\n") != NULL &&
+        strstr(actual_text, "ret tmp.1\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: returned closure-backed function-value parameter immediate call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_returned_closure_backed_function_value_parameter_bind_and_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int id(int f(int))(int) { return f; }\n"
+            "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=id(f); return g(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func main() {\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.1 = mov x.0\n") != NULL &&
+        strstr(actual_text, "f$ftag.2 = mov 1\n") != NULL &&
+        strstr(actual_text, "g$ftag.3 = mov f$ftag.2\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "tmp.0 = fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "tmp.1 = call_indirect tmp.0(4)\n") != NULL &&
+        strstr(actual_text, "ret tmp.1\n") != NULL &&
+        strstr(actual_text, "func main__closure_f_") != NULL &&
+        strstr(actual_text, "id__fv_0_main__closure_f_") == NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: returned closure-backed function-value parameter bind-and-call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_returned_closure_backed_function_value_parameter_bind_and_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int id(int f(int))(int) { return f; }\n"
+            "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; int h(int)=id(f); return h(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func main() {\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov x.1\n") != NULL &&
+        strstr(actual_text, "g$closurecap$0.5 = mov y.2\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "f$ftag.4 = mov 2\n") != NULL &&
+        strstr(actual_text, "h$ftag.7 = mov f$ftag.4\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "tmp.0 = fn_make main__closure_g_") != NULL &&
+        strstr(actual_text, "tmp.1 = call_indirect tmp.0(4)\n") != NULL &&
+        strstr(actual_text, "ret tmp.1\n") != NULL &&
+        strstr(actual_text, "func main__closure_g_") != NULL &&
+        strstr(actual_text, "id__fv_0_main__closure_g_") == NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic returned closure-backed function-value parameter bind-and-call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_returned_closure_backed_function_value_parameter_immediate_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int id(int f(int))(int) { return f; }\n"
+            "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; return id(f)(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "f$closurecap$0.3 = mov x.1\n") != NULL &&
+        strstr(actual_text, "g$closurecap$0.5 = mov y.2\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "f$ftag.4 = mov 2\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "tmp.0 = fn_make main__closure_g_") != NULL &&
+        strstr(actual_text, "tmp.1 = call_indirect tmp.0(4)\n") != NULL &&
+        strstr(actual_text, "ret tmp.1\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic returned closure-backed function-value parameter immediate call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
 }
 
 static int test_ir_rejects_global_float_operator_expression_under_extension(void) {
@@ -4498,6 +4973,1934 @@ static int test_ir_rejects_unary_call_ternary_value_plus_float_call_argument_und
         "SEMA-EXT-035");
 }
 
+static int test_ir_accepts_dynamic_noncapturing_function_value_return_bind_and_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int pick(int c)(int) { int f(int)=add1; if(c) f=add2; return f; }\n"
+            "int main(){ int g(int)=pick(1); return g(40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "func pick(__ret0.0, c.1) {\n") != NULL &&
+        strstr(actual_text, "f$ftag.2 = mov 1\n") != NULL &&
+        strstr(actual_text, "f$ftag.2 = mov 2\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, f$ftag.2\n") != NULL &&
+        strstr(actual_text, "tmp.0 = addr_local local.0\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call pick(tmp.0, 1)\n") != NULL &&
+        strstr(actual_text, "eq __retfn_declslot_0.0, 1\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic noncapturing function-value return bind-and-call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_static_noncapturing_top_level_function_value_return_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int pick()(int) { return add1; }\n"
+            "int main(){ int f(int)=pick(); return f(41); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func pick(__ret0.0) {\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, 1\n") != NULL &&
+        strstr(actual_text, "tmp.0 = addr_local local.0\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call pick(tmp.0)\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.2(41)\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: static top-level noncapturing function-value return mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_noncapturing_function_value_return_immediate_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_source_to_ir_text_with_options(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int pick(int c)(int) { int f(int)=add1; if(c) f=add2; return f; }\n"
+            "int main(){ return pick(1)(40); }\n",
+            1,
+            1,
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "func pick(__ret0.0, c.1) {\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, f$ftag.2\n") != NULL &&
+        strstr(actual_text, "tmp.0 = addr_local local.0\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call pick(tmp.0, 1)\n") != NULL &&
+        strstr(actual_text, "tmp.2 = eq __retfn_callcap_0.0, 1\n") != NULL &&
+        strstr(actual_text, "tmp.4 = fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "tmp.3 = call_indirect tmp.4(40)\n") != NULL &&
+        strstr(actual_text, "tmp.5 = fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic noncapturing function-value return immediate-call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_local_function_value_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int main(){ int c=1; int g(int)=add1; if((putint(0), c)) g=add2; return apply(g, 40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
+        strstr(actual_text, "g$ftag.1 = mov 1\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "g$ftag.1 = mov 2\n") != NULL &&
+        strstr(actual_text, "tmp.1 = eq g$ftag.1, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic local function-value forwarding into function parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_local_zero_arg_function_value_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int next1(){ return 1; }\n"
+            "int next2(){ return 2; }\n"
+            "int apply0(int f()){ return f(); }\n"
+            "int main(){ int c=1; int g()=next1; if((putint(0), c)) g=next2; return apply0(g); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
+        strstr(actual_text, "g$ftag.1 = mov 1\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "g$ftag.1 = mov 2\n") != NULL &&
+        strstr(actual_text, "tmp.1 = eq g$ftag.1, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0() -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_next1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_next2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_next1(__env.0) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_next2(__env.0) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic local zero-arg function-value forwarding mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_local_zero_arg_void_function_value_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "void ping1(){ putint(1); }\n"
+            "void ping2(){ putint(2); }\n"
+            "void apply0(void f()){ f(); }\n"
+            "int main(){ int c=1; void g()=ping1; if((putint(0), c)) g=ping2; apply0(g); return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
+        strstr(actual_text, "g$ftag.1 = mov 1\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "g$ftag.1 = mov 2\n") != NULL &&
+        strstr(actual_text, "tmp.1 = eq g$ftag.1, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0() -> void\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_ping1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_ping2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_ping1(__env.0) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_ping2(__env.0) {\n") != NULL &&
+        strstr(actual_text, "ret 0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic local zero-arg void function-value forwarding mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_runtime_closure_local_forward_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if((putint(0), c)) f=g; return apply(f, 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "f$ftag.4 = mov 2\n") != NULL &&
+        strstr(actual_text, "call apply__fv_0_main__closure_f_") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic runtime closure local forwarding into function parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_runtime_zero_arg_void_closure_local_forward_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "void apply0(void f()){ f(); }\n"
+            "int main(){ int c=1; int x=7; int y=9; void f()=closure [x] void () { putint(x); return; }; void g()=closure [y] void () { putint(y); return; }; if((putint(0), c)) f=g; apply0(f); return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "f$ftag.4 = mov 2\n") != NULL &&
+        strstr(actual_text, "call apply0__fv_0_main__closure_f_") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "ret 0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic runtime zero-arg void closure local forwarding into function parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_local_zero_arg_closure_direct_callee_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int main(){ int c=1; int x=3; int y=5; int f()=closure [x] int () { return x; }; int g()=closure [y] int () { return y; }; if(c) f=g; return f(); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "f$closurecap$0.3 = mov x.1\n") != NULL &&
+        strstr(actual_text, "g$closurecap$0.5 = mov y.2\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "f$ftag.4 = mov 2\n") != NULL &&
+        strstr(actual_text, "shape shape.0() -> int\n") != NULL &&
+        strstr(actual_text, "fn_make main__closure_g_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.0()\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic local zero-arg closure direct-callee mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_local_zero_arg_void_closure_direct_callee_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int main(){ int c=1; int x=3; int y=5; void f()=closure [x] void () { putint(x); return; }; void g()=closure [y] void () { putint(y); return; }; if(c) f=g; f(); return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "f$closurecap$0.3 = mov x.1\n") != NULL &&
+        strstr(actual_text, "g$closurecap$0.5 = mov y.2\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "f$ftag.4 = mov 2\n") != NULL &&
+        strstr(actual_text, "shape shape.0() -> void\n") != NULL &&
+        strstr(actual_text, "fn_make main__closure_g_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.0()\n") != NULL &&
+        strstr(actual_text, "ret 0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic local zero-arg void closure direct-callee mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_runtime_local_zero_arg_closure_direct_callee_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int main(){ int c=1; int x=3; int y=5; int f()=closure [x] int () { return x; }; int g()=closure [y] int () { return y; }; if((putint(0), c)) f=g; return f(); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov x.1\n") != NULL &&
+        strstr(actual_text, "g$closurecap$0.5 = mov y.2\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "f$ftag.4 = mov 2\n") != NULL &&
+        strstr(actual_text, "tmp.1 = eq f$ftag.4, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0() -> int\n") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make main__closure_g_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic runtime local zero-arg closure direct-callee mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_runtime_local_zero_arg_void_closure_direct_callee_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int main(){ int c=1; int x=3; int y=5; void f()=closure [x] void () { putint(x); return; }; void g()=closure [y] void () { putint(y); return; }; if((putint(0), c)) f=g; f(); return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov x.1\n") != NULL &&
+        strstr(actual_text, "g$closurecap$0.5 = mov y.2\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "f$ftag.4 = mov 2\n") != NULL &&
+        strstr(actual_text, "tmp.1 = eq f$ftag.4, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0() -> void\n") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make main__closure_g_") != NULL &&
+        strstr(actual_text, "ret 0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic runtime local zero-arg void closure direct-callee mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_returned_zero_arg_function_value_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int next1(){ return 1; }\n"
+            "int next2(){ return 2; }\n"
+            "int apply0(int f()){ return f(); }\n"
+            "int pick(int c)(){ int g()=next1; if(c) g=next2; return g; }\n"
+            "int main(){ int g()=pick(1); return apply0(g); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func pick(__ret0.0, c.1) {\n") != NULL &&
+        strstr(actual_text, "g$ftag.2 = mov 1\n") != NULL &&
+        strstr(actual_text, "g$ftag.2 = mov 2\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, g$ftag.2\n") != NULL &&
+        strstr(actual_text, "tmp.0 = addr_local local.0\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call pick(tmp.0, 1)\n") != NULL &&
+        strstr(actual_text, "tmp.2 = eq __retfn_declslot_0.0, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0() -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_next1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_next2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_next1(__env.0) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_next2(__env.0) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic returned zero-arg function-value forwarding mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_returned_closure_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+            "int main(){ int f(int)=make(3); return apply(f, 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func make(__ret0.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, 1\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret1.1, x.1\n") != NULL &&
+        strstr(actual_text, "call make(") != NULL &&
+        strstr(actual_text, "call apply__fv_0_make__retclosure_") != NULL &&
+        strstr(actual_text, "call make__retclosure_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: returned closure forwarding into function parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_returned_closure_alias_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+            "int main(){ int f(int)=make(3); int g(int)=f; return apply(g, 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func make(__ret0.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "g$closurecap$0.") != NULL &&
+        strstr(actual_text, "call make(") != NULL &&
+        strstr(actual_text, "call apply__fv_0_make__retclosure_") != NULL &&
+        strstr(actual_text, "call make__retclosure_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: returned closure alias forwarding into function parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_returned_single_capture_closure_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+            "int main(){ int f(int)=make(3); return apply(f, 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
+        strstr(actual_text, "func make(__ret0.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, x.1\n") != NULL &&
+        strstr(actual_text, "call make(") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make make__retclosure_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: returned single-capture closure forwarding into function parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_returned_single_capture_closure_alias_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+            "int main(){ int f(int)=make(3); int g(int)=f; return apply(g, 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
+        strstr(actual_text, "func make(__ret0.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "g$ftag.") != NULL &&
+        strstr(actual_text, "call make(") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make make__retclosure_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: returned single-capture closure alias forwarding into function parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_returned_single_capture_zero_arg_closure_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply0(int f()){ return f(); }\n"
+            "int make(int x)() { return closure [x] int () { return x; }; }\n"
+            "int main(){ int f()=make(3); return apply0(f); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
+        strstr(actual_text, "func make(__ret0.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, x.1\n") != NULL &&
+        strstr(actual_text, "call make(") != NULL &&
+        strstr(actual_text, "shape shape.0() -> int\n") != NULL &&
+        strstr(actual_text, "fn_make make__retclosure_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: returned single-capture zero-arg closure forwarding into function parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_returned_single_capture_zero_arg_void_closure_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "void apply0(void f()){ f(); }\n"
+            "void make(int x)() { return closure [x] void () { putint(x); return; }; }\n"
+            "int main(){ void f()=make(7); apply0(f); return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
+        strstr(actual_text, "func make(__ret0.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, x.1\n") != NULL &&
+        strstr(actual_text, "call make(") != NULL &&
+        strstr(actual_text, "shape shape.0() -> void\n") != NULL &&
+        strstr(actual_text, "fn_make make__retclosure_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: returned single-capture zero-arg void closure forwarding into function parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_returned_local_closure_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+            "int main(){ return apply(pick(5, 1), 3); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
+        strstr(actual_text, "func pick(__ret0.0, __ret1.1, x.2, c.3) {\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, f$ftag.5\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret1.1, f$closurecap$0.4\n") != NULL &&
+        strstr(actual_text, "tmp.2 = call pick(tmp.0, tmp.1, 5, 1)\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make pick__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.5(3)\n") != NULL &&
+        strstr(actual_text, "fn_make pick__closure_g_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.6(3)\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic returned local closure forwarding into function parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_multi_capture_closure_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int,int), int a, int b){ return f(a,b); }\n"
+            "int main(){ int x=3; int y=4; int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; return apply(f, 5, 6); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply(f.0, a.1, b.2)\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.") != NULL &&
+        strstr(actual_text, "f$closurecap$1.") != NULL &&
+        strstr(actual_text, "call apply__fv_0_main__closure_f_") != NULL &&
+        strstr(actual_text, "call main__closure_f_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: multi-capture closure forwarding into function parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_returned_multi_capture_local_closure_bind_and_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int pick(int x,int y)(int,int) { int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; return f; }\n"
+            "int main(){ int h(int,int)=pick(3,4); return h(5,6); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "shape shape.0(int, int) -> int\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, f$closurecap$0.") != NULL &&
+        strstr(actual_text, "store_indirect __ret1.1, f$closurecap$1.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_closure_pick__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "func __fnwrap_closure_pick__closure_f_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: returned multi-capture local closure bind-and-call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_returned_multi_capture_local_closure_forwarding_into_function_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int,int), int a, int b){ return f(a,b); }\n"
+            "int pick(int x, int y, int c)(int,int) { int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; int g(int,int)=closure [x,y] int (int a, int b) { return x + y - a - b; }; if(c) f=g; return f; }\n"
+            "int main(){ return apply(pick(5, 7, 1), 3, 2); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply(f.0, a.1, b.2)\n") != NULL &&
+        strstr(actual_text, "func pick(__ret0.0, __ret1.1, __ret2.2, x.3, y.4, c.5) {\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, f$ftag.8\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret1.1, f$closurecap$0.6\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret2.2, f$closurecap$1.7\n") != NULL &&
+        strstr(actual_text, "call apply__fv_0_pick__closure_f_") != NULL &&
+        strstr(actual_text, "call apply__fv_0_pick__closure_g_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic returned multi-capture local closure forwarding into function parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_function_value_assignment_then_direct_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int main(){ int c=1; int f(int)=add1; int h(int)=add1; if((putint(0), c)) f=add2; h=f; return h(40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "f$ftag.1 = mov 1\n") != NULL &&
+        strstr(actual_text, "h$ftag.2 = mov 1\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "f$ftag.1 = mov 2\n") != NULL &&
+        strstr(actual_text, "h$ftag.2 = mov f$ftag.1\n") != NULL &&
+        strstr(actual_text, "tmp.1 = eq h$ftag.2, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic function-value assignment then direct call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_function_value_assignment_then_direct_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int main(){ int c=1; int f(int)=add1; int g(int)=add2; int h(int)=add1; h=((putint(0), c) ? f : g); return h(40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "h$ftag.3 = mov 1\n") != NULL &&
+        strstr(actual_text, "h$ftag.3 = mov 2\n") != NULL &&
+        strstr(actual_text, "tmp.2 = eq h$ftag.3, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary function-value assignment then direct call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_closure_assignment_then_direct_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; int h(int)=f; h=((putint(0), c) ? f : g); return h(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov x.1\n") != NULL &&
+        strstr(actual_text, "g$closurecap$0.5 = mov y.2\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "h$ftag.7 = mov 1\n") != NULL &&
+        strstr(actual_text, "h$ftag.7 = mov 2\n") != NULL &&
+        strstr(actual_text, "tmp.2 = eq h$ftag.7, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make main__closure_g_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary closure assignment then direct call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_function_value_local_initializer_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int main(){ int c=1; int f(int)=add1; int g(int)=add2; int h(int)=c ? f : g; return h(40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "h$ftag.3 = mov 1\n") != NULL &&
+        strstr(actual_text, "tmp.0 = ne c.0, 0\n") != NULL &&
+        strstr(actual_text, "h$ftag.3 = mov 2\n") != NULL &&
+        strstr(actual_text, "tmp.1 = eq h$ftag.3, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary function value local initializer mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_function_value_assignment_then_return_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int pick(int c)(int){ int f(int)=add1; int h(int)=add1; if(c) f=add2; h=f; return h; }\n"
+            "int main(){ return pick(1)(40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func pick(__ret0.0, c.1) {\n") != NULL &&
+        strstr(actual_text, "f$ftag.2 = mov 1\n") != NULL &&
+        strstr(actual_text, "h$ftag.3 = mov 1\n") != NULL &&
+        strstr(actual_text, "f$ftag.2 = mov 2\n") != NULL &&
+        strstr(actual_text, "h$ftag.3 = mov f$ftag.2\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, h$ftag.3\n") != NULL &&
+        strstr(actual_text, "tmp.2 = eq __retfn_callcap_0.0, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic function-value assignment then return mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_returned_closure_assignment_then_return_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+            "int pick()(int){ int f(int)=make(3); int g(int)=make(5); g=f; return g; }\n"
+            "int main(){ return pick()(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func pick(__ret0.0) {\n") != NULL &&
+        strstr(actual_text, "call make(") != NULL &&
+        strstr(actual_text, "f$closurecap$0.") != NULL &&
+        strstr(actual_text, "g$closurecap$0.") != NULL &&
+        strstr(actual_text, "g$ftag.") != NULL &&
+        strstr(actual_text, "0 = store_indirect __ret0.0, g$closurecap$0.") != NULL &&
+        strstr(actual_text, "call pick(tmp.0)\n") != NULL &&
+        strstr(actual_text, "fn_make make__retclosure_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: returned closure assignment then return mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_wrapped_function_value_return_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int pick()(int){ int f(int)=add1; int h(int)=add1; return (h=f); }\n"
+            "int main(){ return pick()(41); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "h$ftag.2 = mov 1\n") != NULL &&
+        strstr(actual_text, "h$ftag.2 = mov f$ftag.1\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, h$ftag.2\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: wrapped function-value return mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_wrapped_function_value_return_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int pick(int c)(int){ int f(int)=add1; int h(int)=add1; if(c) f=add2; return (h=f); }\n"
+            "int main(){ return pick(1)(40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "h$ftag.3 = mov 1\n") != NULL &&
+        strstr(actual_text, "f$ftag.2 = mov 2\n") != NULL &&
+        strstr(actual_text, "h$ftag.3 = mov f$ftag.2\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, h$ftag.3\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic wrapped function-value return mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_noncapturing_function_value_return_immediate_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+            "int main(){ return pick(1)(40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, 1\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, 2\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary noncapturing function-value return immediate call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_noncapturing_function_value_return_bind_and_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+            "int main(){ int h(int)=pick(1); return h(40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, 1\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, 2\n") != NULL &&
+        strstr(actual_text, "tmp.2 = eq __retfn_declslot_0.0, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary noncapturing function-value return bind-and-call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_closure_function_value_return_immediate_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+            "int main(){ return pick(1)(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, 1\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret1.1, f$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, 2\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret1.1, g$closurecap$0.7\n") != NULL &&
+        strstr(actual_text, "tmp.3 = eq __retclosure_callcap_0.0, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make pick__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make pick__closure_g_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary closure function-value return immediate call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_closure_function_value_return_bind_and_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+            "int main(){ int h(int)=pick(1); return h(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, 1\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret1.1, f$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret0.0, 2\n") != NULL &&
+        strstr(actual_text, "store_indirect __ret1.1, g$closurecap$0.7\n") != NULL &&
+        strstr(actual_text, "tmp.3 = eq h$ftag.0, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make pick__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make pick__closure_g_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary closure function-value return bind-and-call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_closure_local_initializer_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; int h(int)=c ? f : g; return h(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "f$closurecap$0.3 = mov x.1\n") != NULL &&
+        strstr(actual_text, "g$closurecap$0.5 = mov y.2\n") != NULL &&
+        strstr(actual_text, "tmp.0 = ne c.0, 0\n") != NULL &&
+        strstr(actual_text, "h$ftag.8 = mov 1\n") != NULL &&
+        strstr(actual_text, "h$closurecap$0.7 = mov f$closurecap$0.3\n") != NULL &&
+        strstr(actual_text, "h$ftag.8 = mov 2\n") != NULL &&
+        strstr(actual_text, "h$closurecap$0.7 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "tmp.1 = eq h$ftag.8, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make main__closure_g_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary closure local initializer mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_function_value_actual_argument_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return apply(((putint(0), c) ? f : g), 40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "tmp.1 = ne c.0, 0\n") != NULL &&
+        strstr(actual_text, "__ternary_fn_argtag.3 = mov 1\n") != NULL &&
+        strstr(actual_text, "__ternary_fn_argtag.3 = mov 2\n") != NULL &&
+        strstr(actual_text, "tmp.2 = eq __ternary_fn_argtag.3, 1\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary function value actual argument mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_closure_actual_argument_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return apply(((putint(0), c) ? f : g), 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "__ternary_fn_argtag.") != NULL &&
+        strstr(actual_text, "__ternary_fn_argcap_0.") != NULL &&
+        strstr(actual_text, "mov f$closurecap$0.3\n") != NULL &&
+        strstr(actual_text, "mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "eq __ternary_fn_argtag.") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "fn_make main__closure_g_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "func main__closure_f_") != NULL &&
+        strstr(actual_text, "func main__closure_g_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary closure actual argument mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_comma_wrapped_closure_forward_into_function_value_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; return apply((f, f), 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.1 = mov y.0\n") != NULL &&
+        strstr(actual_text, "call apply__fv_0_main__closure_f_") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "func main__closure_f_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: comma-wrapped closure forwarding into function-valued parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_assignment_result_closure_forward_into_function_value_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; return apply((f = f), 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.1 = mov y.0\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.1 = mov f$closurecap$0.1\n") != NULL &&
+        strstr(actual_text, "f$ftag.2 = mov 1\n") != NULL &&
+        strstr(actual_text, "call apply__fv_0_main__closure_f_") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "func main__closure_f_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: assignment-result closure forwarding into function-valued parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_comma_wrapped_closure_forward_into_function_value_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+    const char *scan = NULL;
+    size_t putint_count = 0u;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return apply(((putint(0), c), f), 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    scan = actual_text;
+    while (scan && (scan = strstr(scan, "call putint(0)\n")) != NULL) {
+        ++putint_count;
+        scan += strlen("call putint(0)\n");
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare putint(param0.0)\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call apply__fv_0_main__closure_f_") != NULL &&
+        putint_count == 1u &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "func main__closure_f_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic comma-wrapped closure forwarding into function-valued parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_assignment_result_closure_forward_into_function_value_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+    const char *scan = NULL;
+    size_t putint_count = 0u;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; int h(int)=f; if((putint(0), c)) h=g; return apply((f=h), 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    scan = actual_text;
+    while (scan && (scan = strstr(scan, "call putint(0)\n")) != NULL) {
+        ++putint_count;
+        scan += strlen("call putint(0)\n");
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare putint(param0.0)\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        putint_count == 1u &&
+        strstr(actual_text, "br c.0, bb.1, bb.2\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "f$ftag.4 = mov h$ftag.7\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call apply__fv_0_main__closure_f_") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "func main__closure_g_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic assignment-result closure forwarding into function-valued parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_comma_wrapped_zero_arg_closure_forward_into_function_value_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+    const char *scan = NULL;
+    size_t wrapped_putint_count = 0u;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply0(int f()){ return f(); }\n"
+            "int main(){ int c=1; int x=7; int y=9; int f()=closure [x] int () { return x; }; int g()=closure [y] int () { return y; }; int h()=f; if((putint(0), c)) h=g; return apply0((0, h)); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    scan = actual_text;
+    while (scan && (scan = strstr(scan, "tmp.0 = call putint(0)\n")) != NULL) {
+        ++wrapped_putint_count;
+        scan += strlen("tmp.0 = call putint(0)\n");
+    }
+
+    ok = actual_text &&
+        wrapped_putint_count == 1u &&
+        strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
+        strstr(actual_text, "h$ftag.7 = mov 2\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call apply0__fv_0_main__closure_f_") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.0()\n") != NULL &&
+        strstr(actual_text, "func main__closure_g_") != NULL &&
+        strstr(actual_text, "ret tmp.1\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic comma-wrapped zero-arg closure forwarding into function-valued parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_assignment_result_zero_arg_closure_forward_into_function_value_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+    const char *scan = NULL;
+    size_t wrapped_putint_count = 0u;
+
+    if (!lower_extension_source_to_ir_text(
+            "int apply0(int f()){ return f(); }\n"
+            "int main(){ int c=1; int x=7; int y=9; int f()=closure [x] int () { return x; }; int g()=closure [y] int () { return y; }; int h()=f; if((putint(0), c)) h=g; return apply0((f=h)); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    scan = actual_text;
+    while (scan && (scan = strstr(scan, "tmp.0 = call putint(0)\n")) != NULL) {
+        ++wrapped_putint_count;
+        scan += strlen("tmp.0 = call putint(0)\n");
+    }
+
+    ok = actual_text &&
+        wrapped_putint_count == 1u &&
+        strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov f$closurecap$0.3\n") != NULL &&
+        strstr(actual_text, "f$ftag.4 = mov h$ftag.7\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call apply0__fv_0_main__closure_f_") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.0()\n") != NULL &&
+        strstr(actual_text, "func main__closure_g_") != NULL &&
+        strstr(actual_text, "ret tmp.1\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic assignment-result zero-arg closure forwarding into function-valued parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_comma_wrapped_zero_arg_void_closure_forward_into_function_value_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+    const char *scan = NULL;
+    size_t wrapped_putint_count = 0u;
+
+    if (!lower_extension_source_to_ir_text(
+            "void apply0(void f()){ f(); }\n"
+            "int main(){ int c=1; int x=7; int y=9; void f()=closure [x] void () { putint(x); return; }; void g()=closure [y] void () { putint(y); return; }; void h()=f; if((putint(0), c)) h=g; return (apply0((0, h)), 0); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    scan = actual_text;
+    while (scan && (scan = strstr(scan, "tmp.0 = call putint(0)\n")) != NULL) {
+        ++wrapped_putint_count;
+        scan += strlen("tmp.0 = call putint(0)\n");
+    }
+
+    ok = actual_text &&
+        wrapped_putint_count == 1u &&
+        strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
+        strstr(actual_text, "h$ftag.7 = mov 2\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call apply0__fv_0_main__closure_f_") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.0()\n") != NULL &&
+        strstr(actual_text, "func main__closure_g_") != NULL &&
+        strstr(actual_text, "ret 0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic comma-wrapped zero-arg void closure forwarding into function-valued parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_assignment_result_zero_arg_void_closure_forward_into_function_value_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+    const char *scan = NULL;
+    size_t wrapped_putint_count = 0u;
+
+    if (!lower_extension_source_to_ir_text(
+            "void apply0(void f()){ f(); }\n"
+            "int main(){ int c=1; int x=7; int y=9; void f()=closure [x] void () { putint(x); return; }; void g()=closure [y] void () { putint(y); return; }; void h()=f; if((putint(0), c)) h=g; return (apply0((f=h)), 0); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    scan = actual_text;
+    while (scan && (scan = strstr(scan, "tmp.0 = call putint(0)\n")) != NULL) {
+        ++wrapped_putint_count;
+        scan += strlen("tmp.0 = call putint(0)\n");
+    }
+
+    ok = actual_text &&
+        wrapped_putint_count == 1u &&
+        strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
+        strstr(actual_text, "f$closurecap$0.3 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "f$ftag.4 = mov h$ftag.7\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call apply0__fv_0_main__closure_f_") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.0()\n") != NULL &&
+        strstr(actual_text, "func main__closure_g_") != NULL &&
+        strstr(actual_text, "ret 0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic assignment-result zero-arg void closure forwarding into function-valued parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_comma_wrapped_function_value_forwarding_into_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+    const char *scan = NULL;
+    size_t putint_count = 0u;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int main(){ int c=1; int g(int)=add1; if((putint(0), c)) g=add2; return apply((0, g), 40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    scan = actual_text;
+    while (scan && (scan = strstr(scan, "call putint(0)\n")) != NULL) {
+        ++putint_count;
+        scan += strlen("call putint(0)\n");
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare putint(param0.0)\n") != NULL &&
+        putint_count == 1u &&
+        strstr(actual_text, "tmp.1 = eq g$ftag.1, 1\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.3(40)\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic comma-wrapped function-value forwarding into parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_assignment_result_function_value_forwarding_into_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+    const char *scan = NULL;
+    size_t putint_count = 0u;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int main(){ int c=1; int f(int)=add1; int h(int)=add1; if((putint(0), c)) f=add2; return apply((h=f), 40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    scan = actual_text;
+    while (scan && (scan = strstr(scan, "call putint(0)\n")) != NULL) {
+        ++putint_count;
+        scan += strlen("call putint(0)\n");
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare putint(param0.0)\n") != NULL &&
+        putint_count == 1u &&
+        strstr(actual_text, "h$ftag.2 = mov f$ftag.1\n") != NULL &&
+        strstr(actual_text, "tmp.1 = eq h$ftag.2, 1\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.3(40)\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
+        strstr(actual_text, "func __fnwrap_add2(__env.0, x.1) {\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic assignment-result function-value forwarding into parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_comma_wrapped_zero_arg_function_value_forwarding_into_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+    const char *scan = NULL;
+    size_t putint_count = 0u;
+
+    if (!lower_extension_source_to_ir_text(
+            "int next1(){ return 1; }\n"
+            "int next2(){ return 2; }\n"
+            "int apply0(int f()){ return f(); }\n"
+            "int main(){ int c=1; int g()=next1; if((putint(0), c)) g=next2; return apply0((0, g)); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    scan = actual_text;
+    while (scan && (scan = strstr(scan, "call putint(0)\n")) != NULL) {
+        ++putint_count;
+        scan += strlen("call putint(0)\n");
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare putint(param0.0)\n") != NULL &&
+        putint_count == 1u &&
+        strstr(actual_text, "shape shape.0() -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_next1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.3()\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_next2, 0, shape.0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic comma-wrapped zero-arg function-value forwarding into parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_assignment_result_zero_arg_function_value_forwarding_into_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+    const char *scan = NULL;
+    size_t putint_count = 0u;
+
+    if (!lower_extension_source_to_ir_text(
+            "int next1(){ return 1; }\n"
+            "int next2(){ return 2; }\n"
+            "int apply0(int f()){ return f(); }\n"
+            "int main(){ int c=1; int f()=next1; int h()=next1; if((putint(0), c)) f=next2; return apply0((h=f)); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    scan = actual_text;
+    while (scan && (scan = strstr(scan, "call putint(0)\n")) != NULL) {
+        ++putint_count;
+        scan += strlen("call putint(0)\n");
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare putint(param0.0)\n") != NULL &&
+        putint_count == 1u &&
+        strstr(actual_text, "h$ftag.2 = mov f$ftag.1\n") != NULL &&
+        strstr(actual_text, "shape shape.0() -> int\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_next1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.3()\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_next2, 0, shape.0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic assignment-result zero-arg function-value forwarding into parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_comma_wrapped_zero_arg_void_function_value_forwarding_into_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+    const char *scan = NULL;
+    size_t putint_count = 0u;
+
+    if (!lower_extension_source_to_ir_text(
+            "void ping1(){ putint(1); }\n"
+            "void ping2(){ putint(2); }\n"
+            "void apply0(void f()){ f(); }\n"
+            "int main(){ int c=1; void g()=ping1; if((putint(0), c)) g=ping2; apply0((0, g)); return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    scan = actual_text;
+    while (scan && (scan = strstr(scan, "call putint(0)\n")) != NULL) {
+        ++putint_count;
+        scan += strlen("call putint(0)\n");
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare putint(param0.0)\n") != NULL &&
+        putint_count == 1u &&
+        strstr(actual_text, "shape shape.0() -> void\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_ping1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.3()\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_ping2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "ret 0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic comma-wrapped zero-arg void function-value forwarding into parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_assignment_result_zero_arg_void_function_value_forwarding_into_parameter_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+    const char *scan = NULL;
+    size_t putint_count = 0u;
+
+    if (!lower_extension_source_to_ir_text(
+            "void ping1(){ putint(1); }\n"
+            "void ping2(){ putint(2); }\n"
+            "void apply0(void f()){ f(); }\n"
+            "int main(){ int c=1; void f()=ping1; void h()=ping1; if((putint(0), c)) f=ping2; apply0((h=f)); return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    scan = actual_text;
+    while (scan && (scan = strstr(scan, "call putint(0)\n")) != NULL) {
+        ++putint_count;
+        scan += strlen("call putint(0)\n");
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare putint(param0.0)\n") != NULL &&
+        putint_count == 1u &&
+        strstr(actual_text, "h$ftag.2 = mov f$ftag.1\n") != NULL &&
+        strstr(actual_text, "shape shape.0() -> void\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_ping1, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "call_indirect tmp.3()\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_ping2, 0, shape.0\n") != NULL &&
+        strstr(actual_text, "ret 0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic assignment-result zero-arg void function-value forwarding into parameter mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_function_value_callee_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return (((putint(0), c) ? f : g))(40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "tmp.1 = ne c.0, 0\n") != NULL &&
+        strstr(actual_text, "tmp.2 = eq ") != NULL &&
+        strstr(actual_text, "tmp.3 = call add1(40)\n") != NULL &&
+        strstr(actual_text, "tmp.3 = call add2(40)\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary function value callee mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_closure_callee_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return (((putint(0), c) ? f : g))(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "mov f$closurecap$0.3\n") != NULL &&
+        strstr(actual_text, "mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "__ternary_callee_tag.7 = mov 1\n") != NULL &&
+        strstr(actual_text, "__ternary_callee_cap_0.8 = mov f$closurecap$0.3\n") != NULL &&
+        strstr(actual_text, "__ternary_callee_tag.7 = mov 2\n") != NULL &&
+        strstr(actual_text, "__ternary_callee_cap_0.8 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "shape shape.0(int) -> int\n") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make main__closure_g_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary closure callee mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_zero_arg_closure_callee_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int main(){ int c=1; int x=3; int y=5; int f()=closure [x] int () { return x; }; int g()=closure [y] int () { return y; }; return (((putint(0), c) ? f : g))(); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "__ternary_callee_tag.7 = mov 1\n") != NULL &&
+        strstr(actual_text, "__ternary_callee_cap_0.8 = mov f$closurecap$0.3\n") != NULL &&
+        strstr(actual_text, "__ternary_callee_tag.7 = mov 2\n") != NULL &&
+        strstr(actual_text, "__ternary_callee_cap_0.8 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "shape shape.0() -> int\n") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make main__closure_g_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary zero-arg closure callee mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_ternary_zero_arg_void_closure_callee_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int main(){ int c=1; int x=3; int y=5; void f()=closure [x] void () { putint(x); return; }; void g()=closure [y] void () { putint(y); return; }; (((putint(0), c) ? f : g))(); return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.0 = call putint(0)\n") != NULL &&
+        strstr(actual_text, "__ternary_callee_tag.7 = mov 1\n") != NULL &&
+        strstr(actual_text, "__ternary_callee_cap_0.8 = mov f$closurecap$0.3\n") != NULL &&
+        strstr(actual_text, "__ternary_callee_tag.7 = mov 2\n") != NULL &&
+        strstr(actual_text, "__ternary_callee_cap_0.8 = mov g$closurecap$0.5\n") != NULL &&
+        strstr(actual_text, "shape shape.0() -> void\n") != NULL &&
+        strstr(actual_text, "fn_make main__closure_f_") != NULL &&
+        strstr(actual_text, "call_indirect tmp.") != NULL &&
+        strstr(actual_text, "fn_make main__closure_g_") != NULL &&
+        strstr(actual_text, "ret 0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: ternary zero-arg void closure callee mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_ir_lowers_pair_copy_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -5045,6 +7448,54 @@ int main(void) {
         if (strstr("IR-FLOAT-LOCAL-CALL-CHAIN", filter) != NULL) {
             return test_ir_lowers_float_local_call_chain_transport_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-RETURNED-FUNCTION-VALUE-PARAM-IMMEDIATE-CALL", filter) != NULL) {
+            return test_ir_lowers_returned_function_value_parameter_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-RETURNED-CLOSURE-BACKED-FUNCTION-VALUE-PARAM-IMMEDIATE-CALL", filter) != NULL) {
+            return test_ir_accepts_returned_closure_backed_function_value_parameter_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-RETURNED-CLOSURE-BACKED-FUNCTION-VALUE-PARAM-BIND-AND-CALL", filter) != NULL) {
+            return test_ir_accepts_returned_closure_backed_function_value_parameter_bind_and_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-RETURNED-CLOSURE-BACKED-FUNCTION-VALUE-PARAM-IMMEDIATE-CALL", filter) != NULL) {
+            return test_ir_accepts_dynamic_returned_closure_backed_function_value_parameter_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-RETURNED-CLOSURE-BACKED-FUNCTION-VALUE-PARAM-BIND-AND-CALL", filter) != NULL) {
+            return test_ir_accepts_dynamic_returned_closure_backed_function_value_parameter_bind_and_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-RETURNED-SINGLE-CAPTURE-CLOSURE-FORWARD", filter) != NULL) {
+            return test_ir_accepts_returned_single_capture_closure_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-RETURNED-SINGLE-CAPTURE-CLOSURE-ALIAS-FORWARD", filter) != NULL) {
+            return test_ir_accepts_returned_single_capture_closure_alias_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-RETURNED-SINGLE-CAPTURE-ZERO-CLOSURE-FORWARD", filter) != NULL) {
+            return test_ir_accepts_returned_single_capture_zero_arg_closure_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-RETURNED-SINGLE-CAPTURE-ZERO-VOID-CLOSURE-FORWARD", filter) != NULL) {
+            return test_ir_accepts_returned_single_capture_zero_arg_void_closure_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-RETURNED-LOCAL-CLOSURE-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_returned_local_closure_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-TERNARY-ZERO-CLOSURE-CALLEE", filter) != NULL) {
+            return test_ir_accepts_ternary_zero_arg_closure_callee_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-TERNARY-ZERO-VOID-CLOSURE-CALLEE", filter) != NULL) {
+            return test_ir_accepts_ternary_zero_arg_void_closure_callee_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-LOCAL-ZERO-CLOSURE-CALLEE", filter) != NULL) {
+            return test_ir_accepts_dynamic_local_zero_arg_closure_direct_callee_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-LOCAL-ZERO-VOID-CLOSURE-CALLEE", filter) != NULL) {
+            return test_ir_accepts_dynamic_local_zero_arg_void_closure_direct_callee_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-RUNTIME-LOCAL-ZERO-CLOSURE-CALLEE", filter) != NULL) {
+            return test_ir_accepts_dynamic_runtime_local_zero_arg_closure_direct_callee_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-RUNTIME-LOCAL-ZERO-VOID-CLOSURE-CALLEE", filter) != NULL) {
+            return test_ir_accepts_dynamic_runtime_local_zero_arg_void_closure_direct_callee_under_extension() ? 0 : 1;
+        }
         if (strstr("IR-FLOAT-GLOBAL-LITERAL-RUNTIME-INIT", filter) != NULL) {
             return test_ir_lowers_float_literal_runtime_global_initializer_under_extension() ? 0 : 1;
         }
@@ -5315,11 +7766,100 @@ int main(void) {
         if (strstr("IR-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-ACCEPT", filter) != NULL) {
             return test_ir_accepts_unary_call_helper_wrapped_ternary_call_compare_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-DYNAMIC-FNVAL-RETURN-BIND", filter) != NULL) {
+            return test_ir_accepts_dynamic_noncapturing_function_value_return_bind_and_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-STATIC-TOPLEVEL-FNVAL-RETURN-BIND", filter) != NULL) {
+            return test_ir_accepts_static_noncapturing_top_level_function_value_return_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-FNVAL-RETURN-IMMEDIATE", filter) != NULL) {
+            return test_ir_accepts_dynamic_noncapturing_function_value_return_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-FNVAL-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_local_function_value_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-FNVAL-ZERO-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_local_zero_arg_function_value_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-FNVAL-ZERO-VOID-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_local_zero_arg_void_function_value_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-RETURNED-ZERO-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_returned_zero_arg_function_value_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-FNVAL-ASSIGN-DIRECT", filter) != NULL) {
+            return test_ir_accepts_dynamic_function_value_assignment_then_direct_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-FNVAL-ASSIGN-RETURN", filter) != NULL) {
+            return test_ir_accepts_dynamic_function_value_assignment_then_return_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-WRAPPED-FNVAL-RETURN", filter) != NULL) {
+            return test_ir_accepts_dynamic_wrapped_function_value_return_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-TERNARY-FNVAL-RETURN-IMMEDIATE", filter) != NULL) {
+            return test_ir_accepts_ternary_noncapturing_function_value_return_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-TERNARY-FNVAL-RETURN-BIND", filter) != NULL) {
+            return test_ir_accepts_ternary_noncapturing_function_value_return_bind_and_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-TERNARY-FNVAL-CALLEE", filter) != NULL) {
+            return test_ir_accepts_ternary_function_value_callee_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-COMMA-WRAPPED-CLOSURE-FORWARD", filter) != NULL) {
+            return test_ir_accepts_comma_wrapped_closure_forward_into_function_value_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-ASSIGNMENT-RESULT-CLOSURE-FORWARD", filter) != NULL) {
+            return test_ir_accepts_assignment_result_closure_forward_into_function_value_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-COMMA-WRAPPED-CLOSURE-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_comma_wrapped_closure_forward_into_function_value_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-ASSIGNMENT-RESULT-CLOSURE-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_assignment_result_closure_forward_into_function_value_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-COMMA-WRAPPED-ZERO-CLOSURE-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_comma_wrapped_zero_arg_closure_forward_into_function_value_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-ASSIGNMENT-RESULT-ZERO-CLOSURE-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_assignment_result_zero_arg_closure_forward_into_function_value_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-COMMA-WRAPPED-ZERO-VOID-CLOSURE-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_comma_wrapped_zero_arg_void_closure_forward_into_function_value_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-ASSIGNMENT-RESULT-ZERO-VOID-CLOSURE-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_assignment_result_zero_arg_void_closure_forward_into_function_value_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-COMMA-WRAPPED-FNVAL-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_comma_wrapped_function_value_forwarding_into_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-ASSIGNMENT-RESULT-FNVAL-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_assignment_result_function_value_forwarding_into_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-COMMA-WRAPPED-ZERO-FNVAL-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_comma_wrapped_zero_arg_function_value_forwarding_into_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-ASSIGNMENT-RESULT-ZERO-FNVAL-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_assignment_result_zero_arg_function_value_forwarding_into_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-COMMA-WRAPPED-ZERO-VOID-FNVAL-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_comma_wrapped_zero_arg_void_function_value_forwarding_into_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-DYNAMIC-ASSIGNMENT-RESULT-ZERO-VOID-FNVAL-FORWARD", filter) != NULL) {
+            return test_ir_accepts_dynamic_assignment_result_zero_arg_void_function_value_forwarding_into_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-TERNARY-CLOSURE-CALLEE", filter) != NULL) {
+            return test_ir_accepts_ternary_closure_callee_under_extension() ? 0 : 1;
+        }
     }
 
     ok &= test_ir_lowers_return_literal();
     ok &= test_ir_reports_runtime_global_dependency_cycle_chain_with_callee_segments();
     ok &= test_ir_lowers_return_parameter();
+    ok &= test_ir_lowers_pair_return_via_hidden_result_slots_under_extension();
+    ok &= test_ir_lowers_pair_call_init_via_hidden_result_slots_under_extension();
+    ok &= test_ir_lowers_pair_call_result_as_aggregate_call_argument_under_extension();
+    ok &= test_ir_lowers_pair_multi_hop_return_chain_under_extension();
+    ok &= test_ir_lowers_nested_struct_multi_hop_return_chain_under_extension();
     ok &= test_ir_lowers_arithmetic_expression();
     ok &= test_ir_lowers_bitwise_expression_family();
     ok &= test_ir_lowers_tilde_unary();
@@ -5505,6 +8045,21 @@ int main(void) {
     ok &= test_ir_accepts_chained_float_addition_initializer_to_float_under_extension();
     ok &= test_ir_accepts_nested_float_mul_div_initializer_to_float_under_extension();
     ok &= test_ir_accepts_float_ternary_value_call_argument_to_float_under_extension();
+    ok &= test_ir_lowers_returned_function_value_parameter_immediate_call_under_extension();
+    ok &= test_ir_accepts_returned_closure_backed_function_value_parameter_immediate_call_under_extension();
+    ok &= test_ir_accepts_returned_closure_backed_function_value_parameter_bind_and_call_under_extension();
+    ok &= test_ir_accepts_dynamic_returned_closure_backed_function_value_parameter_immediate_call_under_extension();
+    ok &= test_ir_accepts_dynamic_returned_closure_backed_function_value_parameter_bind_and_call_under_extension();
+    ok &= test_ir_accepts_returned_single_capture_closure_forwarding_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_returned_single_capture_closure_alias_forwarding_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_returned_single_capture_zero_arg_closure_forwarding_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_returned_single_capture_zero_arg_void_closure_forwarding_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_returned_local_closure_forwarding_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_multi_capture_closure_forwarding_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_returned_multi_capture_local_closure_bind_and_call_under_extension();
+    ok &= test_ir_accepts_dynamic_returned_multi_capture_local_closure_forwarding_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_ternary_zero_arg_closure_callee_under_extension();
+    ok &= test_ir_accepts_ternary_zero_arg_void_closure_callee_under_extension();
     ok &= test_ir_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension();
     ok &= test_ir_accepts_chained_float_addition_call_argument_to_float_under_extension();
     ok &= test_ir_accepts_nested_float_mul_div_call_argument_to_float_under_extension();
@@ -5536,6 +8091,50 @@ int main(void) {
     ok &= test_ir_rejects_unary_call_ternary_value_plus_int_under_extension();
     ok &= test_ir_rejects_float_ternary_value_plus_float_call_argument_under_extension();
     ok &= test_ir_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension();
+    ok &= test_ir_accepts_dynamic_noncapturing_function_value_return_bind_and_call_under_extension();
+    ok &= test_ir_accepts_static_noncapturing_top_level_function_value_return_under_extension();
+    ok &= test_ir_accepts_dynamic_noncapturing_function_value_return_immediate_call_under_extension();
+    ok &= test_ir_accepts_dynamic_local_function_value_forwarding_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_local_zero_arg_function_value_forwarding_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_local_zero_arg_void_function_value_forwarding_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_runtime_closure_local_forward_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_runtime_zero_arg_void_closure_local_forward_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_local_zero_arg_closure_direct_callee_under_extension();
+    ok &= test_ir_accepts_dynamic_local_zero_arg_void_closure_direct_callee_under_extension();
+    ok &= test_ir_accepts_dynamic_runtime_local_zero_arg_closure_direct_callee_under_extension();
+    ok &= test_ir_accepts_dynamic_runtime_local_zero_arg_void_closure_direct_callee_under_extension();
+    ok &= test_ir_accepts_dynamic_returned_zero_arg_function_value_forwarding_into_function_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_function_value_assignment_then_direct_call_under_extension();
+    ok &= test_ir_accepts_ternary_function_value_assignment_then_direct_call_under_extension();
+    ok &= test_ir_accepts_ternary_closure_assignment_then_direct_call_under_extension();
+    ok &= test_ir_accepts_ternary_function_value_local_initializer_under_extension();
+    ok &= test_ir_accepts_dynamic_function_value_assignment_then_return_under_extension();
+    ok &= test_ir_accepts_returned_closure_assignment_then_return_under_extension();
+    ok &= test_ir_accepts_wrapped_function_value_return_under_extension();
+    ok &= test_ir_accepts_dynamic_wrapped_function_value_return_under_extension();
+    ok &= test_ir_accepts_ternary_noncapturing_function_value_return_immediate_call_under_extension();
+    ok &= test_ir_accepts_ternary_noncapturing_function_value_return_bind_and_call_under_extension();
+    ok &= test_ir_accepts_ternary_closure_function_value_return_immediate_call_under_extension();
+    ok &= test_ir_accepts_ternary_closure_function_value_return_bind_and_call_under_extension();
+    ok &= test_ir_accepts_ternary_closure_local_initializer_under_extension();
+    ok &= test_ir_accepts_ternary_function_value_actual_argument_under_extension();
+    ok &= test_ir_accepts_ternary_closure_actual_argument_under_extension();
+    ok &= test_ir_accepts_comma_wrapped_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_ir_accepts_assignment_result_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_comma_wrapped_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_assignment_result_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_comma_wrapped_zero_arg_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_assignment_result_zero_arg_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_comma_wrapped_zero_arg_void_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_assignment_result_zero_arg_void_closure_forward_into_function_value_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_comma_wrapped_function_value_forwarding_into_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_assignment_result_function_value_forwarding_into_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_comma_wrapped_zero_arg_function_value_forwarding_into_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_assignment_result_zero_arg_function_value_forwarding_into_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_comma_wrapped_zero_arg_void_function_value_forwarding_into_parameter_under_extension();
+    ok &= test_ir_accepts_dynamic_assignment_result_zero_arg_void_function_value_forwarding_into_parameter_under_extension();
+    ok &= test_ir_accepts_ternary_function_value_callee_under_extension();
+    ok &= test_ir_accepts_ternary_closure_callee_under_extension();
     ok &= test_ir_rejects_float_ternary_value_under_extension();
     ok &= test_ir_lowers_pair_copy_under_extension();
     ok &= test_ir_lowers_struct_copy_under_extension();

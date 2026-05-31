@@ -77,6 +77,7 @@ static int machine_ir_value_ssa_program_needs_conservative_lowering(const ValueS
                     return 1;
                 }
                 switch (instruction->kind) {
+                case VALUE_SSA_INSTR_ADDR_FUNCTION:
                 case VALUE_SSA_INSTR_ADDR_LOCAL:
                 case VALUE_SSA_INSTR_ADDR_GLOBAL:
                 case VALUE_SSA_INSTR_LOAD_INDIRECT:

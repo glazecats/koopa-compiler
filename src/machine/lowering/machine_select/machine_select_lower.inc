@@ -214,6 +214,7 @@ static int machine_select_program_uses_indirect_memory(const MachineSelectProgra
 
             for (op_index = 0; op_index < block->op_count; ++op_index) {
                 switch (block->ops[op_index].kind) {
+                case MACHINE_SELECT_OP_ADDR_FUNCTION:
                 case MACHINE_SELECT_OP_ADDR_LOCAL:
                 case MACHINE_SELECT_OP_ADDR_GLOBAL:
                 case MACHINE_SELECT_OP_LOAD_INDIRECT:

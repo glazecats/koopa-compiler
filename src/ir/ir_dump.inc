@@ -120,6 +120,22 @@ static int ir_append_scalar_type_suffix(IrStringBuilder *builder, AstFunctionRet
     return 1;
 }
 
+static int ir_append_scalar_type_name(IrStringBuilder *builder, AstFunctionReturnType value_type) {
+    if (!builder) {
+        return 0;
+    }
+
+    switch (value_type) {
+    case AST_FUNCTION_RETURN_VOID:
+        return ir_append_string(builder, "void");
+    case AST_FUNCTION_RETURN_FLOAT:
+        return ir_append_string(builder, "float");
+    case AST_FUNCTION_RETURN_INT:
+    default:
+        return ir_append_string(builder, "int");
+    }
+}
+
 int ir_dump_program(const IrProgram *program, char **out_text) {
     IrStringBuilder builder;
     size_t i;
@@ -133,8 +149,36 @@ int ir_dump_program(const IrProgram *program, char **out_text) {
     builder.length = 0;
     builder.capacity = 0;
 
+    for (i = 0; i < program->function_shape_count; ++i) {
+        const IrFunctionShape *shape = &program->function_shapes[i];
+        size_t param_index;
+
+        if (!ir_append_format(&builder, "shape shape.%zu(", shape->id)) {
+            free(builder.data);
+            return 0;
+        }
+        for (param_index = 0; param_index < shape->parameter_count; ++param_index) {
+            if ((param_index > 0 && !ir_append_string(&builder, ", ")) ||
+                !ir_append_scalar_type_name(&builder, shape->parameter_types[param_index])) {
+                free(builder.data);
+                return 0;
+            }
+        }
+        if (!ir_append_string(&builder, ") -> ") ||
+            !ir_append_scalar_type_name(&builder, shape->return_type) ||
+            !ir_append_string(&builder, "\n")) {
+            free(builder.data);
+            return 0;
+        }
+    }
+
     for (i = 0; i < program->global_count; ++i) {
         const IrGlobal *global = &program->globals[i];
+
+        if (i == 0 && program->function_shape_count > 0 && !ir_append_string(&builder, "\n")) {
+            free(builder.data);
+            return 0;
+        }
 
         if (!ir_append_format(&builder,
                 "global %s.%zu",
@@ -167,7 +211,8 @@ int ir_dump_program(const IrProgram *program, char **out_text) {
         const IrFunction *function = &program->functions[i];
         size_t j;
 
-        if ((i > 0 || program->global_count > 0) && !ir_append_string(&builder, "\n")) {
+        if ((i > 0 || program->global_count > 0 || program->function_shape_count > 0) &&
+            !ir_append_string(&builder, "\n")) {
             free(builder.data);
             return 0;
         }
@@ -271,6 +316,76 @@ int ir_dump_program(const IrProgram *program, char **out_text) {
                                 program,
                                 function,
                                 instruction->as.call.args[arg_index])) {
+                            free(builder.data);
+                            return 0;
+                        }
+                    }
+                    if (!ir_append_string(&builder, ")\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                } else if (instruction->kind == IR_INSTR_FN_MAKE) {
+                    if (!ir_append_format(&builder,
+                            "fn_make %s, ",
+                            instruction->as.fn_make.callee_name
+                                ? instruction->as.fn_make.callee_name
+                                : "<anon>") ||
+                        !ir_append_value_name(&builder,
+                            program,
+                            function,
+                            instruction->as.fn_make.env) ||
+                        !ir_append_format(&builder, ", shape.%zu\n", instruction->as.fn_make.shape_id)) {
+                        free(builder.data);
+                        return 0;
+                    }
+                } else if (instruction->kind == IR_INSTR_FN_CODE) {
+                    if (!ir_append_string(&builder, "fn_code ") ||
+                        !ir_append_value_name(&builder,
+                            program,
+                            function,
+                            instruction->as.fn_project_operand) ||
+                        !ir_append_string(&builder, "\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                } else if (instruction->kind == IR_INSTR_FN_ENV) {
+                    if (!ir_append_string(&builder, "fn_env ") ||
+                        !ir_append_value_name(&builder,
+                            program,
+                            function,
+                            instruction->as.fn_project_operand) ||
+                        !ir_append_string(&builder, "\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                } else if (instruction->kind == IR_INSTR_FN_SHAPE) {
+                    if (!ir_append_string(&builder, "fn_shape ") ||
+                        !ir_append_value_name(&builder,
+                            program,
+                            function,
+                            instruction->as.fn_project_operand) ||
+                        !ir_append_string(&builder, "\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                } else if (instruction->kind == IR_INSTR_CALL_INDIRECT) {
+                    size_t arg_index;
+
+                    if (!ir_append_string(&builder, "call_indirect ") ||
+                        !ir_append_value_name(&builder,
+                            program,
+                            function,
+                            instruction->as.call_indirect.callee) ||
+                        !ir_append_string(&builder, "(")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    for (arg_index = 0; arg_index < instruction->as.call_indirect.arg_count; ++arg_index) {
+                        if ((arg_index > 0 && !ir_append_string(&builder, ", ")) ||
+                            !ir_append_value_name(&builder,
+                                program,
+                                function,
+                                instruction->as.call_indirect.args[arg_index])) {
                             free(builder.data);
                             return 0;
                         }

@@ -4,6 +4,11 @@
 #include "ir.c"
 #else
 
+static const IrInstruction *ir_find_temp_definition_instruction(const IrFunction *function,
+    size_t temp_id);
+static const IrInstruction *ir_resolve_callable_object_producer_instruction(const IrFunction *function,
+    size_t temp_id);
+
 static int ir_verify_value_ref(const IrProgram *program,
     const IrFunction *function,
     IrValueRef value,
@@ -176,6 +181,91 @@ static const IrFunction *ir_find_program_function(const IrProgram *program, cons
     }
 
     return NULL;
+}
+
+static const IrFunctionShape *ir_find_program_function_shape(const IrProgram *program, size_t shape_id) {
+    if (!program || shape_id >= program->function_shape_count) {
+        return NULL;
+    }
+
+    return &program->function_shapes[shape_id];
+}
+
+static int ir_verify_function_shape_table(const IrProgram *program, IrError *error) {
+    size_t i;
+
+    if (!program) {
+        ir_set_error(error, 0, 0, "IR-VERIFY-001: invalid verifier contract");
+        return 0;
+    }
+    if (program->function_shape_count > program->function_shape_capacity) {
+        ir_set_error(error,
+            0,
+            0,
+            "IR-VERIFY-068: program has function_shape_count=%zu exceeding function_shape_capacity=%zu",
+            program->function_shape_count,
+            program->function_shape_capacity);
+        return 0;
+    }
+    if (program->function_shape_count > 0 && !program->function_shapes) {
+        ir_set_error(error,
+            0,
+            0,
+            "IR-VERIFY-069: program has function_shape_count=%zu but function shape table is NULL",
+            program->function_shape_count);
+        return 0;
+    }
+
+    for (i = 0; i < program->function_shape_count; ++i) {
+        const IrFunctionShape *shape = &program->function_shapes[i];
+
+        if (shape->id != i) {
+            ir_set_error(error,
+                0,
+                0,
+                "IR-VERIFY-070: function shape slot %zu stores mismatched id %zu",
+                i,
+                shape->id);
+            return 0;
+        }
+        if (shape->parameter_count > 0 && !shape->parameter_types) {
+            ir_set_error(error,
+                0,
+                0,
+                "IR-VERIFY-071: shape.%zu has parameter_count=%zu but parameter table is NULL",
+                shape->id,
+                shape->parameter_count);
+            return 0;
+        }
+        if (shape->return_type != AST_FUNCTION_RETURN_VOID &&
+            shape->return_type != AST_FUNCTION_RETURN_INT &&
+            shape->return_type != AST_FUNCTION_RETURN_FLOAT) {
+            ir_set_error(error,
+                0,
+                0,
+                "IR-VERIFY-072: shape.%zu uses unknown return type %d",
+                shape->id,
+                (int)shape->return_type);
+            return 0;
+        }
+        for (size_t param_index = 0; param_index < shape->parameter_count; ++param_index) {
+            AstFunctionReturnType parameter_type = shape->parameter_types[param_index];
+
+            if (parameter_type != AST_FUNCTION_RETURN_INT &&
+                parameter_type != AST_FUNCTION_RETURN_FLOAT) {
+                ir_set_error(error,
+                    0,
+                    0,
+                    "IR-VERIFY-073: shape.%zu parameter %zu uses unsupported scalar type %d",
+                    shape->id,
+                    param_index,
+                    (int)parameter_type);
+                return 0;
+            }
+        }
+    }
+
+    return 1;
 }
 
 static int ir_instruction_is_zero_arg_call_to(const IrInstruction *instruction, const char *callee_name) {
@@ -842,6 +932,68 @@ static int ir_verify_temp_availability(const IrProgram *program,
                     }
                 }
                 break;
+            case IR_INSTR_FN_MAKE:
+                if (!ir_verify_temp_use_is_available(instruction->as.fn_make.env,
+                        available,
+                        temp_count,
+                        block->id,
+                        "fn_make env",
+                        error)) {
+                    free(block_defs);
+                    free(in_sets);
+                    free(out_sets);
+                    free(edges);
+                    free(available);
+                    return 0;
+                }
+                break;
+            case IR_INSTR_FN_CODE:
+            case IR_INSTR_FN_ENV:
+            case IR_INSTR_FN_SHAPE:
+                if (!ir_verify_temp_use_is_available(instruction->as.fn_project_operand,
+                        available,
+                        temp_count,
+                        block->id,
+                        "callable projection operand",
+                        error)) {
+                    free(block_defs);
+                    free(in_sets);
+                    free(out_sets);
+                    free(edges);
+                    free(available);
+                    return 0;
+                }
+                break;
+            case IR_INSTR_CALL_INDIRECT:
+                if (!ir_verify_temp_use_is_available(instruction->as.call_indirect.callee,
+                        available,
+                        temp_count,
+                        block->id,
+                        "call_indirect callee",
+                        error)) {
+                    free(block_defs);
+                    free(in_sets);
+                    free(out_sets);
+                    free(edges);
+                    free(available);
+                    return 0;
+                }
+                for (size_t arg_index = 0; arg_index < instruction->as.call_indirect.arg_count; ++arg_index) {
+                    if (!ir_verify_temp_use_is_available(instruction->as.call_indirect.args[arg_index],
+                            available,
+                            temp_count,
+                            block->id,
+                            "call_indirect argument",
+                            error)) {
+                        free(block_defs);
+                        free(in_sets);
+                        free(out_sets);
+                        free(edges);
+                        free(available);
+                        return 0;
+                    }
+                }
+                break;
             case IR_INSTR_ADDR_LOCAL:
                 if (instruction->result.kind != IR_VALUE_TEMP ||
                     instruction->as.addr_local_id >= function->local_count) {
@@ -1350,11 +1502,261 @@ static int ir_verify_function(const IrProgram *program, const IrFunction *functi
                             instruction->as.call.args[arg_index],
                             "call argument",
                             error)) {
+                        if (error && error->message[0] != '\0') {
+                            char prior[sizeof(error->message)];
+                            snprintf(prior, sizeof(prior), "%s", error->message);
+                            ir_set_error(error,
+                                0,
+                                0,
+                                "IR-VERIFY-002: bb.%zu instruction %zu arg %zu invalid in '%s': %s",
+                                block->id,
+                                j,
+                                arg_index,
+                                function->name ? function->name : "<anon>",
+                                prior);
+                        }
                         return 0;
                     }
                 }
                 break;
                 }
+            case IR_INSTR_FN_MAKE:
+                {
+                    const IrFunction *callee;
+                    const IrFunctionShape *shape;
+
+                    if (instruction->result.kind != IR_VALUE_TEMP) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-074: bb.%zu instruction %zu fn_make result must be a temporary",
+                            block->id,
+                            j);
+                        return 0;
+                    }
+                    if (!instruction->as.fn_make.callee_name ||
+                        instruction->as.fn_make.callee_name[0] == '\0') {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-075: bb.%zu instruction %zu has an empty fn_make callee",
+                            block->id,
+                            j);
+                        return 0;
+                    }
+                    if (!ir_verify_value_ref(program,
+                            function,
+                            instruction->as.fn_make.env,
+                            "fn_make env",
+                            error)) {
+                        return 0;
+                    }
+                    shape = ir_find_program_function_shape(program, instruction->as.fn_make.shape_id);
+                    if (!shape) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-076: bb.%zu instruction %zu references missing shape.%zu",
+                            block->id,
+                            j,
+                            instruction->as.fn_make.shape_id);
+                        return 0;
+                    }
+                    callee = ir_find_program_function(program, instruction->as.fn_make.callee_name);
+                    if (!callee) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-077: bb.%zu instruction %zu fn_make references unknown function '%s'",
+                            block->id,
+                            j,
+                            instruction->as.fn_make.callee_name);
+                        return 0;
+                    }
+                    if (callee->parameter_count != shape->parameter_count + 1u) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-078: bb.%zu instruction %zu fn_make target '%s' expects %zu params but shape.%zu implies hidden-env + %zu args",
+                            block->id,
+                            j,
+                            instruction->as.fn_make.callee_name,
+                            callee->parameter_count,
+                            shape->id,
+                            shape->parameter_count);
+                        return 0;
+                    }
+                    if (callee->return_type != shape->return_type) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-079: bb.%zu instruction %zu fn_make target '%s' return type mismatches shape.%zu",
+                            block->id,
+                            j,
+                            instruction->as.fn_make.callee_name,
+                            shape->id);
+                        return 0;
+                    }
+                    for (size_t arg_index = 0; arg_index < shape->parameter_count; ++arg_index) {
+                        const IrLocal *callee_param = ir_function_get_local(callee, arg_index + 1u);
+                        if (!callee_param ||
+                            callee_param->value_type != shape->parameter_types[arg_index]) {
+                            ir_set_error(error,
+                                0,
+                                0,
+                                "IR-VERIFY-080: bb.%zu instruction %zu fn_make target '%s' parameter %zu mismatches shape.%zu",
+                                block->id,
+                                j,
+                                instruction->as.fn_make.callee_name,
+                                arg_index,
+                                shape->id);
+                            return 0;
+                        }
+                    }
+                }
+                break;
+            case IR_INSTR_FN_CODE:
+            case IR_INSTR_FN_ENV:
+            case IR_INSTR_FN_SHAPE:
+                {
+                    const IrInstruction *producer;
+
+                    if (instruction->result.kind != IR_VALUE_TEMP) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-081: bb.%zu instruction %zu callable projection result must be a temporary",
+                            block->id,
+                            j);
+                        return 0;
+                    }
+                    if (!ir_verify_value_ref(program,
+                            function,
+                            instruction->as.fn_project_operand,
+                            "callable projection operand",
+                            error)) {
+                        return 0;
+                    }
+                    if (instruction->as.fn_project_operand.kind != IR_VALUE_TEMP) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-089: bb.%zu instruction %zu callable projection operand must be a temporary",
+                            block->id,
+                            j);
+                        return 0;
+                    }
+                    producer = ir_resolve_callable_object_producer_instruction(
+                        function,
+                        instruction->as.fn_project_operand.id);
+                    if (!producer || producer->kind != IR_INSTR_FN_MAKE) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-090: bb.%zu instruction %zu callable projection operand must resolve to fn_make",
+                            block->id,
+                            j);
+                        return 0;
+                    }
+                    break;
+                }
+            case IR_INSTR_CALL_INDIRECT:
+                {
+                    const IrInstruction *producer = NULL;
+                    const IrFunctionShape *shape;
+
+                    if (instruction->result.kind != IR_VALUE_TEMP) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-082: bb.%zu instruction %zu call_indirect result must be a temporary",
+                            block->id,
+                            j);
+                        return 0;
+                    }
+                    if (!ir_verify_value_ref(program,
+                            function,
+                            instruction->as.call_indirect.callee,
+                            "call_indirect callee",
+                            error)) {
+                        return 0;
+                    }
+                    if (instruction->as.call_indirect.arg_count > 0 &&
+                        !instruction->as.call_indirect.args) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-083: bb.%zu instruction %zu has arg_count=%zu but call_indirect args payload is NULL",
+                            block->id,
+                            j,
+                            instruction->as.call_indirect.arg_count);
+                        return 0;
+                    }
+                    if (instruction->as.call_indirect.arg_count == 0 &&
+                        instruction->as.call_indirect.args) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-084: bb.%zu instruction %zu has arg_count=0 but call_indirect args payload is non-NULL",
+                            block->id,
+                            j);
+                        return 0;
+                    }
+                    for (size_t arg_index = 0; arg_index < instruction->as.call_indirect.arg_count; ++arg_index) {
+                        if (!ir_verify_value_ref(program,
+                                function,
+                                instruction->as.call_indirect.args[arg_index],
+                                "call_indirect argument",
+                                error)) {
+                            return 0;
+                        }
+                    }
+                    if (instruction->as.call_indirect.callee.kind != IR_VALUE_TEMP) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-085: bb.%zu instruction %zu call_indirect callee must be a temporary",
+                            block->id,
+                            j);
+                        return 0;
+                    }
+                    producer = ir_resolve_callable_object_producer_instruction(
+                        function,
+                        instruction->as.call_indirect.callee.id);
+                    if (!producer || producer->kind != IR_INSTR_FN_MAKE) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-086: bb.%zu instruction %zu call_indirect callee must resolve to fn_make",
+                            block->id,
+                            j);
+                        return 0;
+                    }
+                    shape = ir_find_program_function_shape(program, producer->as.fn_make.shape_id);
+                    if (!shape) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-087: bb.%zu instruction %zu call_indirect callee references missing shape.%zu",
+                            block->id,
+                            j,
+                            producer->as.fn_make.shape_id);
+                        return 0;
+                    }
+                    if (instruction->as.call_indirect.arg_count != shape->parameter_count) {
+                        ir_set_error(error,
+                            0,
+                            0,
+                            "IR-VERIFY-088: bb.%zu instruction %zu call_indirect passes %zu args but shape.%zu expects %zu",
+                            block->id,
+                            j,
+                            instruction->as.call_indirect.arg_count,
+                            shape->id,
+                            shape->parameter_count);
+                        return 0;
+                    }
+                }
+                break;
             case IR_INSTR_ADDR_LOCAL:
                 if (instruction->result.kind != IR_VALUE_TEMP ||
                     instruction->as.addr_local_id >= function->local_count) {
@@ -1453,6 +1855,10 @@ int ir_verify_program(const IrProgram *program, IrError *error) {
             program->function_capacity);
         return 0;
     }
+
+    if (!ir_verify_function_shape_table(program, error)) {
+        return 0;
+    }
     if (program->function_count > 0 && !program->functions) {
         ir_set_error(error,
             0,
@@ -1538,6 +1944,48 @@ int ir_verify_program(const IrProgram *program, IrError *error) {
     }
 
     return 1;
+}
+
+static const IrInstruction *ir_find_temp_definition_instruction(const IrFunction *function,
+    size_t temp_id) {
+    size_t block_index;
+
+    if (!function || !function->blocks) {
+        return NULL;
+    }
+
+    for (block_index = 0u; block_index < function->block_count; ++block_index) {
+        const IrBasicBlock *block = &function->blocks[block_index];
+        size_t instruction_index;
+
+        if (!block->instructions) {
+            continue;
+        }
+        for (instruction_index = 0u;
+             instruction_index < block->instruction_count;
+             ++instruction_index) {
+            const IrInstruction *instruction = &block->instructions[instruction_index];
+
+            if (instruction->result.kind == IR_VALUE_TEMP &&
+                instruction->result.id == temp_id) {
+                return instruction;
+            }
+        }
+    }
+
+    return NULL;
+}
+
+static const IrInstruction *ir_resolve_callable_object_producer_instruction(const IrFunction *function,
+    size_t temp_id) {
+    const IrInstruction *producer = ir_find_temp_definition_instruction(function, temp_id);
+
+    while (producer && producer->kind == IR_INSTR_MOV &&
+           producer->as.mov_value.kind == IR_VALUE_TEMP) {
+        producer = ir_find_temp_definition_instruction(function, producer->as.mov_value.id);
+    }
+
+    return producer;
 }
 
 #endif

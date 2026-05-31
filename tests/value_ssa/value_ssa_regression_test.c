@@ -30,9 +30,18 @@ static int __attribute__((unused)) value_ssa_reg_and(int ok, const char *case_id
 static int build_value_ssa_perf_from_extension_source_text(const char *source,
     ValueSsaProgram *out_program,
     ValueSsaError *out_error);
+static int build_value_ssa_translation_only_from_extension_source_text(const char *source,
+    ValueSsaProgram *out_program,
+    ValueSsaError *out_error);
 static int build_value_ssa_default_from_extension_source_text(const char *source,
     ValueSsaProgram *out_program,
     ValueSsaError *out_error);
+static int build_lower_ir_returned_function_value_parameter_bind_and_call_program(
+    LowerIrProgram *program,
+    LowerIrError *error);
+static int build_lower_ir_dynamic_returned_function_value_parameter_immediate_call_program(
+    LowerIrProgram *program,
+    LowerIrError *error);
 
 static int build_sample_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaGlobal *global = NULL;
@@ -227,6 +236,73 @@ static int build_lower_ir_diamond_program(LowerIrProgram *program, LowerIrError 
     }
 
     return 1;
+}
+
+static int build_lower_ir_from_extension_source_text(const char *source,
+    LowerIrProgram *program,
+    LowerIrError *error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    SemanticOptions sema_options;
+    IrProgram ir_program;
+    IrError ir_err;
+
+    if (!source || !program) {
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(program);
+    memset(&parse_err, 0, sizeof(parse_err));
+    memset(&sema_err, 0, sizeof(sema_err));
+    memset(&sema_options, 0, sizeof(sema_options));
+    memset(&ir_err, 0, sizeof(ir_err));
+    sema_options.allow_extension_features = 1;
+    sema_options.skip_all_paths_return_check = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_err) ||
+        !semantic_analyze_program_with_options(&ast_program, &sema_options, &sema_err) ||
+        !ir_lower_program(&ast_program, NULL, &ir_program, &ir_err) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, program, error)) {
+        lexer_free_tokens(&tokens);
+        ast_program_free(&ast_program);
+        ir_program_free(&ir_program);
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&ast_program);
+    ir_program_free(&ir_program);
+    return 1;
+}
+
+static int build_lower_ir_returned_function_value_parameter_bind_and_call_program(
+    LowerIrProgram *program,
+    LowerIrError *error) {
+    return build_lower_ir_from_extension_source_text(
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int g(int)=id(add1); return g(41); }\n",
+        program,
+        error);
+}
+
+static int build_lower_ir_dynamic_returned_function_value_parameter_immediate_call_program(
+    LowerIrProgram *program,
+    LowerIrError *error) {
+    return build_lower_ir_from_extension_source_text(
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; if(c) f=add2; return id(f)(40); }\n",
+        program,
+        error);
 }
 
 static int build_lower_ir_diamond_store_indirect_phi_program(LowerIrProgram *program, LowerIrError *error) {
@@ -17578,6 +17654,839 @@ static int test_value_ssa_default_pipeline_preserves_nested_float_mul_div_call_a
     return ok;
 }
 
+static int test_value_ssa_default_pipeline_preserves_nested_struct_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Outer { struct Point p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; putint(o.p.x); putint(o.p.y); return o.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-FIELD-LOOKUP-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-FIELD-LOOKUP-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-FIELD-LOOKUP-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "call putint(1)") ||
+        !strstr(actual_text, "call putint(2)") ||
+        !strstr(actual_text, "ret 3")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-FIELD-LOOKUP-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_pair_parameter_under_extension(void) {
+    static const char *source =
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int main(){ pair p={1,2}; return sum(p); }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_default_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-PARAM-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-PARAM-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-PARAM-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func sum(p.0, p.1) {\n") ||
+        !strstr(actual_text, "load_local p.0") ||
+        !strstr(actual_text, "load_local p.1") ||
+        !strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "store_local p$first.0, 1") ||
+        !strstr(actual_text, "store_local p$second.1, 2") ||
+        !strstr(actual_text, "add ssa.") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-PARAM-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_translation_only_preserves_pair_return_copy_init_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ pair q = mk(); return q.second; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_translation_only_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-RETURN-COPY-INIT-TRANSLATION setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-RETURN-COPY-INIT-TRANSLATION verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-RETURN-COPY-INIT-TRANSLATION dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func mk(__ret0.0, __ret1.1) {\n") ||
+        !strstr(actual_text, "store_local p$first.2, 1") ||
+        !strstr(actual_text, "store_local p$second.3, 2") ||
+        !strstr(actual_text, "store_indirect ssa.0, ssa.1") ||
+        !strstr(actual_text, "store_indirect ssa.2, ssa.3") ||
+        !strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "ssa.0 = addr_local q$first.0") ||
+        !strstr(actual_text, "ssa.1 = addr_local q$second.1") ||
+        !strstr(actual_text, "call mk(ssa.0, ssa.1)") ||
+        !strstr(actual_text, "ret ssa.3")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-RETURN-COPY-INIT-TRANSLATION dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_pair_call_result_as_aggregate_call_argument_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int main(){ return sum(mk()); }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_default_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-CALL-RESULT-CALLARG-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-CALL-RESULT-CALLARG-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-CALL-RESULT-CALLARG-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func mk(__ret0.0, __ret1.1) {\n") ||
+        !strstr(actual_text, "func sum(p.0, p.1) {\n") ||
+        !strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "ssa.0 = addr_local __aggarg_tmp_0.0") ||
+        !strstr(actual_text, "ssa.1 = addr_local __aggarg_tmp_1.1") ||
+        !strstr(actual_text, "store_indirect ssa.0, 1") ||
+        !strstr(actual_text, "store_indirect ssa.1, 2") ||
+        !strstr(actual_text, "ssa.5 = add ssa.2, ssa.3") ||
+        !strstr(actual_text, "ret ssa.5")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-CALL-RESULT-CALLARG-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_pair_multi_hop_return_chain_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair id(pair p){ return p; }\n"
+        "pair wrap(){ return id(mk()); }\n"
+        "int main(){ pair q=wrap(); return q.second; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_default_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-MULTIHOP-RET-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-MULTIHOP-RET-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-MULTIHOP-RET-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func mk(__ret0.0, __ret1.1) {\n") ||
+        !strstr(actual_text, "func id(__ret0.0, __ret1.1, p.2, p.3) {\n") ||
+        !strstr(actual_text, "func wrap(__ret0.0, __ret1.1) {\n") ||
+        !strstr(actual_text, "ssa.0 = addr_local __aggarg_tmp_2.2") ||
+        !strstr(actual_text, "ssa.1 = addr_local __aggarg_tmp_3.3") ||
+        !strstr(actual_text, "store_indirect ssa.0, 1") ||
+        !strstr(actual_text, "store_indirect ssa.1, 2") ||
+        !strstr(actual_text, "store_indirect ssa.2, ssa.4") ||
+        !strstr(actual_text, "store_indirect ssa.3, ssa.5") ||
+        !strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "call wrap(ssa.0, ssa.1)") ||
+        !strstr(actual_text, "ret ssa.2")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-MULTIHOP-RET-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_nested_struct_multi_hop_return_chain_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "struct Mid id(struct Mid m){ return m; }\n"
+        "struct Mid wrap(){ return id(mk()); }\n"
+        "int main(){ struct Mid q=wrap(); return q.p.second + q.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_default_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-MULTIHOP-RET-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-MULTIHOP-RET-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-MULTIHOP-RET-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func mk(__ret0.0, __ret1.1, __ret2.2) {\n") ||
+        !strstr(actual_text, "func id(__ret0.0, __ret1.1, __ret2.2, m.3, m.4, m.5) {\n") ||
+        !strstr(actual_text, "func wrap(__ret0.0, __ret1.1, __ret2.2) {\n") ||
+        !strstr(actual_text, "ssa.0 = addr_local __aggarg_tmp_3.3") ||
+        !strstr(actual_text, "ssa.1 = addr_local __aggarg_tmp_4.4") ||
+        !strstr(actual_text, "ssa.2 = addr_local __aggarg_tmp_5.5") ||
+        !strstr(actual_text, "call mk(ssa.0, ssa.1, ssa.2)") ||
+        !strstr(actual_text, "call id(ssa.3, ssa.4, ssa.5, ssa.6, ssa.7, ssa.8)") ||
+        !strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "call wrap(ssa.0, ssa.1, ssa.2)") ||
+        !strstr(actual_text, "ssa.7 = add ssa.3, ssa.5") ||
+        !strstr(actual_text, "ret ssa.7")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-MULTIHOP-RET-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_translation_only_preserves_nested_struct_return_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "int main(){ struct Mid q=mk(); return q.p.second + q.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_translation_only_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-RETURN-TRANSLATION setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-RETURN-TRANSLATION verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-RETURN-TRANSLATION dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func mk(__ret0.0, __ret1.1, __ret2.2) {\n") ||
+        !strstr(actual_text, "store_local m$p$0.3, 1") ||
+        !strstr(actual_text, "store_local m$p$1.4, 2") ||
+        !strstr(actual_text, "store_local m$z.5, 3") ||
+        !strstr(actual_text, "store_indirect ssa.0, ssa.1") ||
+        !strstr(actual_text, "store_indirect ssa.2, ssa.3") ||
+        !strstr(actual_text, "store_indirect ssa.4, ssa.5") ||
+        !strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "ssa.0 = addr_local q$p$0.0") ||
+        !strstr(actual_text, "ssa.1 = addr_local q$p$1.1") ||
+        !strstr(actual_text, "ssa.2 = addr_local q$z.2") ||
+        !strstr(actual_text, "call mk(ssa.0, ssa.1, ssa.2)") ||
+        !strstr(actual_text, "ssa.7 = add ssa.4, ssa.6") ||
+        !strstr(actual_text, "ret ssa.7")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-RETURN-TRANSLATION dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_nested_struct_parameter_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "int sum(struct Mid m){ return m.p.first + m.p.second + m.z; }\n"
+        "int main(){ struct Mid m={{1,2},3}; return sum(m); }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_default_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-PARAM-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-PARAM-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-PARAM-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func sum(m.0, m.1, m.2) {\n") ||
+        !strstr(actual_text, "load_local m.0") ||
+        !strstr(actual_text, "load_local m.1") ||
+        !strstr(actual_text, "load_local m.2") ||
+        !strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "store_local m$p$0.0, 1") ||
+        !strstr(actual_text, "store_local m$p$1.1, 2") ||
+        !strstr(actual_text, "store_local m$z.2, 3") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-PARAM-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_nested_pair_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Outer { pair p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; pair q=o.p; putint(q.first); return q.second; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-PAIR-COPY-INIT-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-PAIR-COPY-INIT-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-PAIR-COPY-INIT-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "call putint(1)") ||
+        !strstr(actual_text, "ret 2")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-PAIR-COPY-INIT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_nested_struct_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Outer { struct Point p; int z; };\n"
+        "int main(){ struct Point q={4,5}; struct Outer o={{1,2},3}; q=o.p; putint(q.x); return q.y; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-ASSIGN-MEMBER-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-ASSIGN-MEMBER-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-ASSIGN-MEMBER-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "call putint(1)") ||
+        !strstr(actual_text, "ret 2")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-ASSIGN-MEMBER-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_deep_nested_struct_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; struct Mid m=o.m; putint(m.p.x); return m.p.y + m.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-COPY-INIT-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-COPY-INIT-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-COPY-INIT-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "call putint(1)") ||
+        !strstr(actual_text, "ssa.0 = add 2, 3") ||
+        !strstr(actual_text, "ret ssa.0")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-COPY-INIT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_deep_nested_pair_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; struct Mid m=o.m; putint(m.p.first); return m.p.second + m.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-COPY-INIT-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-COPY-INIT-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-COPY-INIT-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "call putint(1)") ||
+        !strstr(actual_text, "ssa.0 = add 2, 3") ||
+        !strstr(actual_text, "ret ssa.0")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-COPY-INIT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_deep_nested_struct_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; putint(o.m.p.x); putint(o.m.p.y); return o.m.z + o.w; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-FIELD-LOOKUP-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-FIELD-LOOKUP-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-FIELD-LOOKUP-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "call putint(1)") ||
+        !strstr(actual_text, "call putint(2)") ||
+        !strstr(actual_text, "ssa.0 = add 3, 4") ||
+        !strstr(actual_text, "ret ssa.0")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-FIELD-LOOKUP-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_deep_nested_pair_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; putint(o.m.p.first); putint(o.m.p.second); return o.m.z + o.w; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-FIELD-LOOKUP-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-FIELD-LOOKUP-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-FIELD-LOOKUP-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "call putint(1)") ||
+        !strstr(actual_text, "call putint(2)") ||
+        !strstr(actual_text, "ssa.0 = add 3, 4") ||
+        !strstr(actual_text, "ret ssa.0")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-FIELD-LOOKUP-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_deep_nested_struct_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Mid m={{7,8},9}; struct Outer o={{{1,2},3},4}; m=o.m; putint(m.p.x); return m.p.y + m.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-ASSIGN-MEMBER-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-ASSIGN-MEMBER-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-ASSIGN-MEMBER-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "call putint(1)") ||
+        !strstr(actual_text, "ssa.0 = add 2, 3") ||
+        !strstr(actual_text, "ret ssa.0")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-ASSIGN-MEMBER-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_deep_nested_pair_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Mid m={{7,8},9}; struct Outer o={{{1,2},3},4}; m=o.m; putint(m.p.first); return m.p.second + m.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-ASSIGN-MEMBER-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-ASSIGN-MEMBER-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-ASSIGN-MEMBER-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "call putint(1)") ||
+        !strstr(actual_text, "ssa.0 = add 2, 3") ||
+        !strstr(actual_text, "ret ssa.0")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-ASSIGN-MEMBER-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_value_ssa_default_pipeline_preserves_explicit_int_from_float_ternary_bridge(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -18383,6 +19292,719 @@ static int test_value_ssa_rejects_negative_float_call_int_condition_under_extens
     return ok;
 }
 
+static int test_value_ssa_rejects_deep_nested_struct_copy_init_mismatch_under_extension(void) {
+    static const char *source =
+        "struct P { int x; int y; };\n"
+        "struct Q { int x; int y; };\n"
+        "struct Mid { struct P p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; struct Q q=o.m.p; return q.x; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-AGG-006") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-COPY-INIT-MISMATCH-REJECT expected SEMA-AGG-006, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_pair_call_result_direct_member_access_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ return mk().second; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-AGG-003") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-CALL-RESULT-MEMBER-REJECT expected SEMA-AGG-003, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_pair_call_result_as_scalar_call_argument_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int sink(int x){ return x; }\n"
+        "int main(){ return sink(mk()); }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-003") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-CALL-RESULT-SCALAR-CALLARG-REJECT expected SEMA-TYPE-003, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_pair_call_result_scalar_initializer_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ int x = mk(); return x; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-004") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-CALL-RESULT-SCALAR-INIT-REJECT expected SEMA-TYPE-004, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_pair_call_result_scalar_assignment_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ int x = 0; x = mk(); return x; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-006") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-CALL-RESULT-SCALAR-ASSIGN-REJECT expected SEMA-TYPE-006, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_nested_struct_multi_hop_return_chain_scalar_initializer_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "struct Mid id(struct Mid m){ return m; }\n"
+        "struct Mid wrap(){ return id(mk()); }\n"
+        "int main(){ int x = wrap(); return x; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-004") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-MULTIHOP-SCALAR-INIT-REJECT expected SEMA-TYPE-004, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_pair_multi_hop_return_chain_control_condition_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair wrap(){ return mk(); }\n"
+        "int main(){ if(wrap()) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-AGG-004") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-PAIR-MULTIHOP-CONTROL-REJECT expected SEMA-AGG-004, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_nested_struct_multi_hop_return_chain_control_condition_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "struct Mid id(struct Mid m){ return m; }\n"
+        "struct Mid wrap(){ return id(mk()); }\n"
+        "int main(){ if(wrap()) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-AGG-004") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-MULTIHOP-CONTROL-REJECT expected SEMA-AGG-004, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_nested_struct_call_result_direct_member_chain_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "int main(){ return mk().p.second; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-AGG-003") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-NESTED-STRUCT-CALL-RESULT-MEMBER-CHAIN-REJECT expected SEMA-AGG-003, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_deep_nested_pair_struct_assignment_mismatch_under_extension(void) {
+    static const char *source =
+        "struct A { pair p; int z; };\n"
+        "struct B { pair p; int z; };\n"
+        "struct Outer { struct A a; int w; };\n"
+        "int main(){ struct B b={{7,8},9}; struct Outer o={{{1,2},3},4}; b=o.a; return b.z; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-AGG-006") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-STRUCT-ASSIGN-MISMATCH-REJECT expected SEMA-AGG-006, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_deep_nested_pair_initializer_too_many_items_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2,3},4},5}; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-AGG-002") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-PAIR-INIT-TOO-MANY-REJECT expected SEMA-AGG-002, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_deep_nested_struct_initializer_too_many_items_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2,3},4},5}; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-AGG-002") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-DEEP-NESTED-STRUCT-INIT-TOO-MANY-REJECT expected SEMA-AGG-002, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
 static int test_value_ssa_rejects_nested_float_tree_plus_int_condition_under_extension(void) {
     static const char *source =
         "int main(float x, float y, float z){ if(((x + y) + z) + 1) return 1; return 0; }\n";
@@ -18958,6 +20580,125 @@ static int test_value_ssa_rejects_unary_call_helper_wrapped_ternary_call_plus_in
     if (!ok) {
         fprintf(stderr,
             "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-UNARY-HELPER-TERNARY-CALL-PLUS-INT-REJECT expected SEMA-TYPE-008, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "int main(){ if(pick() + 1) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-008") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT expected SEMA-TYPE-008, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "int main(float x){ if(pick(x) + 1) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-008") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-UNARY-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT expected SEMA-TYPE-008, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
             parser_error.message,
             semantic_error.message,
             ir_error.message,
@@ -22537,6 +24278,91 @@ static int build_value_ssa_perf_from_extension_source_text(const char *source,
         !memory_ssa_pass_scalar_replace_local_slots(out_program, out_error) ||
         !memory_ssa_pass_scalar_replace_global_slots(out_program, out_error) ||
         !value_ssa_optimize_perf_hotspots(out_program, out_error)) {
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (!ok) {
+        value_ssa_program_free(out_program);
+    }
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_value_ssa_translation_only_from_extension_source_text(const char *source,
+    ValueSsaProgram *out_program,
+    ValueSsaError *out_error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    LowerIrOptions lower_options;
+    int ok = 0;
+
+    if (!source || !out_program) {
+        if (out_error) {
+            out_error->line = 0;
+            out_error->column = 0;
+            snprintf(out_error->message, sizeof(out_error->message), "invalid extension source translation-only build contract");
+        }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+    value_ssa_program_init(out_program);
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, out_program, out_error)) {
+        if (out_error && out_error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                out_error->line = lower_error.line;
+                out_error->column = lower_error.column;
+                snprintf(out_error->message, sizeof(out_error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                out_error->line = ir_error.line;
+                out_error->column = ir_error.column;
+                snprintf(out_error->message, sizeof(out_error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                out_error->line = semantic_error.line;
+                out_error->column = semantic_error.column;
+                snprintf(out_error->message, sizeof(out_error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                out_error->line = parse_error.line;
+                out_error->column = parse_error.column;
+                snprintf(out_error->message, sizeof(out_error->message), "%s", parse_error.message);
+            } else {
+                snprintf(out_error->message, sizeof(out_error->message), "VALUE-SSA-AGGRET-TRANSLATION setup failed");
+            }
+        }
         goto cleanup;
     }
 
@@ -27521,6 +29347,234 @@ static int test_value_ssa_default_conversion_fold_program(void) {
         "}\n");
 }
 
+static int test_value_ssa_default_conversion_returned_function_value_parameter_bind_and_call(void) {
+    return expect_default_converted_dump(
+        "VALUE-SSA-CONVERT-DEFAULT-RETURNED-FUNCTION-VALUE-PARAM-BIND",
+        build_lower_ir_returned_function_value_parameter_bind_and_call_program,
+        "declare id(__ret0.0, f.1)\n"
+        "\n"
+        "func add1(x.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ssa.1 = add ssa.0, 1\n"
+        "    ret ssa.1\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 42\n"
+        "}\n"
+        "\n"
+        "func __fnwrap_add1(__env.0, x.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.1\n"
+        "    ssa.1 = add ssa.0, 1\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_dynamic_returned_function_value_parameter_immediate_call(void) {
+    return expect_default_converted_dump(
+        "VALUE-SSA-CONVERT-DEFAULT-DYN-RETURNED-FUNCTION-VALUE-PARAM-IMM",
+        build_lower_ir_dynamic_returned_function_value_parameter_immediate_call_program,
+        "declare id(__ret0.0, f.1)\n"
+        "\n"
+        "func add1(x.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ssa.1 = add ssa.0, 1\n"
+        "    ret ssa.1\n"
+        "}\n"
+        "\n"
+        "func add2(x.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ssa.1 = add ssa.0, 2\n"
+        "    ret ssa.1\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 42\n"
+        "}\n"
+        "\n"
+        "func __fnwrap_add2(__env.0, x.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.1\n"
+        "    ssa.1 = add ssa.0, 2\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
+static int build_lower_ir_returned_closure_backed_function_value_parameter_immediate_call_program(
+    LowerIrProgram *program,
+    LowerIrError *error) {
+    return build_lower_ir_from_extension_source_text(
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; return id(f)(4); }\n",
+        program,
+        error);
+}
+
+static int build_lower_ir_returned_closure_backed_function_value_parameter_bind_and_call_program(
+    LowerIrProgram *program,
+    LowerIrError *error) {
+    return build_lower_ir_from_extension_source_text(
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=id(f); return g(4); }\n",
+        program,
+        error);
+}
+
+static int test_value_ssa_default_conversion_returned_closure_backed_function_value_parameter_immediate_call(void) {
+    return expect_default_converted_dump(
+        "VALUE-SSA-CONVERT-DEFAULT-RETURNED-CLOSURE-BACKED-FUNCTION-VALUE-PARAM-IMM",
+        build_lower_ir_returned_closure_backed_function_value_parameter_immediate_call_program,
+        "declare id(__ret0.0, f.1)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_local x.0, 3\n"
+        "    ssa.0 = load_local x.0\n"
+        "    store_local f$closurecap$0.1, ssa.0\n"
+        "    ssa.1 = load_local f$closurecap$0.1\n"
+        "    ssa.2 = add ssa.1, 4\n"
+        "    ret ssa.2\n"
+        "}\n"
+        "\n"
+        "func main__closure_f_131094(x.0, y.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ssa.1 = load_local y.1\n"
+        "    ssa.2 = add ssa.0, ssa.1\n"
+        "    ret ssa.2\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_returned_closure_backed_function_value_parameter_bind_and_call(void) {
+    return expect_default_converted_dump(
+        "VALUE-SSA-CONVERT-DEFAULT-RETURNED-CLOSURE-BACKED-FUNCTION-VALUE-PARAM-BIND",
+        build_lower_ir_returned_closure_backed_function_value_parameter_bind_and_call_program,
+        "declare id(__ret0.0, f.1)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_local x.0, 3\n"
+        "    ssa.0 = load_local x.0\n"
+        "    store_local f$closurecap$0.1, ssa.0\n"
+        "    store_local f$ftag.2, 1\n"
+        "    ssa.1 = load_local f$closurecap$0.1\n"
+        "    ssa.2 = add ssa.1, 4\n"
+        "    ret ssa.2\n"
+        "}\n"
+        "\n"
+        "func main__closure_f_131094(x.0, y.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ssa.1 = load_local y.1\n"
+        "    ssa.2 = add ssa.0, ssa.1\n"
+        "    ret ssa.2\n"
+        "}\n");
+}
+
+static int build_lower_ir_dynamic_returned_closure_backed_function_value_parameter_immediate_call_program(
+    LowerIrProgram *program,
+    LowerIrError *error) {
+    return build_lower_ir_from_extension_source_text(
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; return id(f)(4); }\n",
+        program,
+        error);
+}
+
+static int build_lower_ir_dynamic_returned_closure_backed_function_value_parameter_bind_and_call_program(
+    LowerIrProgram *program,
+    LowerIrError *error) {
+    return build_lower_ir_from_extension_source_text(
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; int h(int)=id(f); return h(4); }\n",
+        program,
+        error);
+}
+
+static int test_value_ssa_default_conversion_dynamic_returned_closure_backed_function_value_parameter_immediate_call(void) {
+    return expect_default_converted_dump(
+        "VALUE-SSA-CONVERT-DEFAULT-DYN-RETURNED-CLOSURE-BACKED-FUNCTION-VALUE-PARAM-IMM",
+        build_lower_ir_dynamic_returned_closure_backed_function_value_parameter_immediate_call_program,
+        "declare id(__ret0.0, f.1)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_local x.1, 3\n"
+        "    store_local y.2, 5\n"
+        "    ssa.0 = load_local x.1\n"
+        "    store_local f$closurecap$0.3, ssa.0\n"
+        "    ssa.1 = load_local y.2\n"
+        "    store_local g$closurecap$0.5, ssa.1\n"
+        "    ssa.2 = load_local g$closurecap$0.5\n"
+        "    store_local f$closurecap$0.3, ssa.2\n"
+        "    ssa.3 = load_local f$closurecap$0.3\n"
+        "    ssa.4 = add ssa.3, 4\n"
+        "    ret ssa.4\n"
+        "}\n"
+        "\n"
+        "func main__closure_f_131112(x.0, z.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ssa.1 = load_local z.1\n"
+        "    ssa.2 = add ssa.0, ssa.1\n"
+        "    ret ssa.2\n"
+        "}\n"
+        "\n"
+        "func main__closure_g_131166(y.0, z.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local y.0\n"
+        "    ssa.1 = load_local z.1\n"
+        "    ssa.2 = add ssa.0, ssa.1\n"
+        "    ret ssa.2\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_dynamic_returned_closure_backed_function_value_parameter_bind_and_call(void) {
+    return expect_default_converted_dump(
+        "VALUE-SSA-CONVERT-DEFAULT-DYN-RETURNED-CLOSURE-BACKED-FUNCTION-VALUE-PARAM-BIND",
+        build_lower_ir_dynamic_returned_closure_backed_function_value_parameter_bind_and_call_program,
+        "declare id(__ret0.0, f.1)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_local x.1, 3\n"
+        "    store_local y.2, 5\n"
+        "    ssa.0 = load_local x.1\n"
+        "    store_local f$closurecap$0.3, ssa.0\n"
+        "    store_local f$ftag.4, 1\n"
+        "    ssa.1 = load_local y.2\n"
+        "    store_local g$closurecap$0.5, ssa.1\n"
+        "    ssa.2 = load_local g$closurecap$0.5\n"
+        "    store_local f$closurecap$0.3, ssa.2\n"
+        "    store_local f$ftag.4, 2\n"
+        "    ssa.3 = load_local f$closurecap$0.3\n"
+        "    ssa.4 = add ssa.3, 4\n"
+        "    ret ssa.4\n"
+        "}\n"
+        "\n"
+        "func main__closure_f_131112(x.0, z.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ssa.1 = load_local z.1\n"
+        "    ssa.2 = add ssa.0, ssa.1\n"
+        "    ret ssa.2\n"
+        "}\n"
+        "\n"
+        "func main__closure_g_131166(y.0, z.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local y.0\n"
+        "    ssa.1 = load_local z.1\n"
+        "    ssa.2 = add ssa.0, ssa.1\n"
+        "    ret ssa.2\n"
+        "}\n");
+}
+
 static int test_value_ssa_default_conversion_indirect_safe_global_forward_program(void) {
     return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-INDIRECT-SAFE-GLOBAL-FORWARD",
         build_lower_ir_indirect_safe_global_forward_program,
@@ -28463,6 +30517,54 @@ int main(void) {
         if (strstr("VALUE-SSA-FLOAT-NESTED-MUL-DIV-CALLARG-FLOAT-DEFAULT", filter) != NULL) {
             return test_value_ssa_default_pipeline_preserves_nested_float_mul_div_call_argument_to_float() ? 0 : 1;
         }
+        if (strstr("VALUE-SSA-NESTED-STRUCT-FIELD-LOOKUP-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_nested_struct_field_lookup_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-PAIR-PARAM-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_pair_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-PAIR-RETURN-COPY-INIT-TRANSLATION", filter) != NULL) {
+            return test_value_ssa_translation_only_preserves_pair_return_copy_init_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-PAIR-CALL-RESULT-CALLARG-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_pair_call_result_as_aggregate_call_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-PAIR-MULTIHOP-RET-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_pair_multi_hop_return_chain_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-NESTED-STRUCT-MULTIHOP-RET-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_nested_struct_multi_hop_return_chain_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-NESTED-STRUCT-RETURN-TRANSLATION", filter) != NULL) {
+            return test_value_ssa_translation_only_preserves_nested_struct_return_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-NESTED-STRUCT-PARAM-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_nested_struct_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-NESTED-PAIR-COPY-INIT-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_nested_pair_copy_init_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-NESTED-STRUCT-ASSIGN-MEMBER-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_nested_struct_assignment_from_member_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-DEEP-NESTED-STRUCT-COPY-INIT-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_deep_nested_struct_copy_init_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-DEEP-NESTED-PAIR-COPY-INIT-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_deep_nested_pair_copy_init_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-DEEP-NESTED-STRUCT-FIELD-LOOKUP-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_deep_nested_struct_field_lookup_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-DEEP-NESTED-PAIR-FIELD-LOOKUP-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_deep_nested_pair_field_lookup_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-DEEP-NESTED-STRUCT-ASSIGN-MEMBER-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_deep_nested_struct_assignment_from_member_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-DEEP-NESTED-PAIR-ASSIGN-MEMBER-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_deep_nested_pair_assignment_from_member_under_extension() ? 0 : 1;
+        }
         if (strstr("VALUE-SSA-FLOAT-TO-INT-TERNARY-BRIDGE-DEFAULT", filter) != NULL) {
             return test_value_ssa_default_pipeline_preserves_explicit_int_from_float_ternary_bridge() ? 0 : 1;
         }
@@ -28502,6 +30604,42 @@ int main(void) {
         if (strstr("VALUE-SSA-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
             return test_value_ssa_rejects_negative_float_call_int_condition_under_extension() ? 0 : 1;
         }
+        if (strstr("VALUE-SSA-DEEP-NESTED-STRUCT-COPY-INIT-MISMATCH-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_deep_nested_struct_copy_init_mismatch_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-PAIR-CALL-RESULT-MEMBER-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_pair_call_result_direct_member_access_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-PAIR-CALL-RESULT-SCALAR-CALLARG-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_pair_call_result_as_scalar_call_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-PAIR-CALL-RESULT-SCALAR-INIT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_pair_call_result_scalar_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-PAIR-CALL-RESULT-SCALAR-ASSIGN-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_pair_call_result_scalar_assignment_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-NESTED-STRUCT-MULTIHOP-SCALAR-INIT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_nested_struct_multi_hop_return_chain_scalar_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-PAIR-MULTIHOP-CONTROL-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_pair_multi_hop_return_chain_control_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-NESTED-STRUCT-MULTIHOP-CONTROL-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_nested_struct_multi_hop_return_chain_control_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-NESTED-STRUCT-CALL-RESULT-MEMBER-CHAIN-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_nested_struct_call_result_direct_member_chain_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-DEEP-NESTED-PAIR-STRUCT-ASSIGN-MISMATCH-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_deep_nested_pair_struct_assignment_mismatch_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-DEEP-NESTED-PAIR-INIT-TOO-MANY-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_deep_nested_pair_initializer_too_many_items_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-DEEP-NESTED-STRUCT-INIT-TOO-MANY-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_deep_nested_struct_initializer_too_many_items_under_extension() ? 0 : 1;
+        }
         if (strstr("VALUE-SSA-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT", filter) != NULL) {
             return test_value_ssa_rejects_nested_float_tree_plus_int_condition_under_extension() ? 0 : 1;
         }
@@ -28531,6 +30669,12 @@ int main(void) {
         }
         if (strstr("VALUE-SSA-FLOAT-UNARY-HELPER-TERNARY-CALL-PLUS-INT-REJECT", filter) != NULL) {
             return test_value_ssa_rejects_unary_call_helper_wrapped_ternary_call_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-UNARY-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension() ? 0 : 1;
         }
         if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT", filter) != NULL) {
             return test_value_ssa_rejects_float_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
@@ -28721,6 +30865,22 @@ int main(void) {
     ok &= test_value_ssa_default_pipeline_preserves_unary_call_float_ternary_value_float_call_argument();
     ok &= test_value_ssa_default_pipeline_preserves_chained_float_addition_call_argument_to_float();
     ok &= test_value_ssa_default_pipeline_preserves_nested_float_mul_div_call_argument_to_float();
+    ok &= test_value_ssa_default_pipeline_preserves_nested_struct_field_lookup_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_pair_parameter_under_extension();
+    ok &= test_value_ssa_translation_only_preserves_pair_return_copy_init_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_pair_call_result_as_aggregate_call_argument_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_pair_multi_hop_return_chain_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_nested_struct_multi_hop_return_chain_under_extension();
+    ok &= test_value_ssa_translation_only_preserves_nested_struct_return_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_nested_struct_parameter_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_nested_pair_copy_init_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_nested_struct_assignment_from_member_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_deep_nested_struct_copy_init_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_deep_nested_pair_copy_init_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_deep_nested_struct_field_lookup_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_deep_nested_pair_field_lookup_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_deep_nested_struct_assignment_from_member_under_extension();
+    ok &= test_value_ssa_default_pipeline_preserves_deep_nested_pair_assignment_from_member_under_extension();
     ok &= test_value_ssa_default_pipeline_preserves_explicit_int_from_float_ternary_bridge();
     ok &= test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_call_argument_bridge();
     ok &= test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_assignment_bridge();
@@ -28739,10 +30899,53 @@ int main(void) {
     ok &= test_value_ssa_rejects_global_float_int_condition_under_extension();
     ok &= test_value_ssa_rejects_float_call_int_condition_under_extension();
     ok &= test_value_ssa_rejects_negative_float_call_int_condition_under_extension();
+    ok &= test_value_ssa_rejects_deep_nested_struct_copy_init_mismatch_under_extension();
+    ok &= test_value_ssa_rejects_pair_call_result_direct_member_access_under_extension();
+    ok &= test_value_ssa_rejects_pair_call_result_as_scalar_call_argument_under_extension();
+    ok &= test_value_ssa_rejects_pair_call_result_scalar_initializer_under_extension();
+    ok &= test_value_ssa_rejects_pair_call_result_scalar_assignment_under_extension();
+    ok &= test_value_ssa_rejects_nested_struct_multi_hop_return_chain_scalar_initializer_under_extension();
+    ok &= test_value_ssa_rejects_pair_multi_hop_return_chain_control_condition_under_extension();
+    ok &= test_value_ssa_rejects_nested_struct_multi_hop_return_chain_control_condition_under_extension();
+    ok &= test_value_ssa_rejects_nested_struct_call_result_direct_member_chain_under_extension();
+    ok &= test_value_ssa_rejects_deep_nested_pair_struct_assignment_mismatch_under_extension();
+    ok &= test_value_ssa_rejects_deep_nested_pair_initializer_too_many_items_under_extension();
+    ok &= test_value_ssa_rejects_deep_nested_struct_initializer_too_many_items_under_extension();
     ok &= test_value_ssa_rejects_nested_float_tree_plus_int_condition_under_extension();
     ok &= test_value_ssa_rejects_nested_float_muldiv_plus_int_condition_under_extension();
+    ok &= test_value_ssa_rejects_nested_float_tree_plus_int_under_extension();
+    ok &= test_value_ssa_rejects_nested_float_muldiv_plus_int_under_extension();
+    ok &= test_value_ssa_rejects_float_ternary_value_plus_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_ternary_value_plus_int_under_extension();
     ok &= test_value_ssa_rejects_float_ternary_value_plus_float_call_argument_under_extension();
     ok &= test_value_ssa_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension();
+    ok &= test_value_ssa_rejects_float_helper_wrapped_ternary_call_plus_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_helper_wrapped_ternary_call_plus_int_under_extension();
+    ok &= test_value_ssa_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension();
+    ok &= test_value_ssa_rejects_float_helper_wrapped_ternary_call_compare_against_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_helper_wrapped_ternary_call_compare_against_int_under_extension();
+    ok &= test_value_ssa_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension();
+    ok &= test_value_ssa_rejects_float_ternary_value_return_to_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_ternary_value_return_to_int_under_extension();
+    ok &= test_value_ssa_rejects_recursive_float_call_result_in_initializer_under_extension();
+    ok &= test_value_ssa_rejects_float_helper_wrapped_ternary_call_initializer_to_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_helper_wrapped_ternary_call_initializer_to_int_under_extension();
+    ok &= test_value_ssa_rejects_float_ternary_value_initializer_to_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_ternary_value_initializer_to_int_under_extension();
+    ok &= test_value_ssa_accepts_float_ternary_value_initializer_to_float_under_extension();
+    ok &= test_value_ssa_rejects_float_helper_wrapped_ternary_call_assignment_to_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_helper_wrapped_ternary_call_assignment_to_int_under_extension();
+    ok &= test_value_ssa_rejects_float_ternary_value_assignment_to_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_ternary_value_assignment_to_int_under_extension();
+    ok &= test_value_ssa_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension();
+    ok &= test_value_ssa_rejects_recursive_float_call_argument_to_int_under_extension();
+    ok &= test_value_ssa_rejects_float_ternary_value_call_argument_to_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_ternary_value_call_argument_to_int_under_extension();
+    ok &= test_value_ssa_rejects_float_ternary_value_compare_against_int_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_ternary_value_compare_against_int_under_extension();
     ok &= test_value_ssa_rejects_float_ternary_value_compare_against_float_under_extension();
     ok &= test_value_ssa_rejects_unary_call_ternary_value_compare_against_float_under_extension();
     ok &= test_value_ssa_rejects_float_assignment_to_int_under_extension();
@@ -28965,6 +31168,12 @@ int main(void) {
     ok &= test_value_ssa_mode_conversion_memory_full_fold();
     ok &= test_value_ssa_mode_conversion_rejects_unknown_mode();
     ok &= test_value_ssa_default_conversion_fold_program();
+    ok &= test_value_ssa_default_conversion_returned_function_value_parameter_bind_and_call();
+    ok &= test_value_ssa_default_conversion_dynamic_returned_function_value_parameter_immediate_call();
+    ok &= test_value_ssa_default_conversion_returned_closure_backed_function_value_parameter_immediate_call();
+    ok &= test_value_ssa_default_conversion_returned_closure_backed_function_value_parameter_bind_and_call();
+    ok &= test_value_ssa_default_conversion_dynamic_returned_closure_backed_function_value_parameter_immediate_call();
+    ok &= test_value_ssa_default_conversion_dynamic_returned_closure_backed_function_value_parameter_bind_and_call();
     ok &= test_value_ssa_default_conversion_indirect_safe_global_forward_program();
     ok &= test_value_ssa_default_conversion_tiny_helper_inline_program();
     ok &= test_value_ssa_default_conversion_tiny_helper_two_block_return_program();

@@ -1197,6 +1197,49 @@ static int test_lower_ir_verifier_rejects_reserved_init_helper_name_without_runt
     return ok;
 }
 
+static int test_lower_ir_verifier_rejects_addr_function_unknown_target(void) {
+    LowerIrProgram program;
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *block = NULL;
+    LowerIrInstruction instruction;
+    LowerIrError error;
+    int ok;
+
+    lower_ir_program_init(&program);
+    if (!lower_ir_program_append_function(&program, "main", 1, &function, &error) ||
+        !lower_ir_function_append_block(function, NULL, &block, &error)) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    function->next_temp_id = 1u;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_FUNCTION;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(0u);
+    instruction.as.addr_function_name = (char *)malloc(sizeof("missing_fn"));
+    if (!instruction.as.addr_function_name) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+    memcpy(instruction.as.addr_function_name, "missing_fn", sizeof("missing_fn"));
+    if (!lower_ir_block_append_instruction(block, &instruction, &error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(0u), &error)) {
+        free(instruction.as.addr_function_name);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+    free(instruction.as.addr_function_name);
+
+    ok = expect_verifier_rejects("LOWER-IR-VERIFY-ADDR-FUNCTION-UNKNOWN",
+        &program,
+        "LOWER-IR-VERIFY-048C");
+
+    lower_ir_program_free(&program);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -1236,6 +1279,7 @@ int main(void) {
     ok &= test_lower_ir_verifier_rejects_runtime_global_missing_startup_call();
     ok &= test_lower_ir_verifier_rejects_reserved_runtime_init_call_outside_startup_entry();
     ok &= test_lower_ir_verifier_rejects_reserved_init_helper_name_without_runtime_globals();
+    ok &= test_lower_ir_verifier_rejects_addr_function_unknown_target();
 
     if (!ok) {
         return 1;

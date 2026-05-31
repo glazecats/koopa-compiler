@@ -128,6 +128,7 @@ static int machine_mutation_classify_known_op(unsigned char tag_value,
         case MACHINE_SELECT_OP_ALU_IMM:
         case MACHINE_SELECT_OP_CMP:
         case MACHINE_SELECT_OP_CMP_IMM:
+        case MACHINE_SELECT_OP_ADDR_FUNCTION:
         case MACHINE_SELECT_OP_ADDR_LOCAL:
         case MACHINE_SELECT_OP_ADDR_GLOBAL:
         case MACHINE_SELECT_OP_LOAD_LOCAL:

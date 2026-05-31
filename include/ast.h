@@ -13,12 +13,16 @@ typedef enum {
 typedef enum {
     AST_FUNCTION_RETURN_INT = 0,
     AST_FUNCTION_RETURN_FLOAT,
+    AST_FUNCTION_RETURN_PAIR,
+    AST_FUNCTION_RETURN_STRUCT,
     AST_FUNCTION_RETURN_VOID,
 } AstFunctionReturnType;
 
 typedef enum {
     AST_PARAMETER_VALUE_INT = 0,
     AST_PARAMETER_VALUE_FLOAT,
+    AST_PARAMETER_VALUE_PAIR,
+    AST_PARAMETER_VALUE_STRUCT,
     AST_PARAMETER_VALUE_FUNCTION,
 } AstParameterValueKind;
 
@@ -27,6 +31,7 @@ typedef enum {
     AST_DECLARATION_VALUE_FLOAT,
     AST_DECLARATION_VALUE_PAIR,
     AST_DECLARATION_VALUE_STRUCT,
+    AST_DECLARATION_VALUE_FUNCTION,
 } AstDeclarationValueKind;
 
 typedef enum {
@@ -43,6 +48,7 @@ typedef enum {
     AST_EXPR_CALL,
     AST_EXPR_BINARY,
     AST_EXPR_TERNARY,
+    AST_EXPR_CLOSURE,
 } AstExpressionKind;
 
 typedef enum {
@@ -74,6 +80,8 @@ typedef struct {
     char *name;
     size_t name_length;
     char **field_names;
+    int *field_value_kinds;
+    char **field_type_names;
     size_t field_count;
 } AstStructType;
 
@@ -138,6 +146,17 @@ struct AstExpression {
             AstExpression *then_expr;
             AstExpression *else_expr;
         } ternary;
+        struct {
+            char **capture_names;
+            size_t capture_name_count;
+            AstFunctionReturnType return_type;
+            char *return_type_name;
+            size_t parameter_count;
+            char **parameter_names;
+            int *parameter_value_kinds;
+            char **parameter_type_names;
+            AstStatement *body;
+        } closure;
     } as;
 };
 
@@ -154,6 +173,7 @@ struct AstStatement {
     AstExpression ***declaration_array_extent_exprs;
     AstFunctionReturnType *declaration_function_return_types;
     size_t *declaration_function_parameter_counts;
+    int **declaration_function_parameter_value_kinds;
     char **declaration_type_names;
     AstExpression **expressions;
     size_t expression_count;
@@ -176,6 +196,15 @@ struct AstStatement {
 typedef struct {
     AstExternalKind kind;
     AstFunctionReturnType function_return_type;
+    char *function_return_type_name;
+    int has_function_return_signature;
+    AstFunctionReturnType function_return_function_return_type;
+    char *function_return_function_return_type_name;
+    size_t function_return_function_parameter_count;
+    int *function_return_function_parameter_value_kinds;
+    AstFunctionReturnType *function_return_function_parameter_return_types;
+    size_t *function_return_function_parameter_parameter_counts;
+    char **function_return_function_parameter_type_names;
     int declaration_value_kind;
     char *declaration_type_name;
     char *name;
@@ -188,6 +217,7 @@ typedef struct {
     size_t parameter_count;
     char **parameter_names;
     int *parameter_value_kinds;
+    char **parameter_type_names;
     size_t *parameter_array_ranks;
     AstExpression ***parameter_array_extent_exprs;
     AstFunctionReturnType *parameter_function_return_types;

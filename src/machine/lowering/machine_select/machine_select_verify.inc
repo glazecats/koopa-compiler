@@ -262,6 +262,14 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
                         }
                         break;
                     }
+                    case MACHINE_SELECT_OP_ADDR_FUNCTION:
+                        if (!op->has_result ||
+                            !op->as.addr_function_name ||
+                            op->as.addr_function_name[0] == '\0') {
+                            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-136A: invalid addr_function op");
+                            return 0;
+                        }
+                        break;
                     case MACHINE_SELECT_OP_ADDR_LOCAL:
                     case MACHINE_SELECT_OP_ADDR_GLOBAL:
                         if (!op->has_result ||

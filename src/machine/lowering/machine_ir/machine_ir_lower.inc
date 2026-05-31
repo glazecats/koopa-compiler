@@ -665,6 +665,17 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
                     }
                     break;
                 }
+                case VALUE_SSA_INSTR_ADDR_FUNCTION:
+                    instruction.as.addr_function_name =
+                        machine_ir_strdup(source_instruction->as.addr_function_name);
+                    if (source_instruction->as.addr_function_name &&
+                        !instruction.as.addr_function_name) {
+                        machine_ir_instruction_free(&instruction);
+                        machine_ir_function_free(out_function);
+                        machine_ir_set_error(error, 0, 0, "MACHINE-IR-310A: out of memory copying function-address name");
+                        return 0;
+                    }
+                    break;
                 case VALUE_SSA_INSTR_ADDR_LOCAL:
                     instruction.as.addr_slot = machine_ir_slot_local(source_instruction->as.addr_slot.id);
                     break;

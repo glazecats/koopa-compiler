@@ -304,6 +304,7 @@ int value_ssa_rename_rewrite_block_uses(ValueSsaBasicBlock *block,
                 return 0;
             }
             break;
+        case VALUE_SSA_INSTR_ADDR_FUNCTION:
         case VALUE_SSA_INSTR_ADDR_LOCAL:
         case VALUE_SSA_INSTR_ADDR_GLOBAL:
         case VALUE_SSA_INSTR_LOAD_LOCAL:
@@ -433,6 +434,7 @@ static int value_ssa_rename_rewrite_instruction_uses(ValueSsaInstruction *instru
     case VALUE_SSA_INSTR_STORE_INDIRECT:
         return value_ssa_rename_rewrite_value_ref(&instruction->as.store_indirect.addr, state, error) &&
             value_ssa_rename_rewrite_value_ref(&instruction->as.store_indirect.value, state, error);
+    case VALUE_SSA_INSTR_ADDR_FUNCTION:
     case VALUE_SSA_INSTR_ADDR_LOCAL:
     case VALUE_SSA_INSTR_ADDR_GLOBAL:
     case VALUE_SSA_INSTR_LOAD_LOCAL:

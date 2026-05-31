@@ -107,6 +107,9 @@ static void value_ssa_instruction_free(ValueSsaInstruction *instruction) {
         instruction->as.call.callee_name = NULL;
         instruction->as.call.args = NULL;
         instruction->as.call.arg_count = 0;
+    } else if (instruction->kind == VALUE_SSA_INSTR_ADDR_FUNCTION) {
+        free(instruction->as.addr_function_name);
+        instruction->as.addr_function_name = NULL;
     }
 }
 
@@ -212,12 +215,14 @@ static int value_ssa_instruction_copy(ValueSsaInstruction *destination,
     }
 
     *destination = *source;
-    if (source->kind != VALUE_SSA_INSTR_CALL) {
+    if (source->kind != VALUE_SSA_INSTR_CALL &&
+        source->kind != VALUE_SSA_INSTR_ADDR_FUNCTION) {
         return 1;
     }
 
     destination->as.call.callee_name = NULL;
     destination->as.call.args = NULL;
+    destination->as.addr_function_name = NULL;
 
     if (source->as.call.callee_name) {
         destination->as.call.callee_name = value_ssa_strdup(source->as.call.callee_name);
@@ -239,6 +244,15 @@ static int value_ssa_instruction_copy(ValueSsaInstruction *destination,
         memcpy(destination->as.call.args,
             source->as.call.args,
             source->as.call.arg_count * sizeof(ValueSsaValueRef));
+    }
+
+    if (source->kind == VALUE_SSA_INSTR_ADDR_FUNCTION &&
+        source->as.addr_function_name) {
+        destination->as.addr_function_name = value_ssa_strdup(source->as.addr_function_name);
+        if (!destination->as.addr_function_name) {
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-003A: out of memory copying function address name");
+            return 0;
+        }
     }
 
     return 1;

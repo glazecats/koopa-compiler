@@ -880,7 +880,7 @@ static int test_semantic_ast_primary_callable_ignores_tampered_metadata(void) {
 }
 
 static int test_semantic_ast_primary_chained_call_ignores_tampered_metadata(void) {
-    const char *source = "int f(){return 1;}\nint main(){return f()(1);}\n";
+    const char *source = "int f(){return 1;}\nint id(int x){return x;}\nint main(){return id(1)(1);}\n";
     TokenArray tokens;
     AstProgram program;
     ParserError parse_err;
@@ -2227,6 +2227,25 @@ static int test_semantic_rejects_unary_call_helper_wrapped_ternary_call_plus_int
         "SEMA-TYPE-008");
 }
 
+static int test_semantic_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-helper-ternary-call-cond-plus-int-ext-reject",
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "int main(){ if(pick() + 1) return 1; return 0; }\n",
+        "SEMA-TYPE-008");
+}
+
+static int test_semantic_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-unary-helper-ternary-call-cond-plus-int-ext-reject",
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "int main(float x){ if(pick(x) + 1) return 1; return 0; }\n",
+        "SEMA-TYPE-008");
+}
+
 static int test_semantic_rejects_float_helper_wrapped_ternary_call_compare_int_under_extension(void) {
     return run_extension_semantic_expect_rejects(
         "float-helper-ternary-call-compare-int-ext-reject",
@@ -2508,6 +2527,775 @@ static int test_semantic_accepts_function_valued_parameter_declaration_under_ext
         "int apply(int f(int), int x){ return x; }\nint main(){ return 0; }\n");
 }
 
+static int test_semantic_accepts_function_valued_return_declaration_extension_slice_for_now(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-decl-pass-for-now",
+        "int make(int x)(int);\nint main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_compatible_function_valued_return_redeclaration_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-redecl-pass",
+        "int make(int x)(int);\nint make(int x)(int);\nint main(){ return 0; }\n");
+}
+
+static int test_semantic_rejects_mismatched_function_valued_return_redeclaration_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-return-ext-redecl-mismatch",
+        "int make(int x)(int);\nvoid make(int x)(int);\nint main(){ return 0; }\n",
+        "SEMA-TOP-005");
+}
+
+static int test_semantic_accepts_function_valued_return_definition_with_closure_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-def-closure-pass",
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\nint main(){ return 0; }\n");
+}
+
+static int test_semantic_rejects_function_valued_return_definition_with_mismatched_closure_signature_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-return-ext-def-closure-mismatch",
+        "int make(int x)(int) { return closure [x] void () { return; }; }\nint main(){ return 0; }\n",
+        "SEMA-EXT-045");
+}
+
+static int test_semantic_rejects_function_valued_return_definition_with_multiple_closure_return_sites_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-return-ext-def-multi-return-site-reject",
+        "int make(int x)(int) { if (x) return closure [x] int (int y) { return x + y; }; return closure [x] int (int y) { return x - y; }; }\nint main(){ return 0; }\n",
+        "SEMA-EXT-049");
+}
+
+static int test_semantic_accepts_local_function_value_initialization_from_function_valued_return_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-local-init-pass",
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\nint main(){ int f(int)=make(3); return 0; }\n");
+}
+
+static int test_semantic_accepts_immediate_call_of_function_valued_return_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-immediate-call-pass",
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\nint main(){ return make(3)(4); }\n");
+}
+
+static int test_semantic_rejects_closure_function_valued_return_immediate_call_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-return-ext-closure-immediate-call-scalar-type-mismatch-reject",
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ return make(3)(1.25); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_closure_function_valued_return_immediate_call_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-return-ext-closure-immediate-call-arity-mismatch-reject",
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ return make(3)(1, 2); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_local_closure_function_valued_return_bind_and_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-local-closure-bind-call-pass",
+        "int pick(int x)(int) { int f(int)=closure [x] int (int y) { return x + y; }; return f; }\n"
+        "int main(){ int h(int)=pick(3); return h(4); }\n");
+}
+
+static int test_semantic_accepts_local_closure_function_valued_return_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-local-closure-immediate-call-pass",
+        "int pick(int x)(int) { int f(int)=closure [x] int (int y) { return x + y; }; return f; }\n"
+        "int main(){ return pick(3)(4); }\n");
+}
+
+static int test_semantic_accepts_dynamic_local_closure_function_valued_return_bind_and_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-dynamic-local-closure-bind-call-pass",
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ int h(int)=pick(3, 1); return h(4); }\n");
+}
+
+static int test_semantic_accepts_dynamic_local_closure_function_valued_return_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-dynamic-local-closure-immediate-call-pass",
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ return pick(3, 1)(4); }\n");
+}
+
+static int test_semantic_accepts_dynamic_local_closure_function_valued_return_forward_into_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-dynamic-local-closure-forward-into-param-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ return apply(pick(5, 1), 3); }\n");
+}
+
+static int test_semantic_accepts_noncapturing_function_valued_return_bind_and_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-noncapturing-bind-call-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int) { return add1; }\n"
+        "int main(){ int f(int)=pick(); return f(41); }\n");
+}
+
+static int test_semantic_accepts_noncapturing_function_valued_return_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-noncapturing-immediate-call-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int) { return add1; }\n"
+        "int main(){ return pick()(41); }\n");
+}
+
+static int test_semantic_rejects_noncapturing_function_valued_return_immediate_call_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-return-ext-noncapturing-immediate-call-scalar-type-mismatch-reject",
+        "int addf(float x){ return 1; }\n"
+        "int pick()(float) { return addf; }\n"
+        "int main(){ return pick()(0); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_noncapturing_function_valued_return_immediate_call_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-return-ext-noncapturing-immediate-call-arity-mismatch-reject",
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int) { return add1; }\n"
+        "int main(){ return pick()(1, 2); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_rejects_noncapturing_function_valued_return_immediate_call_pair_argument_scalar_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-return-ext-noncapturing-immediate-call-pair-arg-scalar-mismatch-reject",
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int pick()(pair) { return sum; }\n"
+        "int main(){ return pick()(1); }\n",
+        "SEMA-AGG-005");
+}
+
+static int test_semantic_rejects_noncapturing_function_valued_return_immediate_call_struct_argument_kind_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-return-ext-noncapturing-immediate-call-struct-arg-kind-mismatch-reject",
+        "struct P { int x; int y; };\n"
+        "struct Q { int x; int y; };\n"
+        "int sum(struct P p){ return p.x + p.y; }\n"
+        "int pick()(struct P) { return sum; }\n"
+        "int main(){ struct Q q={1,2}; return pick()(q); }\n",
+        "SEMA-AGG-006");
+}
+
+static int test_semantic_rejects_zero_arg_function_valued_return_immediate_call_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-return-ext-zero-arg-immediate-call-arity-mismatch-reject",
+        "int next(){ return 9; }\n"
+        "int pick()(){ return next; }\n"
+        "int main(){ return pick()(1); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_local_noncapturing_function_value_return_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-local-noncapturing-immediate-call-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int) { int f(int)=add1; return f; }\n"
+        "int main(){ return pick()(41); }\n");
+}
+
+static int test_semantic_accepts_rebound_local_noncapturing_function_value_return_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-local-rebound-immediate-call-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick()(int) { int f(int)=add1; f=add2; return f; }\n"
+        "int main(){ return pick()(40); }\n");
+}
+
+static int test_semantic_accepts_dynamic_noncapturing_function_value_return_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-dynamic-immediate-call-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int) { int f(int)=add1; if(c) f=add2; return f; }\n"
+        "int main(){ return pick(1)(40); }\n");
+}
+
+static int test_semantic_accepts_dynamic_noncapturing_function_value_return_bind_and_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-dynamic-bind-call-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int) { int f(int)=add1; if(c) f=add2; return f; }\n"
+        "int main(){ int g(int)=pick(1); return g(40); }\n");
+}
+
+static int test_semantic_accepts_ternary_noncapturing_function_value_return_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-ternary-noncapturing-immediate-call-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ return pick(1)(40); }\n");
+}
+
+static int test_semantic_accepts_ternary_noncapturing_function_value_return_bind_and_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-ternary-noncapturing-bind-call-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=pick(1); return h(40); }\n");
+}
+
+static int test_semantic_accepts_ternary_closure_function_value_return_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-ternary-closure-immediate-call-pass",
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ return pick(1)(4); }\n");
+}
+
+static int test_semantic_accepts_ternary_closure_function_value_return_bind_and_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "function-valued-return-ext-ternary-closure-bind-call-pass",
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=pick(1); return h(4); }\n");
+}
+
+static int test_semantic_accepts_dynamic_local_function_value_forwarding_into_function_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-local-function-value-forward-into-param-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int g(int)=add1; if(c) g=add2; return apply(g, 40); }\n");
+}
+
+static int test_semantic_accepts_dynamic_returned_function_value_forwarding_into_function_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-returned-function-value-forward-into-param-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c)(int) { int f(int)=add1; if(c) f=add2; return f; }\n"
+        "int main(){ int g(int)=pick(1); return apply(g, 40); }\n");
+}
+
+static int test_semantic_accepts_dynamic_local_zero_arg_function_value_forwarding_into_function_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-local-zero-arg-function-value-forward-into-param-pass",
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int main(){ int c=1; int g()=next1; if(c) g=next2; return apply0(g); }\n");
+}
+
+static int test_semantic_accepts_dynamic_local_zero_arg_void_function_value_forwarding_into_function_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-local-zero-arg-void-function-value-forward-into-param-pass",
+        "void ping1(){ putint(1); }\n"
+        "void ping2(){ putint(2); }\n"
+        "void apply0(void f()){ f(); }\n"
+        "int main(){ int c=1; void g()=ping1; if(c) g=ping2; apply0(g); return 0; }\n");
+}
+
+static int test_semantic_accepts_dynamic_returned_zero_arg_function_value_forwarding_into_function_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-returned-zero-arg-function-value-forward-into-param-pass",
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int pick(int c)(){ int g()=next1; if(c) g=next2; return g; }\n"
+        "int main(){ int g()=pick(1); return apply0(g); }\n");
+}
+
+static int test_semantic_accepts_direct_returned_noncapturing_function_value_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "direct-returned-noncapturing-function-value-arg-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int){ return add1; }\n"
+        "int main(){ return apply(pick(), 4); }\n");
+}
+
+static int test_semantic_accepts_returned_function_value_parameter_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-function-value-parameter-immediate-call-pass",
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return id(add1)(41); }\n");
+}
+
+static int test_semantic_rejects_returned_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "returned-function-value-parameter-immediate-call-scalar-type-mismatch-reject",
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return id(add1)(1.25); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_returned_function_value_parameter_immediate_call_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "returned-function-value-parameter-immediate-call-arity-mismatch-reject",
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return id(add1)(1, 2); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_returned_function_value_parameter_bind_and_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-function-value-parameter-bind-call-pass",
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int g(int)=id(add1); return g(41); }\n");
+}
+
+static int test_semantic_accepts_dynamic_returned_function_value_parameter_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-returned-function-value-parameter-immediate-call-pass",
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; if(c) f=add2; return id(f)(40); }\n");
+}
+
+static int test_semantic_rejects_dynamic_returned_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "dynamic-returned-function-value-parameter-immediate-call-scalar-type-mismatch-reject",
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; if(c) f=add2; return id(f)(1.25); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_dynamic_returned_function_value_parameter_immediate_call_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "dynamic-returned-function-value-parameter-immediate-call-arity-mismatch-reject",
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; if(c) f=add2; return id(f)(1, 2); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_dynamic_returned_function_value_parameter_bind_and_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-returned-function-value-parameter-bind-call-pass",
+        "int id(int f(int))(int) { return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; if(c) f=add2; int g(int)=id(f); return g(40); }\n");
+}
+
+static int test_semantic_accepts_returned_closure_backed_function_value_parameter_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-closure-backed-function-value-parameter-immediate-call-pass",
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; return id(f)(4); }\n");
+}
+
+static int test_semantic_rejects_returned_closure_backed_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "returned-closure-backed-function-value-parameter-immediate-call-scalar-type-mismatch-reject",
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; return id(f)(1.25); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_returned_closure_backed_function_value_parameter_immediate_call_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "returned-closure-backed-function-value-parameter-immediate-call-arity-mismatch-reject",
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; return id(f)(1, 2); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_returned_closure_backed_function_value_parameter_bind_and_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-closure-backed-function-value-parameter-bind-call-pass",
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=id(f); return g(4); }\n");
+}
+
+static int test_semantic_accepts_dynamic_returned_closure_backed_function_value_parameter_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-returned-closure-backed-function-value-parameter-immediate-call-pass",
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; return id(f)(4); }\n");
+}
+
+static int test_semantic_rejects_dynamic_returned_closure_backed_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "dynamic-returned-closure-backed-function-value-parameter-immediate-call-scalar-type-mismatch-reject",
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; return id(f)(1.25); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_dynamic_returned_closure_backed_function_value_parameter_immediate_call_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "dynamic-returned-closure-backed-function-value-parameter-immediate-call-arity-mismatch-reject",
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; return id(f)(1, 2); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_dynamic_returned_closure_backed_function_value_parameter_bind_and_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-returned-closure-backed-function-value-parameter-bind-call-pass",
+        "int id(int f(int))(int) { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; int h(int)=id(f); return h(4); }\n");
+}
+
+static int test_semantic_accepts_direct_returned_noncapturing_zero_arg_function_value_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "direct-returned-noncapturing-zero-arg-function-value-arg-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int next(){ return 9; }\n"
+        "int pick()(){ return next; }\n"
+        "int main(){ return apply0(pick()); }\n");
+}
+
+static int test_semantic_accepts_direct_returned_noncapturing_zero_arg_void_function_value_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "direct-returned-noncapturing-zero-arg-void-function-value-arg-pass",
+        "void apply0(void f()){ f(); }\n"
+        "void ping(){ putint(7); }\n"
+        "void pick()(){ return ping; }\n"
+        "int main(){ apply0(pick()); return 0; }\n");
+}
+
+static int test_semantic_accepts_direct_returned_closure_function_value_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "direct-returned-closure-function-value-arg-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ return apply(make(3), 4); }\n");
+}
+
+static int test_semantic_accepts_direct_returned_closure_zero_arg_function_value_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "direct-returned-closure-zero-arg-function-value-arg-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int make(int x)() { return closure [x] int () { return x; }; }\n"
+        "int main(){ return apply0(make(3)); }\n");
+}
+
+static int test_semantic_rejects_direct_returned_closure_zero_arg_function_value_argument_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "direct-returned-closure-zero-arg-function-value-arg-arity-mismatch-reject",
+        "int apply0(int f()){ return f(1); }\n"
+        "int make(int x)() { return closure [x] int () { return x; }; }\n"
+        "int main(){ return apply0(make(3)); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_direct_returned_closure_zero_arg_void_function_value_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "direct-returned-closure-zero-arg-void-function-value-arg-pass",
+        "void apply0(void f()){ f(); }\n"
+        "void make(int x)() { return closure [x] void () { putint(x); return; }; }\n"
+        "int main(){ apply0(make(7)); return 0; }\n");
+}
+
+static int test_semantic_rejects_direct_returned_closure_zero_arg_void_function_value_argument_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "direct-returned-closure-zero-arg-void-function-value-arg-arity-mismatch-reject",
+        "void apply0(void f()){ f(1); }\n"
+        "void make(int x)() { return closure [x] void () { putint(x); return; }; }\n"
+        "int main(){ apply0(make(7)); return 0; }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_direct_dynamic_returned_noncapturing_function_value_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "direct-dynamic-returned-noncapturing-function-value-arg-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; if(c) f=add2; return f; }\n"
+        "int main(){ return apply(pick(1), 40); }\n");
+}
+
+static int test_semantic_accepts_direct_dynamic_returned_noncapturing_zero_arg_function_value_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "direct-dynamic-returned-noncapturing-zero-arg-function-value-arg-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int g()=next1; if(c) g=next2; return g; }\n"
+        "int main(){ return apply0(pick(1)); }\n");
+}
+
+static int test_semantic_accepts_direct_dynamic_returned_noncapturing_zero_arg_void_function_value_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "direct-dynamic-returned-noncapturing-zero-arg-void-function-value-arg-pass",
+        "void apply0(void f()){ f(); }\n"
+        "void ping1(){ putint(1); }\n"
+        "void ping2(){ putint(2); }\n"
+        "void pick(int c)(){ void g()=ping1; if(c) g=ping2; return g; }\n"
+        "int main(){ apply0(pick(1)); return 0; }\n");
+}
+
+static int test_semantic_accepts_dynamic_function_value_assignment_then_direct_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-function-value-assignment-then-direct-call-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int h(int)=add1; if(c) f=add2; h=f; return h(40); }\n");
+}
+
+static int test_semantic_accepts_ternary_function_value_assignment_then_direct_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "ternary-function-value-assignment-then-direct-call-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; int h(int)=add1; h=((putint(0), c) ? f : g); return h(40); }\n");
+}
+
+static int test_semantic_accepts_ternary_closure_assignment_then_direct_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "ternary-closure-assignment-then-direct-call-pass",
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; int h(int)=f; h=((putint(0), c) ? f : g); return h(4); }\n");
+}
+
+static int test_semantic_accepts_dynamic_function_value_assignment_then_forward_into_function_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-function-value-assignment-then-forward-into-param-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int f(int)=add1; int h(int)=add1; if(c) f=add2; h=f; return apply(h, 40); }\n");
+}
+
+static int test_semantic_accepts_dynamic_function_value_assignment_then_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-function-value-assignment-then-return-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int h(int)=add1; if(c) f=add2; h=f; return h; }\n"
+        "int main(){ return pick(1)(40); }\n");
+}
+
+static int test_semantic_accepts_comma_wrapped_function_value_direct_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "comma-wrapped-function-value-direct-call-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int g(int)=add1; return (0, g)(41); }\n");
+}
+
+static int test_semantic_rejects_comma_wrapped_function_value_direct_call_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "comma-wrapped-function-value-direct-call-scalar-type-mismatch-reject",
+        "int addf(float x){ return 1; }\n"
+        "int main(){ int f(float)=addf; return (0, f)(0); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_accepts_assignment_result_function_value_direct_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "assignment-result-function-value-direct-call-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int f(int)=add1; int h(int)=add1; return (h=f)(41); }\n");
+}
+
+static int test_semantic_rejects_assignment_result_function_value_direct_call_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "assignment-result-function-value-direct-call-scalar-type-mismatch-reject",
+        "int addf(float x){ return 1; }\n"
+        "int main(){ int f(float)=addf; int h(float)=addf; return (h=f)(0); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_accepts_wrapped_function_value_local_initializer_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-function-value-local-initializer-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int f(int)=add1; int h(int)=(0, f); return h(41); }\n");
+}
+
+static int test_semantic_accepts_ternary_function_value_local_initializer_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "ternary-function-value-local-initializer-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; int h(int)=c ? f : g; return h(40); }\n");
+}
+
+static int test_semantic_rejects_ternary_function_value_local_initializer_parameter_kind_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "ternary-function-value-local-initializer-param-kind-mismatch-reject",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; int h(float)=c ? f : g; return 0; }\n",
+        "SEMA-EXT-018");
+}
+
+static int test_semantic_rejects_function_valued_return_call_local_initializer_parameter_kind_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-return-call-local-initializer-param-kind-mismatch-reject",
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int){ return add1; }\n"
+        "int main(){ int h(float)=pick(); return 0; }\n",
+        "SEMA-EXT-018");
+}
+
+static int test_semantic_accepts_wrapped_function_value_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-function-value-return-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick()(int){ int f(int)=add1; int h(int)=add1; return (h=f); }\n"
+        "int main(){ return pick()(41); }\n");
+}
+
+static int test_semantic_accepts_dynamic_wrapped_function_value_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-wrapped-function-value-return-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int h(int)=add1; if(c) f=add2; return (h=f); }\n"
+        "int main(){ return pick(1)(40); }\n");
+}
+
+static int test_semantic_accepts_dynamic_comma_wrapped_function_value_forwarding_into_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-comma-wrapped-function-value-forward-into-param-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int g(int)=add1; if(c) g=add2; return apply((0, g), 40); }\n");
+}
+
+static int test_semantic_rejects_dynamic_comma_wrapped_function_value_forwarding_into_parameter_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "dynamic-comma-wrapped-function-value-forward-into-param-scalar-mismatch-reject",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int main(){ int c=1; int g(int)=add1; if(c) g=add2; return apply((0, g), 40); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_accepts_dynamic_assignment_result_function_value_forwarding_into_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-assignment-result-function-value-forward-into-param-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int f(int)=add1; int h(int)=add1; if(c) f=add2; return apply((h=f), 40); }\n");
+}
+
+static int test_semantic_rejects_dynamic_assignment_result_function_value_forwarding_into_parameter_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "dynamic-assignment-result-function-value-forward-into-param-scalar-mismatch-reject",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int main(){ int c=1; int f(int)=add1; int h(int)=add1; if(c) f=add2; return apply((h=f), 40); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_accepts_ternary_function_value_actual_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "ternary-function-value-actual-argument-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return apply(((putint(0), c) ? f : g), 40); }\n");
+}
+
+static int test_semantic_rejects_ternary_function_value_actual_argument_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "ternary-function-value-actual-argument-scalar-mismatch-reject",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return apply(((putint(0), c) ? f : g), 40); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_ternary_function_value_actual_argument_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "ternary-function-value-actual-argument-arity-mismatch-reject",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(1, 2); }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return apply(((putint(0), c) ? f : g), 40); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_ternary_closure_actual_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "ternary-closure-actual-argument-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return apply(((putint(0), c) ? f : g), 4); }\n");
+}
+
+static int test_semantic_rejects_ternary_closure_actual_argument_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "ternary-closure-actual-argument-scalar-mismatch-reject",
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return apply(((putint(0), c) ? f : g), 4); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_ternary_closure_actual_argument_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "ternary-closure-actual-argument-arity-mismatch-reject",
+        "int apply(int f(int), int x){ return f(1, 2); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return apply(((putint(0), c) ? f : g), 4); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_ternary_function_value_callee_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "ternary-function-value-callee-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return (((putint(0), c) ? f : g))(40); }\n");
+}
+
+static int test_semantic_rejects_ternary_function_value_callee_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "ternary-function-value-callee-scalar-mismatch-reject",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return (((putint(0), c) ? f : g))(1.25); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_ternary_function_value_callee_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "ternary-function-value-callee-arity-mismatch-reject",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return (((putint(0), c) ? f : g))(1, 2); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_ternary_closure_callee_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "ternary-closure-callee-pass",
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return (((putint(0), c) ? f : g))(4); }\n");
+}
+
+static int test_semantic_rejects_ternary_closure_callee_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "ternary-closure-callee-scalar-mismatch-reject",
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return (((putint(0), c) ? f : g))(1.25); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_ternary_closure_callee_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "ternary-closure-callee-arity-mismatch-reject",
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; return (((putint(0), c) ? f : g))(1, 2); }\n",
+        "SEMA-CALL-004");
+}
+
 static int test_semantic_rejects_calling_function_with_function_valued_parameter_under_extension_for_now(void) {
     return run_extension_semantic_expect_accepts(
         "function-valued-param-ext-call-pass",
@@ -2532,6 +3320,650 @@ static int test_semantic_accepts_direct_call_of_function_valued_parameter_under_
     return run_extension_semantic_expect_accepts(
         "function-valued-param-direct-call-semantic-pass",
         "int add1(int x){ return x+1; }\nint apply(int f(int), int x){ return f(x); }\nint main(){ return apply(add1, 41); }\n");
+}
+
+static int test_semantic_rejects_direct_call_of_function_valued_parameter_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-param-direct-call-scalar-type-mismatch-reject",
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return apply(add1, 0); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_direct_call_of_function_valued_parameter_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-param-direct-call-arity-mismatch-reject",
+        "int apply(int f(int), int x){ return f(1, 2); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return apply(add1, 0); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_local_function_value_direct_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "local-function-value-direct-call-pass",
+        "int add1(int x){ return x+1; }\nint main(){ int f(int)=add1; return f(41); }\n");
+}
+
+static int test_semantic_rejects_local_function_value_direct_call_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "local-function-value-direct-call-scalar-type-mismatch-reject",
+        "int addf(float x){ return 1; }\n"
+        "int main(){ int f(float)=addf; return f(0); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_local_function_value_direct_call_pair_argument_scalar_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "local-function-value-direct-call-pair-arg-scalar-mismatch-reject",
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int main(){ int f(pair)=sum; return f(1); }\n",
+        "SEMA-AGG-005");
+}
+
+static int test_semantic_rejects_local_function_value_direct_call_struct_argument_kind_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "local-function-value-direct-call-struct-arg-kind-mismatch-reject",
+        "struct P { int x; int y; };\n"
+        "struct Q { int x; int y; };\n"
+        "int sum(struct P p){ return p.x + p.y; }\n"
+        "int main(){ struct Q q={1,2}; int f(struct P)=sum; return f(q); }\n",
+        "SEMA-AGG-006");
+}
+
+static int test_semantic_rejects_local_function_value_plain_value_position_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "local-function-value-plain-value-reject",
+        "int add1(int x){ return x+1; }\nint main(){ int f(int)=add1; return f; }\n",
+        "SEMA-EXT-019");
+}
+
+static int test_semantic_accepts_local_zero_arg_function_value_direct_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "local-zero-arg-function-value-direct-call-pass",
+        "int next(){ return 9; }\nint main(){ int f()=next; return f(); }\n");
+}
+
+static int test_semantic_rejects_local_zero_arg_function_value_direct_call_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "local-zero-arg-function-value-direct-call-arity-mismatch-reject",
+        "int next(){ return 9; }\nint main(){ int f()=next; return f(1); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_local_zero_arg_void_function_value_direct_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "local-zero-arg-void-function-value-direct-call-pass",
+        "void ping(){ putint(1); return; }\nint main(){ void f()=ping; f(); return 0; }\n");
+}
+
+static int test_semantic_accepts_local_builtin_function_value_direct_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "local-builtin-function-value-direct-call-pass",
+        "int main(){ void f(int)=putint; f(7); return 0; }\n");
+}
+
+static int test_semantic_accepts_local_function_value_forwarding_into_function_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "local-function-value-forward-into-param-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int g(int)=add1; return apply(g, 41); }\n");
+}
+
+static int test_semantic_accepts_returned_closure_forwarding_into_function_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-closure-forward-into-param-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ int f(int)=make(3); return apply(f, 4); }\n");
+}
+
+static int test_semantic_accepts_zero_arg_returned_closure_forwarding_into_function_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-closure-zero-arg-forward-into-param-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int make(int x)() { return closure [x] int () { return x; }; }\n"
+        "int main(){ int f()=make(3); return apply0(f); }\n");
+}
+
+static int test_semantic_accepts_void_returned_closure_forwarding_into_function_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-closure-void-forward-into-param-pass",
+        "void apply0(void f()){ f(); }\n"
+        "void make(int x)() { return closure [x] void () { putint(x); return; }; }\n"
+        "int main(){ void f()=make(7); apply0(f); return 0; }\n");
+}
+
+static int test_semantic_accepts_returned_closure_alias_forwarding_into_function_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-closure-alias-forward-into-param-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ int f(int)=make(3); int g(int)=f; return apply(g, 4); }\n");
+}
+
+static int test_semantic_accepts_closure_assignment_then_direct_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-assignment-then-direct-call-pass",
+        "int main(){ int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; g=f; return g(4); }\n");
+}
+
+static int test_semantic_accepts_closure_assignment_then_forward_into_function_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-assignment-then-forward-into-param-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int y=5; int x=3; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; g=f; return apply(g, 4); }\n");
+}
+
+static int test_semantic_accepts_returned_closure_assignment_then_direct_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-closure-assignment-then-direct-call-pass",
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int main(){ int f(int)=make(3); int g(int)=make(5); g=f; return g(4); }\n");
+}
+
+static int test_semantic_accepts_returned_closure_assignment_then_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-closure-assignment-then-return-pass",
+        "int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }\n"
+        "int pick()(int){ int f(int)=make(3); int g(int)=make(5); g=f; return g; }\n"
+        "int main(){ return pick()(4); }\n");
+}
+
+static int test_semantic_accepts_dynamic_closure_local_dispatch_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-closure-local-dispatch-pass",
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; return f(4); }\n");
+}
+
+static int test_semantic_accepts_ternary_closure_local_initializer_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "ternary-closure-local-initializer-pass",
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; int h(int)=c ? f : g; return h(4); }\n");
+}
+
+static int test_semantic_accepts_dynamic_closure_local_forward_into_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-closure-local-forward-into-param-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z) { return x + z; }; int g(int)=closure [y] int (int z) { return y + z; }; if(c) f=g; return apply(f, 4); }\n");
+}
+
+static int test_semantic_accepts_multi_capture_closure_forward_into_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "multi-capture-closure-forward-into-param-pass",
+        "int apply(int f(int,int), int a, int b){ return f(a,b); }\n"
+        "int main(){ int x=3; int y=4; int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; return apply(f, 5, 6); }\n");
+}
+
+static int test_semantic_accepts_returned_multi_capture_local_closure_bind_and_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-multi-capture-local-closure-bind-call-pass",
+        "int pick(int x,int y)(int,int){ int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; return f; }\n"
+        "int main(){ int h(int,int)=pick(3,4); return h(5,6); }\n");
+}
+
+static int test_semantic_accepts_dynamic_returned_multi_capture_local_closure_forward_into_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "dynamic-returned-multi-capture-local-closure-forward-pass",
+        "int apply(int f(int,int), int a, int b){ return f(a,b); }\n"
+        "int pick(int x, int y, int c)(int,int){ int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; int g(int,int)=closure [x,y] int (int a, int b) { return x + y - a - b; }; if(c) f=g; return f; }\n"
+        "int main(){ return apply(pick(5, 7, 1), 3, 2); }\n");
+}
+
+static int test_semantic_accepts_local_function_value_alias_chain_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "local-function-value-alias-chain-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int f(int)=add1; int g(int)=f; return g(41); }\n");
+}
+
+static int test_semantic_rejects_local_function_value_nonfunction_initializer_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "local-function-value-nonfunction-init-reject",
+        "int main(){ int f(int)=0; return 0; }\n",
+        "SEMA-EXT-018");
+}
+
+static int test_semantic_rejects_local_function_value_signature_mismatch_initializer_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "local-function-value-signature-mismatch-init-reject",
+        "int next(){ return 9; }\nint main(){ int f(int)=next; return 0; }\n",
+        "SEMA-EXT-018");
+}
+
+static int test_semantic_rejects_local_function_value_alias_chain_parameter_kind_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "local-function-value-alias-chain-param-kind-mismatch-reject",
+        "int addf(float x){ return 1; }\n"
+        "int main(){ int f(float)=addf; int g(int)=f; return 0; }\n",
+        "SEMA-EXT-018");
+}
+
+static int test_semantic_rejects_local_function_value_alias_chain_expected_parameter_kind_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "local-function-value-alias-chain-expected-param-kind-mismatch-reject",
+        "int addi(int x){ return x+1; }\n"
+        "int main(){ int f(int)=addi; int g(float)=f; return 0; }\n",
+        "SEMA-EXT-018");
+}
+
+static int test_semantic_rejects_local_function_value_assignment_parameter_kind_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "local-function-value-assignment-param-kind-mismatch-reject",
+        "int addf(float x){ return 1; }\n"
+        "int addi(int x){ return x+1; }\n"
+        "int main(){ int f(float)=addf; int g(int)=addi; g=f; return 0; }\n",
+        "SEMA-EXT-019");
+}
+
+static int test_semantic_accepts_local_function_value_reassignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "local-function-value-reassignment-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int f(int)=add1; f=add2; return f(40); }\n");
+}
+
+static int test_semantic_accepts_dynamic_local_function_value_dispatch_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "local-function-value-dynamic-dispatch-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=0; int f(int)=add1; if((putint(0), c)) f=add2; return f(40); }\n");
+}
+
+static int test_semantic_rejects_closure_literal_outside_extension_mode(void) {
+    const CallableDiagCase c = {
+        "closure-literal-non-extension",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; return 0; }\n",
+        "SEMA-EXT-039",
+        "closures are available only under -extension mode",
+        1,
+        33,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_accepts_closure_literal_function_local_initializer_shape_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-literal-ext-phase1-shape-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; return f(4); }\n");
+}
+
+static int test_semantic_rejects_closure_literal_non_int_capture_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-literal-non-int-capture-ext-reject",
+        "int main(){ float x=1.25; int f(int)=closure [x] int (int y) { return y; }; return 0; }\n",
+        "SEMA-EXT-043");
+}
+
+static int test_semantic_rejects_closure_literal_nested_local_capture_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-literal-nested-local-capture-ext-reject",
+        "int main(){ if(1){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; } return 0; }\n",
+        "SEMA-EXT-041");
+}
+
+static int test_semantic_rejects_closure_literal_signature_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-literal-signature-mismatch-ext-reject",
+        "int main(){ int x=3; int f()=closure [x] int (int y) { return x + y; }; return 0; }\n",
+        "SEMA-EXT-045");
+}
+
+static int test_semantic_rejects_closure_literal_body_shape_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-literal-body-shape-ext-reject",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z=y; if(z) putint(z); return z; }; return 0; }\n",
+        "SEMA-EXT-041");
+}
+
+static int test_semantic_rejects_closure_literal_uncaptured_identifier_in_body_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-literal-uncaptured-body-name-ext-reject",
+        "int g=7; int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y + g; }; return 0; }\n",
+        "SEMA-EXT-044");
+}
+
+static int test_semantic_accepts_closure_literal_alias_chain_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-literal-alias-chain-ext-pass",
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; int g(int)=f; return g(4); }\n");
+}
+
+static int test_semantic_accepts_closure_literal_alias_chain_two_hops_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-literal-alias-chain-two-hop-ext-pass",
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; int g(int)=f; int h(int)=g; return h(4); }\n");
+}
+
+static int test_semantic_accepts_zero_arg_closure_alias_chain_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-zero-alias-chain-ext-pass",
+        "int main(){ int x=3; int f()=closure [x] int () { return x; }; int g()=f; return g(); }\n");
+}
+
+static int test_semantic_accepts_void_closure_alias_chain_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-void-alias-chain-ext-pass",
+        "int main(){ int x=7; void f()=closure [x] void () { putint(x); return; }; void g()=f; g(); return 0; }\n");
+}
+
+static int test_semantic_accepts_closure_literal_forward_into_function_value_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-forward-into-function-param-ext-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; int g(int)=f; return apply(g, 4); }\n");
+}
+
+static int test_semantic_accepts_zero_arg_closure_forward_into_function_value_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-zero-forward-into-function-param-ext-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int main(){ int y=3; int f()=closure [y] int () { return y; }; return apply0(f); }\n");
+}
+
+static int test_semantic_rejects_zero_arg_closure_forward_into_function_value_parameter_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-zero-forward-into-function-param-arity-mismatch-reject",
+        "int apply0(int f()){ return f(1); }\n"
+        "int main(){ int y=3; int f()=closure [y] int () { return y; }; return apply0(f); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_void_closure_forward_into_function_value_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-void-forward-into-function-param-ext-pass",
+        "void apply0(void f()){ f(); }\n"
+        "int main(){ int y=7; void f()=closure [y] void () { putint(y); return; }; apply0(f); return 0; }\n");
+}
+
+static int test_semantic_rejects_void_closure_forward_into_function_value_parameter_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-void-forward-into-function-param-arity-mismatch-reject",
+        "void apply0(void f()){ f(1); }\n"
+        "int main(){ int y=7; void f()=closure [y] void () { putint(y); return; }; apply0(f); return 0; }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_two_hop_closure_forward_into_function_value_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-two-hop-forward-into-function-param-ext-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; int g(int)=f; int h(int)=g; return apply(h, 4); }\n");
+}
+
+static int test_semantic_accepts_zero_arg_alias_closure_forward_into_function_value_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-zero-alias-forward-into-function-param-ext-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int main(){ int y=3; int f()=closure [y] int () { return y; }; int g()=f; return apply0(g); }\n");
+}
+
+static int test_semantic_accepts_void_alias_closure_forward_into_function_value_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-void-alias-forward-into-function-param-ext-pass",
+        "void apply0(void f()){ f(); }\n"
+        "int main(){ int y=7; void f()=closure [y] void () { putint(y); return; }; void g()=f; apply0(g); return 0; }\n");
+}
+
+static int test_semantic_accepts_direct_closure_literal_argument_to_function_value_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-direct-literal-arg-ext-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int y=3; return apply(closure [y] int (int z) { return y + z; }, 4); }\n");
+}
+
+static int test_semantic_rejects_direct_closure_literal_argument_to_function_value_parameter_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-direct-literal-arg-scalar-mismatch-reject",
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int main(){ int y=3; return apply(closure [y] int (int z) { return y + z; }, 4); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_accepts_zero_arg_direct_closure_literal_argument_to_function_value_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-zero-direct-literal-arg-ext-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int main(){ int y=3; return apply0(closure [y] int () { return y; }); }\n");
+}
+
+static int test_semantic_rejects_zero_arg_direct_closure_literal_argument_to_function_value_parameter_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-zero-direct-literal-arg-arity-mismatch-reject",
+        "int apply0(int f()){ return f(1); }\n"
+        "int main(){ int y=3; return apply0(closure [y] int () { return y; }); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_void_direct_closure_literal_argument_to_function_value_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-void-direct-literal-arg-ext-pass",
+        "void apply0(void f()){ f(); }\n"
+        "int main(){ int y=7; apply0(closure [y] void () { putint(y); return; }); return 0; }\n");
+}
+
+static int test_semantic_rejects_void_direct_closure_literal_argument_to_function_value_parameter_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-void-direct-literal-arg-arity-mismatch-reject",
+        "void apply0(void f()){ f(1); }\n"
+        "int main(){ int y=7; apply0(closure [y] void () { putint(y); return; }); return 0; }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_comma_wrapped_closure_forward_into_function_value_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-comma-forward-into-function-param-ext-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; return apply((f, f), 4); }\n");
+}
+
+static int test_semantic_rejects_comma_wrapped_closure_forward_into_function_value_parameter_scalar_type_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-comma-forward-into-function-param-scalar-mismatch-reject",
+        "int apply(int f(int), int x){ return f(1.25); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z) { return y + z; }; return apply((f, f), 4); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_assignment_of_closure_literal_after_function_local_declaration_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-assignment-after-local-decl-ext-reject",
+        "int main(){ int y=3; int f(int); f = closure [y] int (int z) { return y + z; }; return 0; }\n",
+        "SEMA-EXT-040");
+}
+
+static int test_semantic_accepts_zero_arg_closure_direct_local_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-zero-arg-direct-call-ext-pass",
+        "int main(){ int x=3; int f()=closure [x] int () { return x; }; return f(); }\n");
+}
+
+static int test_semantic_rejects_zero_arg_closure_direct_local_call_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-zero-arg-direct-call-arity-mismatch-reject",
+        "int main(){ int x=3; int f()=closure [x] int () { return x; }; return f(1); }\n",
+        "SEMA-CALL-004");
+}
+
+static int test_semantic_accepts_multi_capture_closure_direct_local_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-multi-capture-direct-call-ext-pass",
+        "int main(){ int x=3; int y=4; int f()=closure [x,y] int () { return x + y; }; return f(); }\n");
+}
+
+static int test_semantic_accepts_multi_capture_two_arg_closure_direct_local_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-multi-capture-two-arg-direct-call-ext-pass",
+        "int main(){ int x=3; int y=4; int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; return f(5,6); }\n");
+}
+
+static int test_semantic_accepts_void_closure_direct_local_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-void-direct-call-ext-pass",
+        "int main(){ int x=7; void f()=closure [x] void () { putint(x); return; }; f(); return 0; }\n");
+}
+
+static int test_semantic_accepts_int_closure_expression_statement_prefix_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-prestmt-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { putint(x); return x + y; }; return f(4); }\n");
+}
+
+static int test_semantic_rejects_int_closure_control_flow_prefix_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-int-control-prefix-ext-reject",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { if(y) putint(x); return x + y; }; return f(4); }\n",
+        "SEMA-EXT-041");
+}
+
+static int test_semantic_accepts_int_closure_local_decl_prefix_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-local-decl-prefix-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z = x + y; return z; }; return f(4); }\n");
+}
+
+static int test_semantic_rejects_int_closure_local_decl_shadow_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-int-local-decl-shadow-ext-reject",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int x = y; return x; }; return f(4); }\n",
+        "SEMA-EXT-046");
+}
+
+static int test_semantic_rejects_int_closure_non_int_local_decl_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-int-local-decl-float-ext-reject",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { float z = 1.25; return y; }; return f(4); }\n",
+        "SEMA-EXT-041");
+}
+
+static int test_semantic_accepts_int_closure_parameter_assignment_prefix_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-param-assign-prefix-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { y = y + 1; return x + y; }; return f(4); }\n");
+}
+
+static int test_semantic_accepts_int_closure_local_assignment_prefix_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-local-assign-prefix-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z = y; z = z + 1; return x + z; }; return f(4); }\n");
+}
+
+static int test_semantic_rejects_int_closure_capture_assignment_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-int-capture-assign-ext-reject",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { x = y; return x; }; return f(4); }\n",
+        "SEMA-EXT-047");
+}
+
+static int test_semantic_accepts_int_closure_uninitialized_local_prefix_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-uninit-local-prefix-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z; z = y + 1; return x + z; }; return f(4); }\n");
+}
+
+static int test_semantic_accepts_int_closure_multi_declarator_local_prefix_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-multi-decl-prefix-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int a, b; a = y; b = a + 1; return x + b; }; return f(4); }\n");
+}
+
+static int test_semantic_rejects_int_closure_local_decl_shadow_parameter_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-int-local-decl-shadow-param-ext-reject",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int y; y = 1; return x + y; }; return f(4); }\n",
+        "SEMA-EXT-046");
+}
+
+static int test_semantic_accepts_int_closure_parameter_compound_assignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-param-plus-assign-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { y += 1; return x + y; }; return f(4); }\n");
+}
+
+static int test_semantic_accepts_int_closure_local_compound_assignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-local-plus-assign-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z = y; z += 1; return x + z; }; return f(4); }\n");
+}
+
+static int test_semantic_accepts_int_closure_parameter_prefix_increment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-param-preinc-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { ++y; return x + y; }; return f(4); }\n");
+}
+
+static int test_semantic_accepts_int_closure_local_postfix_increment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-local-postinc-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z = y; z++; return x + z; }; return f(4); }\n");
+}
+
+static int test_semantic_rejects_int_closure_capture_prefix_increment_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-int-capture-preinc-ext-reject",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { ++x; return x + y; }; return f(4); }\n",
+        "SEMA-EXT-047");
+}
+
+static int test_semantic_accepts_int_closure_bitwise_expression_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-bitwise-expr-ext-pass",
+        "int main(){ int x=6; int f(int)=closure [x] int (int y) { return (x & y) ^ 1; }; return f(3); }\n");
+}
+
+static int test_semantic_accepts_int_closure_logical_expression_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-logical-expr-ext-pass",
+        "int main(){ int x=0; int f(int)=closure [x] int (int y) { return (x || y) && 1; }; return f(4); }\n");
+}
+
+static int test_semantic_accepts_int_closure_shift_expression_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-shift-expr-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return (x << 1) + (y >> 1); }; return f(4); }\n");
+}
+
+static int test_semantic_accepts_int_closure_bitwise_compound_assignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-bitwise-compound-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { y &= 7; return x + y; }; return f(12); }\n");
+}
+
+static int test_semantic_accepts_int_closure_bitwise_not_expression_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-bitwise-not-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return ~x + y; }; return f(4); }\n");
+}
+
+static int test_semantic_rejects_int_closure_comma_expression_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "closure-int-comma-ext-reject",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return (x = y, x + y); }; return f(4); }\n",
+        "SEMA-EXT-047");
+}
+
+static int test_semantic_accepts_int_closure_return_assignment_expression_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-return-assign-expr-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return (y = y + 1); }; return f(4); }\n");
+}
+
+static int test_semantic_accepts_int_closure_return_prefix_increment_expression_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-return-preinc-expr-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return ++y; }; return f(4); }\n");
+}
+
+static int test_semantic_accepts_int_closure_return_comma_expression_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-int-return-comma-expr-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return (y = y + 1, x + y); }; return f(4); }\n");
 }
 
 static int test_semantic_accepts_pair_copy_under_extension(void) {
@@ -2624,6 +4056,299 @@ static int test_semantic_rejects_plain_struct_value_in_int_context_under_extensi
         "SEMA-AGG-004");
 }
 
+static int test_semantic_rejects_local_pair_as_scalar_call_argument_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "pair-local-scalar-callarg-ext-reject",
+        "int sink(int x){ return x; }\n"
+        "int main(){ pair a={1,2}; return sink(a); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_local_struct_as_scalar_call_argument_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "struct-local-scalar-callarg-ext-reject",
+        "struct Point { int x; int y; };\n"
+        "int sink(int x){ return x; }\n"
+        "int main(){ struct Point p={1,2}; return sink(p); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_local_pair_scalar_initializer_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "pair-local-scalar-init-ext-reject",
+        "int main(){ pair a={1,2}; int x = a; return x; }\n",
+        "SEMA-TYPE-004");
+}
+
+static int test_semantic_rejects_local_struct_scalar_initializer_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "struct-local-scalar-init-ext-reject",
+        "struct Point { int x; int y; };\n"
+        "int main(){ struct Point p={1,2}; int x = p; return x; }\n",
+        "SEMA-TYPE-004");
+}
+
+static int test_semantic_rejects_local_pair_scalar_assignment_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "pair-local-scalar-assign-ext-reject",
+        "int main(){ pair a={1,2}; int x = 0; x = a; return x; }\n",
+        "SEMA-TYPE-006");
+}
+
+static int test_semantic_rejects_local_struct_scalar_assignment_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "struct-local-scalar-assign-ext-reject",
+        "struct Point { int x; int y; };\n"
+        "int main(){ struct Point p={1,2}; int x = 0; x = p; return x; }\n",
+        "SEMA-TYPE-006");
+}
+
+static int test_semantic_rejects_local_pair_control_condition_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "pair-local-control-ext-reject",
+        "int main(){ pair a={1,2}; if(a) return 1; return 0; }\n",
+        "SEMA-AGG-004");
+}
+
+static int test_semantic_rejects_local_struct_control_condition_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "struct-local-control-ext-reject",
+        "struct Point { int x; int y; };\n"
+        "int main(){ struct Point p={1,2}; if(p) return 1; return 0; }\n",
+        "SEMA-AGG-004");
+}
+
+static int test_semantic_accepts_pair_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "pair-return-ext-pass",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_struct_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "struct-return-ext-pass",
+        "struct Point { int x; int y; };\n"
+        "struct Point mk(){ struct Point p={1,2}; return p; }\n"
+        "int main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_pair_call_result_copy_init_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "pair-call-copy-init-ext-pass",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ pair q = mk(); return q.second; }\n");
+}
+
+static int test_semantic_accepts_struct_call_result_copy_init_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "struct-call-copy-init-ext-pass",
+        "struct Point { int x; int y; };\n"
+        "struct Point mk(){ struct Point p={1,2}; return p; }\n"
+        "int main(){ struct Point q = mk(); return q.y; }\n");
+}
+
+static int test_semantic_accepts_pair_call_result_assignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "pair-call-assignment-ext-pass",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ pair q={7,8}; q = mk(); return q.second; }\n");
+}
+
+static int test_semantic_accepts_struct_call_result_assignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "struct-call-assignment-ext-pass",
+        "struct Point { int x; int y; };\n"
+        "struct Point mk(){ struct Point p={1,2}; return p; }\n"
+        "int main(){ struct Point q={7,8}; q = mk(); return q.y; }\n");
+}
+
+static int test_semantic_accepts_pair_parameter_to_return_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "pair-param-return-forward-ext-pass",
+        "pair id(pair p){ return p; }\n"
+        "int main(){ pair q={1,2}; pair r=id(q); return r.second; }\n");
+}
+
+static int test_semantic_accepts_struct_parameter_to_return_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "struct-param-return-forward-ext-pass",
+        "struct Point { int x; int y; };\n"
+        "struct Point id(struct Point p){ return p; }\n"
+        "int main(){ struct Point q={1,2}; struct Point r=id(q); return r.y; }\n");
+}
+
+static int test_semantic_accepts_nested_struct_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "nested-struct-return-ext-pass",
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "int main(){ struct Mid q=mk(); return q.p.second + q.z; }\n");
+}
+
+static int test_semantic_accepts_pair_call_result_as_aggregate_call_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "pair-call-result-callarg-ext-pass",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int main(){ return sum(mk()); }\n");
+}
+
+static int test_semantic_accepts_struct_call_result_as_aggregate_call_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "struct-call-result-callarg-ext-pass",
+        "struct Point { int x; int y; };\n"
+        "struct Point mk(){ struct Point p={1,2}; return p; }\n"
+        "int sum(struct Point p){ return p.x + p.y; }\n"
+        "int main(){ return sum(mk()); }\n");
+}
+
+static int test_semantic_accepts_nested_struct_call_result_as_aggregate_call_argument_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "nested-struct-call-result-callarg-ext-pass",
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "int sum(struct Mid m){ return m.p.first + m.p.second + m.z; }\n"
+        "int main(){ return sum(mk()); }\n");
+}
+
+static int test_semantic_accepts_pair_multi_hop_return_chain_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "pair-multi-hop-return-chain-ext-pass",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair id(pair p){ return p; }\n"
+        "pair wrap(){ return id(mk()); }\n"
+        "int main(){ pair q=wrap(); return q.second; }\n");
+}
+
+static int test_semantic_accepts_nested_struct_multi_hop_return_chain_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "nested-struct-multi-hop-return-chain-ext-pass",
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "struct Mid id(struct Mid m){ return m; }\n"
+        "struct Mid wrap(){ return id(mk()); }\n"
+        "int main(){ struct Mid q=wrap(); return q.p.second + q.z; }\n");
+}
+
+static int test_semantic_rejects_pair_call_result_as_scalar_call_argument_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "pair-call-result-scalar-callarg-ext-reject",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int sink(int x){ return x; }\n"
+        "int main(){ return sink(mk()); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_pair_multi_hop_return_chain_as_scalar_call_argument_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "pair-multi-hop-scalar-callarg-ext-reject",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair wrap(){ return mk(); }\n"
+        "int sink(int x){ return x; }\n"
+        "int main(){ return sink(wrap()); }\n",
+        "SEMA-TYPE-003");
+}
+
+static int test_semantic_rejects_pair_call_result_scalar_initializer_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "pair-call-result-scalar-init-ext-reject",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ int x = mk(); return x; }\n",
+        "SEMA-TYPE-004");
+}
+
+static int test_semantic_rejects_pair_call_result_scalar_assignment_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "pair-call-result-scalar-assign-ext-reject",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ int x = 0; x = mk(); return x; }\n",
+        "SEMA-TYPE-006");
+}
+
+static int test_semantic_rejects_pair_multi_hop_return_chain_scalar_initializer_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "pair-multi-hop-scalar-init-ext-reject",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair wrap(){ return mk(); }\n"
+        "int main(){ int x = wrap(); return x; }\n",
+        "SEMA-TYPE-004");
+}
+
+static int test_semantic_rejects_nested_struct_multi_hop_return_chain_scalar_initializer_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "nested-struct-multi-hop-scalar-init-ext-reject",
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "struct Mid id(struct Mid m){ return m; }\n"
+        "struct Mid wrap(){ return id(mk()); }\n"
+        "int main(){ int x = wrap(); return x; }\n",
+        "SEMA-TYPE-004");
+}
+
+static int test_semantic_rejects_pair_multi_hop_return_chain_control_condition_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "pair-multi-hop-control-ext-reject",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair wrap(){ return mk(); }\n"
+        "int main(){ if(wrap()) return 1; return 0; }\n",
+        "SEMA-AGG-004");
+}
+
+static int test_semantic_rejects_nested_struct_multi_hop_return_chain_control_condition_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "nested-struct-multi-hop-control-ext-reject",
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "struct Mid id(struct Mid m){ return m; }\n"
+        "struct Mid wrap(){ return id(mk()); }\n"
+        "int main(){ if(wrap()) return 1; return 0; }\n",
+        "SEMA-AGG-004");
+}
+
+static int test_semantic_rejects_pair_call_result_direct_member_access_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "pair-call-result-member-ext-reject",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ return mk().second; }\n",
+        "SEMA-AGG-003");
+}
+
+static int test_semantic_rejects_struct_call_result_direct_member_access_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "struct-call-result-member-ext-reject",
+        "struct Point { int x; int y; };\n"
+        "struct Point mk(){ struct Point p={1,2}; return p; }\n"
+        "int main(){ return mk().y; }\n",
+        "SEMA-AGG-003");
+}
+
+static int test_semantic_rejects_parenthesized_pair_call_result_direct_member_access_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "pair-call-result-member-paren-ext-reject",
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ return (mk()).second; }\n",
+        "SEMA-AGG-003");
+}
+
+static int test_semantic_rejects_parenthesized_struct_call_result_direct_member_access_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "struct-call-result-member-paren-ext-reject",
+        "struct Point { int x; int y; };\n"
+        "struct Point mk(){ struct Point p={1,2}; return p; }\n"
+        "int main(){ return ((mk())).y; }\n",
+        "SEMA-AGG-003");
+}
+
+static int test_semantic_rejects_nested_struct_call_result_direct_member_chain_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "nested-struct-call-result-member-chain-ext-reject",
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "int main(){ return mk().p.second; }\n",
+        "SEMA-AGG-003");
+}
+
 static int test_semantic_rejects_unknown_struct_field_under_extension(void) {
     return run_extension_semantic_expect_rejects(
         "struct-unknown-field-ext-reject",
@@ -2637,6 +4362,164 @@ static int test_semantic_accepts_pair_and_struct_member_lookup_under_extension(v
         "pair-struct-member-lookup-ext-pass",
         "struct Point { int x; int y; };\n"
         "int main(){ pair a={1,2}; struct Point p={3,4}; return a.first + p.y; }\n");
+}
+
+static int test_semantic_accepts_nested_pair_field_lookup_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "nested-pair-field-lookup-ext-pass",
+        "struct Outer { pair p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; return o.p.first + o.p.second + o.z; }\n");
+}
+
+static int test_semantic_accepts_nested_struct_field_lookup_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "nested-struct-field-lookup-ext-pass",
+        "struct Point { int x; int y; };\n"
+        "struct Outer { struct Point p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; return o.p.x + o.p.y + o.z; }\n");
+}
+
+static int test_semantic_accepts_nested_pair_copy_init_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "nested-pair-copy-init-ext-pass",
+        "struct Outer { pair p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; pair q=o.p; return q.first + q.second; }\n");
+}
+
+static int test_semantic_accepts_nested_struct_copy_init_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "nested-struct-copy-init-ext-pass",
+        "struct Point { int x; int y; };\n"
+        "struct Outer { struct Point p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; struct Point q=o.p; return q.x + q.y; }\n");
+}
+
+static int test_semantic_accepts_nested_pair_assignment_from_member_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "nested-pair-assign-member-ext-pass",
+        "struct Outer { pair p; int z; };\n"
+        "int main(){ pair q={4,5}; struct Outer o={{1,2},3}; q=o.p; return q.first + q.second; }\n");
+}
+
+static int test_semantic_accepts_nested_struct_assignment_from_member_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "nested-struct-assign-member-ext-pass",
+        "struct Point { int x; int y; };\n"
+        "struct Outer { struct Point p; int z; };\n"
+        "int main(){ struct Point q={4,5}; struct Outer o={{1,2},3}; q=o.p; return q.x + q.y; }\n");
+}
+
+static int test_semantic_accepts_deep_nested_struct_field_lookup_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "deep-nested-struct-field-lookup-ext-pass",
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; return o.m.p.x + o.m.p.y + o.m.z + o.w; }\n");
+}
+
+static int test_semantic_accepts_deep_nested_struct_copy_init_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "deep-nested-struct-copy-init-ext-pass",
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; struct Mid m=o.m; return m.p.x + m.p.y + m.z; }\n");
+}
+
+static int test_semantic_accepts_deep_nested_struct_assignment_from_member_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "deep-nested-struct-assign-member-ext-pass",
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Mid m={{7,8},9}; struct Outer o={{{1,2},3},4}; m=o.m; return m.p.x + m.p.y + m.z; }\n");
+}
+
+static int test_semantic_accepts_deep_nested_pair_field_lookup_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "deep-nested-pair-field-lookup-ext-pass",
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; return o.m.p.first + o.m.p.second + o.m.z + o.w; }\n");
+}
+
+static int test_semantic_accepts_deep_nested_pair_copy_init_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "deep-nested-pair-copy-init-ext-pass",
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; struct Mid m=o.m; return m.p.first + m.p.second + m.z; }\n");
+}
+
+static int test_semantic_accepts_deep_nested_pair_assignment_from_member_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "deep-nested-pair-assign-member-ext-pass",
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Mid m={{7,8},9}; struct Outer o={{{1,2},3},4}; m=o.m; return m.p.first + m.p.second + m.z; }\n");
+}
+
+static int test_semantic_accepts_pair_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "pair-param-ext-pass",
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int main(){ pair p={1,2}; return sum(p); }\n");
+}
+
+static int test_semantic_accepts_struct_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "struct-param-ext-pass",
+        "struct Point { int x; int y; };\n"
+        "int sum(struct Point p){ return p.x + p.y; }\n"
+        "int main(){ struct Point p={3,4}; return sum(p); }\n");
+}
+
+static int test_semantic_accepts_nested_struct_parameter_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "nested-struct-param-ext-pass",
+        "struct Mid { pair p; int z; };\n"
+        "int sum(struct Mid m){ return m.p.first + m.p.second + m.z; }\n"
+        "int main(){ struct Mid m={{1,2},3}; return sum(m); }\n");
+}
+
+static int test_semantic_rejects_deep_nested_struct_assignment_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "deep-nested-struct-assign-mismatch-ext-reject",
+        "struct P { int x; int y; };\n"
+        "struct Q { int x; int y; };\n"
+        "struct Outer { struct P p; int z; };\n"
+        "int main(){ struct Q q={4,5}; struct Outer o={{{1,2},3}}; q=o.p; return q.x; }\n",
+        "SEMA-AGG-006");
+}
+
+static int test_semantic_rejects_deep_nested_pair_struct_assignment_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "deep-nested-pair-struct-assign-mismatch-ext-reject",
+        "struct A { pair p; int z; };\n"
+        "struct B { pair p; int z; };\n"
+        "struct Outer { struct A a; int w; };\n"
+        "int main(){ struct B b={{7,8},9}; struct Outer o={{{1,2},3},4}; b=o.a; return b.z; }\n",
+        "SEMA-AGG-006");
+}
+
+static int test_semantic_rejects_deep_nested_pair_initializer_too_many_items_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "deep-nested-pair-init-too-many-ext-reject",
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2,3},4},5}; return 0; }\n",
+        "SEMA-AGG-002");
+}
+
+static int test_semantic_rejects_deep_nested_struct_initializer_too_many_items_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "deep-nested-struct-init-too-many-ext-reject",
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2,3},4},5}; return 0; }\n",
+        "SEMA-AGG-002");
 }
 
 static int test_semantic_accepts_float_local_declaration_under_extension(void) {
@@ -2714,12 +4597,30 @@ static int test_semantic_accepts_zero_arg_function_valued_parameter_under_extens
         "int main(){ return apply0(next); }\n");
 }
 
+static int test_semantic_rejects_zero_arg_function_valued_parameter_direct_call_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-param-zero-arg-direct-call-arity-mismatch-reject",
+        "int apply0(int f()){ return f(1); }\n"
+        "int next(){ return 9; }\n"
+        "int main(){ return apply0(next); }\n",
+        "SEMA-CALL-004");
+}
+
 static int test_semantic_accepts_zero_arg_void_function_valued_parameter_under_extension(void) {
     return run_extension_semantic_expect_accepts(
         "function-valued-param-zero-arg-void-pass",
         "void ping(){ putint(1); }\n"
         "void apply0(void f()){ f(); }\n"
         "int main(){ apply0(ping); return 0; }\n");
+}
+
+static int test_semantic_rejects_zero_arg_void_function_valued_parameter_direct_call_arity_mismatch_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "function-valued-param-zero-arg-void-direct-call-arity-mismatch-reject",
+        "void apply0(void f()){ f(1); }\n"
+        "void ping(){ return; }\n"
+        "int main(){ apply0(ping); return 0; }\n",
+        "SEMA-CALL-004");
 }
 
 static int test_semantic_rejects_nonvoid_function_for_void_function_valued_parameter_under_extension(void) {

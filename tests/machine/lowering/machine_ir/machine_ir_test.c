@@ -777,6 +777,152 @@ cleanup:
     return ok;
 }
 
+static int test_machine_ir_manual_verify_rejects_unknown_addr_function(void) {
+    MachineIrProgram program;
+    MachineIrFunction *function = NULL;
+    MachineIrBasicBlock *block = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError error;
+
+    machine_ir_program_init(&program);
+    if (!machine_ir_program_append_function(&program, "main", 1, &function, &error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, &block, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: addr-function invalid setup failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+
+    program.register_bank.register_count = 1;
+    program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!program.register_bank.registers) {
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    program.register_bank.registers[0].register_id = 0;
+    program.register_bank.registers[0].name = dup_text("r0");
+    program.register_bank.registers[0].allocatable = 1u;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_FUNCTION;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.addr_function_name = dup_text("missing_fn");
+    if (!instruction.as.addr_function_name) {
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    if (!machine_ir_block_append_instruction(block, &instruction, &error) ||
+        !machine_ir_block_set_return(block, machine_ir_operand_register(0), &error)) {
+        free(instruction.as.addr_function_name);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    free(instruction.as.addr_function_name);
+
+    if (machine_ir_verify_program(&program, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: verifier accepted unknown addr_function target\n");
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    if (!strstr(error.message, "MACHINE-IR-135A")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: unexpected verifier message for unknown addr_function target: %s\n",
+            error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+
+    machine_ir_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_translation_only_lowers_callable_object_code_projection(void) {
+    ValueSsaProgram program;
+    ValueSsaFunction *callee = NULL;
+    ValueSsaFunction *main_function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaError value_error;
+    ValueSsaMachineRegisterBank bank;
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    value_ssa_machine_register_bank_init(&bank);
+    machine_ir_program_init(&machine_program);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!value_ssa_program_append_function(&program, "callee", 0, &callee, &value_error) ||
+        !callee ||
+        !value_ssa_program_append_function(&program, "main", 1, &main_function, &value_error) ||
+        !main_function ||
+        !value_ssa_function_append_block(main_function, NULL, &block, &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: callable-object code projection Value-SSA setup failed: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    callee->parameter_count = 0u;
+    main_function->parameter_count = 0u;
+    main_function->next_value_id = 1u;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_ADDR_FUNCTION;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(0u);
+    instruction.as.addr_function_name = dup_text("callee");
+    if (!instruction.as.addr_function_name) {
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_block_append_instruction(block, &instruction, &value_error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(0u), &value_error)) {
+        free(instruction.as.addr_function_name);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    free(instruction.as.addr_function_name);
+
+    if (!value_ssa_build_flat_machine_register_bank(8, &bank, &value_error) ||
+        !machine_ir_allocate_lower_program_from_value_ssa(&program, 8, &bank, &machine_program, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: callable-object code projection machine lowering failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        value_ssa_program_free(&program);
+        value_ssa_machine_register_bank_free(&bank);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    if (!machine_ir_dump_program(&machine_program, &actual_text, &machine_error) || !actual_text) {
+        fprintf(stderr, "[machine-ir] FAIL: callable-object code projection machine dump failed: %s\n", machine_error.message);
+        value_ssa_program_free(&program);
+        machine_ir_program_free(&machine_program);
+        free(actual_text);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "addr_function callee") ||
+        !machine_ir_verify_program(&machine_program, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: callable-object code projection machine-ir mismatch\nactual:\n%s\nverify:%s\n",
+            actual_text ? actual_text : "<null>",
+            machine_error.message);
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    value_ssa_machine_register_bank_free(&bank);
+    machine_ir_program_free(&machine_program);
+    return ok;
+}
+
 static int prepare_manual_phi_spill_result(ValueSsaProgramAllocationResult *result,
     const ValueSsaProgram *program) {
     ValueSsaAllocationResult *function_result;
@@ -3688,6 +3834,826 @@ cleanup:
     return ok;
 }
 
+static int test_machine_ir_accepts_nested_struct_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Outer { struct Point p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; putint(o.p.x); putint(o.p.y); return o.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-FIELD-LOOKUP-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0") ||
+        !strstr(actual_text, "local.0") ||
+        !strstr(actual_text, "local.1") ||
+        !strstr(actual_text, "local.2") ||
+        !strstr(actual_text, "store local.0, 1") ||
+        !strstr(actual_text, "store local.1, 2") ||
+        !strstr(actual_text, "store local.2, 3") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "load local.1") ||
+        !strstr(actual_text, "load local.2") ||
+        !strstr(actual_text, "call putint(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-FIELD-LOOKUP-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_pair_parameter_under_extension(void) {
+    static const char *source =
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int main(){ pair p={1,2}; return sum(p); }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-PARAM-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function sum params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "load local.1") ||
+        !strstr(actual_text, "function main params=0 locals=2 spills=0") ||
+        !strstr(actual_text, "store local.0, 1") ||
+        !strstr(actual_text, "store local.1, 2") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-PARAM-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_pair_return_copy_init_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ pair q = mk(); return q.second; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-RETURN-COPY-INIT-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mk params=2 locals=4 spills=0") ||
+        !strstr(actual_text, "store local.2, 1") ||
+        !strstr(actual_text, "store local.3, 2") ||
+        !strstr(actual_text, "store_indirect reg.1(r1), reg.0(r0)") ||
+        !strstr(actual_text, "function main params=0 locals=2 spills=0") ||
+        !strstr(actual_text, "addr local.0") ||
+        !strstr(actual_text, "addr local.1") ||
+        !strstr(actual_text, "call mk(reg.1(r1), reg.0(r0))") ||
+        !strstr(actual_text, "load local.1") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-RETURN-COPY-INIT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_pair_call_result_as_aggregate_call_argument_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int main(){ return sum(mk()); }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-CALL-RESULT-CALLARG-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mk params=2 locals=4 spills=0") ||
+        !strstr(actual_text, "function sum params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "function main params=0 locals=2 spills=0") ||
+        !strstr(actual_text, "addr local.0") ||
+        !strstr(actual_text, "addr local.1") ||
+        !strstr(actual_text, "store_indirect reg.1(r1), 1") ||
+        !strstr(actual_text, "store_indirect reg.0(r0), 2") ||
+        !strstr(actual_text, "add reg.1(r1), reg.0(r0)") ||
+        !strstr(actual_text, "ret reg.1(r1)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-CALL-RESULT-CALLARG-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_pair_multi_hop_return_chain_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair id(pair p){ return p; }\n"
+        "pair wrap(){ return id(mk()); }\n"
+        "int main(){ pair q=wrap(); return q.second; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-MULTIHOP-RET-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mk params=2 locals=4 spills=0") ||
+        !strstr(actual_text, "function id params=4 locals=4 spills=0") ||
+        !strstr(actual_text, "function wrap params=2 locals=4 spills=0") ||
+        !strstr(actual_text, "function main params=0 locals=2 spills=0") ||
+        !strstr(actual_text, "addr local.2") ||
+        !strstr(actual_text, "addr local.3") ||
+        !strstr(actual_text, "store_indirect reg.1(r1), 1") ||
+        !strstr(actual_text, "store_indirect reg.0(r0), 2") ||
+        !strstr(actual_text, "store_indirect reg.3(r3), reg.1(r1)") ||
+        !strstr(actual_text, "store_indirect reg.2(r2), reg.0(r0)") ||
+        !strstr(actual_text, "call wrap(reg.1(r1), reg.0(r0))") ||
+        !strstr(actual_text, "ret reg.1(r1)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-MULTIHOP-RET-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_nested_struct_multi_hop_return_chain_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "struct Mid id(struct Mid m){ return m; }\n"
+        "struct Mid wrap(){ return id(mk()); }\n"
+        "int main(){ struct Mid q=wrap(); return q.p.second + q.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-MULTIHOP-RET-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mk params=3 locals=6 spills=0") ||
+        !strstr(actual_text, "function id params=6 locals=6 spills=0") ||
+        !strstr(actual_text, "function wrap params=3 locals=6 spills=0") ||
+        !strstr(actual_text, "function main params=0 locals=3 spills=0") ||
+        !strstr(actual_text, "addr local.3") ||
+        !strstr(actual_text, "addr local.4") ||
+        !strstr(actual_text, "addr local.5") ||
+        !strstr(actual_text, "call mk(reg.2(r2), reg.1(r1), reg.0(r0))") ||
+        !strstr(actual_text, "call id(reg.5(r5), reg.4(r4), reg.3(r3), reg.2(r2), reg.1(r1), reg.0(r0))") ||
+        !strstr(actual_text, "call wrap(reg.2(r2), reg.1(r1), reg.0(r0))") ||
+        !strstr(actual_text, "add reg.2(r2), reg.1(r1)") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-MULTIHOP-RET-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_nested_struct_return_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "int main(){ struct Mid q=mk(); return q.p.second + q.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-RETURN-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mk params=3 locals=6 spills=0") ||
+        !strstr(actual_text, "store local.3, 1") ||
+        !strstr(actual_text, "store local.4, 2") ||
+        !strstr(actual_text, "store local.5, 3") ||
+        !strstr(actual_text, "store_indirect reg.1(r1), reg.0(r0)") ||
+        !strstr(actual_text, "function main params=0 locals=3 spills=0") ||
+        !strstr(actual_text, "addr local.0") ||
+        !strstr(actual_text, "addr local.1") ||
+        !strstr(actual_text, "addr local.2") ||
+        !strstr(actual_text, "call mk(") ||
+        !strstr(actual_text, "add reg.1(r1), reg.0(r0)") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-RETURN-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_nested_struct_parameter_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "int sum(struct Mid m){ return m.p.first + m.p.second + m.z; }\n"
+        "int main(){ struct Mid m={{1,2},3}; return sum(m); }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-PARAM-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function sum params=3 locals=3 spills=0") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "load local.1") ||
+        !strstr(actual_text, "load local.2") ||
+        !strstr(actual_text, "function main params=0 locals=3 spills=0") ||
+        !strstr(actual_text, "store local.0, 1") ||
+        !strstr(actual_text, "store local.1, 2") ||
+        !strstr(actual_text, "store local.2, 3") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-PARAM-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_nested_pair_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Outer { pair p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; pair q=o.p; putint(q.first); return q.second; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-PAIR-COPY-INIT-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=5 spills=0") ||
+        !strstr(actual_text, "store local.0, 1") ||
+        !strstr(actual_text, "store local.1, 2") ||
+        !strstr(actual_text, "store local.3, reg.") ||
+        !strstr(actual_text, "store local.4, reg.") ||
+        !strstr(actual_text, "load local.3") ||
+        !strstr(actual_text, "load local.4") ||
+        !strstr(actual_text, "call putint(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-PAIR-COPY-INIT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_nested_struct_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Outer { struct Point p; int z; };\n"
+        "int main(){ struct Point q={4,5}; struct Outer o={{1,2},3}; q=o.p; putint(q.x); return q.y; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-ASSIGN-MEMBER-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=5 spills=0") ||
+        !strstr(actual_text, "store local.0, 4") ||
+        !strstr(actual_text, "store local.1, 5") ||
+        !strstr(actual_text, "store local.2, 1") ||
+        !strstr(actual_text, "store local.3, 2") ||
+        !strstr(actual_text, "store local.0, reg.") ||
+        !strstr(actual_text, "store local.1, reg.") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "load local.1") ||
+        !strstr(actual_text, "call putint(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-ASSIGN-MEMBER-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_deep_nested_struct_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; struct Mid m=o.m; putint(m.p.x); return m.p.y + m.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-STRUCT-COPY-INIT-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=7 spills=0") ||
+        !strstr(actual_text, "store local.0, 1") ||
+        !strstr(actual_text, "store local.1, 2") ||
+        !strstr(actual_text, "store local.2, 3") ||
+        !strstr(actual_text, "store local.4, reg.") ||
+        !strstr(actual_text, "store local.5, reg.") ||
+        !strstr(actual_text, "store local.6, reg.") ||
+        !strstr(actual_text, "load local.4") ||
+        !strstr(actual_text, "load local.5") ||
+        !strstr(actual_text, "load local.6") ||
+        !strstr(actual_text, "call putint(") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-STRUCT-COPY-INIT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_deep_nested_pair_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; struct Mid m=o.m; putint(m.p.first); return m.p.second + m.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-PAIR-COPY-INIT-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=7 spills=0") ||
+        !strstr(actual_text, "store local.0, 1") ||
+        !strstr(actual_text, "store local.1, 2") ||
+        !strstr(actual_text, "store local.2, 3") ||
+        !strstr(actual_text, "store local.4, reg.") ||
+        !strstr(actual_text, "store local.5, reg.") ||
+        !strstr(actual_text, "store local.6, reg.") ||
+        !strstr(actual_text, "load local.4") ||
+        !strstr(actual_text, "load local.5") ||
+        !strstr(actual_text, "load local.6") ||
+        !strstr(actual_text, "call putint(") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-PAIR-COPY-INIT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_deep_nested_struct_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; putint(o.m.p.x); putint(o.m.p.y); return o.m.z + o.w; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-STRUCT-FIELD-LOOKUP-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=4 spills=0") ||
+        !strstr(actual_text, "store local.0, 1") ||
+        !strstr(actual_text, "store local.1, 2") ||
+        !strstr(actual_text, "store local.2, 3") ||
+        !strstr(actual_text, "store local.3, 4") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "load local.1") ||
+        !strstr(actual_text, "call putint(") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-STRUCT-FIELD-LOOKUP-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_deep_nested_pair_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; putint(o.m.p.first); putint(o.m.p.second); return o.m.z + o.w; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-PAIR-FIELD-LOOKUP-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=4 spills=0") ||
+        !strstr(actual_text, "store local.0, 1") ||
+        !strstr(actual_text, "store local.1, 2") ||
+        !strstr(actual_text, "store local.2, 3") ||
+        !strstr(actual_text, "store local.3, 4") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "load local.1") ||
+        !strstr(actual_text, "call putint(") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-PAIR-FIELD-LOOKUP-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_deep_nested_struct_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Mid m={{7,8},9}; struct Outer o={{{1,2},3},4}; m=o.m; putint(m.p.x); return m.p.y + m.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-STRUCT-ASSIGN-MEMBER-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=7 spills=0") ||
+        !strstr(actual_text, "store local.0, 7") ||
+        !strstr(actual_text, "store local.1, 8") ||
+        !strstr(actual_text, "store local.2, 9") ||
+        !strstr(actual_text, "store local.3, 1") ||
+        !strstr(actual_text, "store local.4, 2") ||
+        !strstr(actual_text, "store local.5, 3") ||
+        !strstr(actual_text, "store local.0, reg.") ||
+        !strstr(actual_text, "store local.1, reg.") ||
+        !strstr(actual_text, "store local.2, reg.") ||
+        !strstr(actual_text, "call putint(") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-STRUCT-ASSIGN-MEMBER-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_deep_nested_pair_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Mid m={{7,8},9}; struct Outer o={{{1,2},3},4}; m=o.m; putint(m.p.first); return m.p.second + m.z; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-PAIR-ASSIGN-MEMBER-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=7 spills=0") ||
+        !strstr(actual_text, "store local.0, 7") ||
+        !strstr(actual_text, "store local.1, 8") ||
+        !strstr(actual_text, "store local.2, 9") ||
+        !strstr(actual_text, "store local.3, 1") ||
+        !strstr(actual_text, "store local.4, 2") ||
+        !strstr(actual_text, "store local.5, 3") ||
+        !strstr(actual_text, "store local.0, reg.") ||
+        !strstr(actual_text, "store local.1, reg.") ||
+        !strstr(actual_text, "store local.2, reg.") ||
+        !strstr(actual_text, "call putint(") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-PAIR-ASSIGN-MEMBER-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_machine_ir_rejects_mixed_float_int_arithmetic_under_extension(void) {
     ValueSsaProgram program;
     ValueSsaError value_error;
@@ -3884,6 +4850,652 @@ static int test_machine_ir_rejects_negative_float_call_int_condition_under_exten
     if (strstr(value_error.message, "SEMA-TYPE-008") == NULL) {
         fprintf(stderr,
             "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float pick(){ return g ? h : h; }\n"
+            "int main(){ if(pick() + 1) return 1; return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float pick(float x){ return -id(x) ? x : x; }\n"
+            "int main(float x){ if(pick(x) + 1) return 1; return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_helper_wrapped_ternary_call_compare_against_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float pick(){ return g ? h : h; }\n"
+            "int eq(){ return pick() == 0; }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-COMPARE-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-007") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-COMPARE-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_compare_against_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float pick(float x){ return -id(x) ? x : x; }\n"
+            "int eq(float x){ return pick(x) == 0; }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-007") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float pick(){ return g ? h : h; }\n"
+            "int bad(){ return pick(); }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-RETURN-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-005") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-RETURN-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float pick(float x){ return -id(x) ? x : x; }\n"
+            "int bad(float x){ return pick(x); }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-RETURN-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-005") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-RETURN-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "int sink(int x){ return x; }\n"
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float pick(){ return g ? h : h; }\n"
+            "int main(){ return sink(pick()); }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-CALLARG-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-CALLARG-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "int sink(int x){ return x; }\n"
+            "float id(float x){ return x; }\n"
+            "float pick(float x){ return -id(x) ? x : x; }\n"
+            "int main(){ return sink(pick(1.0)); }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-CALLARG-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-CALLARG-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_deep_nested_struct_copy_init_mismatch_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "struct P { int x; int y; };\n"
+            "struct Q { int x; int y; };\n"
+            "struct Mid { struct P p; int z; };\n"
+            "struct Outer { struct Mid m; int w; };\n"
+            "int main(){ struct Outer o={{{1,2},3},4}; struct Q q=o.m.p; return q.x; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-STRUCT-COPY-INIT-MISMATCH-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-AGG-006") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-STRUCT-COPY-INIT-MISMATCH-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_pair_call_result_direct_member_access_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "pair mk(){ pair p={1,2}; return p; }\n"
+            "int main(){ return mk().second; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-CALL-RESULT-MEMBER-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-AGG-003") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-CALL-RESULT-MEMBER-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_pair_call_result_as_scalar_call_argument_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "pair mk(){ pair p={1,2}; return p; }\n"
+            "int sink(int x){ return x; }\n"
+            "int main(){ return sink(mk()); }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-CALL-RESULT-SCALAR-CALLARG-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-CALL-RESULT-SCALAR-CALLARG-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_pair_multi_hop_return_chain_as_scalar_call_argument_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "pair mk(){ pair p={1,2}; return p; }\n"
+            "pair wrap(){ return mk(); }\n"
+            "int sink(int x){ return x; }\n"
+            "int main(){ return sink(wrap()); }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-MULTIHOP-SCALAR-CALLARG-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-MULTIHOP-SCALAR-CALLARG-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_pair_call_result_scalar_initializer_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "pair mk(){ pair p={1,2}; return p; }\n"
+            "int main(){ int x = mk(); return x; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-CALL-RESULT-SCALAR-INIT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-CALL-RESULT-SCALAR-INIT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_pair_call_result_scalar_assignment_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "pair mk(){ pair p={1,2}; return p; }\n"
+            "int main(){ int x = 0; x = mk(); return x; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-CALL-RESULT-SCALAR-ASSIGN-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-CALL-RESULT-SCALAR-ASSIGN-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_nested_struct_multi_hop_return_chain_scalar_initializer_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "struct Mid { pair p; int z; };\n"
+            "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+            "struct Mid id(struct Mid m){ return m; }\n"
+            "struct Mid wrap(){ return id(mk()); }\n"
+            "int main(){ int x = wrap(); return x; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-MULTIHOP-SCALAR-INIT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-MULTIHOP-SCALAR-INIT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_pair_multi_hop_return_chain_control_condition_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "pair mk(){ pair p={1,2}; return p; }\n"
+            "pair wrap(){ return mk(); }\n"
+            "int main(){ if(wrap()) return 1; return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-MULTIHOP-CONTROL-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-AGG-004") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-PAIR-MULTIHOP-CONTROL-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_nested_struct_multi_hop_return_chain_control_condition_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "struct Mid { pair p; int z; };\n"
+            "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+            "struct Mid id(struct Mid m){ return m; }\n"
+            "struct Mid wrap(){ return id(mk()); }\n"
+            "int main(){ if(wrap()) return 1; return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-MULTIHOP-CONTROL-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-AGG-004") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-MULTIHOP-CONTROL-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_nested_struct_call_result_direct_member_chain_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "struct Mid { pair p; int z; };\n"
+            "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+            "int main(){ return mk().p.second; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-CALL-RESULT-MEMBER-CHAIN-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-AGG-003") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-NESTED-STRUCT-CALL-RESULT-MEMBER-CHAIN-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_deep_nested_pair_struct_assignment_mismatch_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "struct A { pair p; int z; };\n"
+            "struct B { pair p; int z; };\n"
+            "struct Outer { struct A a; int w; };\n"
+            "int main(){ struct B b={{7,8},9}; struct Outer o={{{1,2},3},4}; b=o.a; return b.z; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-PAIR-STRUCT-ASSIGN-MISMATCH-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-AGG-006") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-PAIR-STRUCT-ASSIGN-MISMATCH-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_deep_nested_pair_initializer_too_many_items_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "struct Mid { pair p; int z; };\n"
+            "struct Outer { struct Mid m; int w; };\n"
+            "int main(){ struct Outer o={{{1,2,3},4},5}; return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-PAIR-INIT-TOO-MANY-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-AGG-002") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-PAIR-INIT-TOO-MANY-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_deep_nested_struct_initializer_too_many_items_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "struct Point { int x; int y; };\n"
+            "struct Mid { struct Point p; int z; };\n"
+            "struct Outer { struct Mid m; int w; };\n"
+            "int main(){ struct Outer o={{{1,2,3},4},5}; return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-STRUCT-INIT-TOO-MANY-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-AGG-002") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-DEEP-NESTED-STRUCT-INIT-TOO-MANY-REJECT mismatch: %s\n",
             value_error.message);
         value_ssa_program_free(&program);
         return 0;
@@ -15129,6 +16741,54 @@ int main(void) {
         if (strstr("MACHINE-IR-FLOAT-NESTED-MUL-DIV-ACCEPT", filter) != NULL) {
             return test_machine_ir_accepts_nested_float_mul_div_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-IR-NESTED-STRUCT-FIELD-LOOKUP-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_nested_struct_field_lookup_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-PAIR-PARAM-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_pair_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-PAIR-RETURN-COPY-INIT-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_pair_return_copy_init_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-PAIR-CALL-RESULT-CALLARG-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_pair_call_result_as_aggregate_call_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-PAIR-MULTIHOP-RET-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_pair_multi_hop_return_chain_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-NESTED-STRUCT-MULTIHOP-RET-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_nested_struct_multi_hop_return_chain_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-NESTED-STRUCT-RETURN-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_nested_struct_return_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-NESTED-STRUCT-PARAM-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_nested_struct_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-NESTED-PAIR-COPY-INIT-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_nested_pair_copy_init_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-NESTED-STRUCT-ASSIGN-MEMBER-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_nested_struct_assignment_from_member_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-DEEP-NESTED-STRUCT-COPY-INIT-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_deep_nested_struct_copy_init_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-DEEP-NESTED-PAIR-COPY-INIT-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_deep_nested_pair_copy_init_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-DEEP-NESTED-STRUCT-FIELD-LOOKUP-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_deep_nested_struct_field_lookup_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-DEEP-NESTED-PAIR-FIELD-LOOKUP-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_deep_nested_pair_field_lookup_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-DEEP-NESTED-STRUCT-ASSIGN-MEMBER-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_deep_nested_struct_assignment_from_member_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-DEEP-NESTED-PAIR-ASSIGN-MEMBER-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_deep_nested_pair_assignment_from_member_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-IR-FLOAT-ARITH-INT-TYPE-REJECT", filter) != NULL) {
             return test_machine_ir_rejects_mixed_float_int_arithmetic_under_extension() ? 0 : 1;
         }
@@ -15149,6 +16809,69 @@ int main(void) {
         }
         if (strstr("MACHINE-IR-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
             return test_machine_ir_rejects_negative_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-DEEP-NESTED-STRUCT-COPY-INIT-MISMATCH-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_deep_nested_struct_copy_init_mismatch_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-PAIR-CALL-RESULT-MEMBER-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_pair_call_result_direct_member_access_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-PAIR-CALL-RESULT-SCALAR-CALLARG-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_pair_call_result_as_scalar_call_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-PAIR-MULTIHOP-SCALAR-CALLARG-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_pair_multi_hop_return_chain_as_scalar_call_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-PAIR-CALL-RESULT-SCALAR-INIT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_pair_call_result_scalar_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-PAIR-CALL-RESULT-SCALAR-ASSIGN-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_pair_call_result_scalar_assignment_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-NESTED-STRUCT-MULTIHOP-SCALAR-INIT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_nested_struct_multi_hop_return_chain_scalar_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-PAIR-MULTIHOP-CONTROL-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_pair_multi_hop_return_chain_control_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-NESTED-STRUCT-MULTIHOP-CONTROL-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_nested_struct_multi_hop_return_chain_control_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-NESTED-STRUCT-CALL-RESULT-MEMBER-CHAIN-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_nested_struct_call_result_direct_member_chain_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-DEEP-NESTED-PAIR-STRUCT-ASSIGN-MISMATCH-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_deep_nested_pair_struct_assignment_mismatch_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-DEEP-NESTED-PAIR-INIT-TOO-MANY-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_deep_nested_pair_initializer_too_many_items_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-DEEP-NESTED-STRUCT-INIT-TOO-MANY-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_deep_nested_struct_initializer_too_many_items_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_helper_wrapped_ternary_call_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-RETURN-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-RETURN-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension() ? 0 : 1;
         }
         if (strstr("MACHINE-IR-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT", filter) != NULL) {
             return test_machine_ir_rejects_nested_float_tree_plus_int_condition_under_extension() ? 0 : 1;
@@ -15237,6 +16960,18 @@ int main(void) {
         if (strstr("MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT", filter) != NULL) {
             return test_machine_ir_rejects_unary_call_ternary_value_compare_against_int_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-RETURN-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-RETURN-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-IR-FLOAT-TERNARY-VALUE-COMPARE-FLOAT-REJECT", filter) != NULL) {
             return test_machine_ir_rejects_float_ternary_value_compare_against_float_under_extension() ? 0 : 1;
         }
@@ -15248,6 +16983,9 @@ int main(void) {
     if (!test_machine_ir_manual_verify_accepts_valid_program()) {
         return 1;
     }
+    if (!test_machine_ir_manual_verify_rejects_unknown_addr_function()) {
+        return 1;
+    }
     if (!test_machine_ir_manual_verify_rejects_bad_spill_slot()) {
         return 1;
     }
@@ -15255,6 +16993,9 @@ int main(void) {
         return 1;
     }
     if (!test_machine_ir_lower_from_value_ssa_dump()) {
+        return 1;
+    }
+    if (!test_machine_ir_translation_only_lowers_callable_object_code_projection()) {
         return 1;
     }
     if (!test_machine_ir_lower_from_manual_machine_view_dump()) {
@@ -15467,6 +17208,54 @@ int main(void) {
     if (!test_machine_ir_accepts_nested_float_mul_div_under_extension()) {
         return 1;
     }
+    if (!test_machine_ir_accepts_nested_struct_field_lookup_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_pair_parameter_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_pair_return_copy_init_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_pair_call_result_as_aggregate_call_argument_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_pair_multi_hop_return_chain_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_nested_struct_multi_hop_return_chain_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_nested_struct_return_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_nested_struct_parameter_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_nested_pair_copy_init_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_nested_struct_assignment_from_member_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_deep_nested_struct_copy_init_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_deep_nested_pair_copy_init_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_deep_nested_struct_field_lookup_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_deep_nested_pair_field_lookup_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_deep_nested_struct_assignment_from_member_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_deep_nested_pair_assignment_from_member_under_extension()) {
+        return 1;
+    }
     if (!test_machine_ir_rejects_mixed_float_int_arithmetic_under_extension()) {
         return 1;
     }
@@ -15488,6 +17277,69 @@ int main(void) {
     if (!test_machine_ir_rejects_negative_float_call_int_condition_under_extension()) {
         return 1;
     }
+    if (!test_machine_ir_rejects_deep_nested_struct_copy_init_mismatch_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_pair_call_result_direct_member_access_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_pair_call_result_as_scalar_call_argument_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_pair_multi_hop_return_chain_as_scalar_call_argument_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_pair_call_result_scalar_initializer_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_pair_call_result_scalar_assignment_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_nested_struct_multi_hop_return_chain_scalar_initializer_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_pair_multi_hop_return_chain_control_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_nested_struct_multi_hop_return_chain_control_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_nested_struct_call_result_direct_member_chain_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_deep_nested_pair_struct_assignment_mismatch_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_deep_nested_pair_initializer_too_many_items_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_deep_nested_struct_initializer_too_many_items_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_float_helper_wrapped_ternary_call_compare_against_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_compare_against_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension()) {
+        return 1;
+    }
     if (!test_machine_ir_rejects_nested_float_tree_plus_int_condition_under_extension()) {
         return 1;
     }
@@ -15498,6 +17350,18 @@ int main(void) {
         return 1;
     }
     if (!test_machine_ir_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension()) {
         return 1;
     }
     if (!test_machine_ir_rejects_float_ternary_value_compare_against_float_under_extension()) {

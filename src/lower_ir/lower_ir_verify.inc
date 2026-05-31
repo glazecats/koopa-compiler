@@ -1129,7 +1129,7 @@ static int lower_ir_verify_instruction(const LowerIrProgram *program,
         return 1;
     case LOWER_IR_INSTR_CALL:
         {
-            const LowerIrFunction *callee;
+        const LowerIrFunction *callee;
 
         if (instruction->has_result && instruction->result.kind != LOWER_IR_VALUE_TEMP) {
             lower_ir_set_error(error,
@@ -1203,6 +1203,48 @@ static int lower_ir_verify_instruction(const LowerIrProgram *program,
                     error)) {
                 return 0;
             }
+        }
+        return 1;
+        }
+    case LOWER_IR_INSTR_ADDR_FUNCTION:
+        {
+        const LowerIrFunction *callee;
+
+        if (!instruction->has_result || instruction->result.kind != LOWER_IR_VALUE_TEMP) {
+            lower_ir_set_error(error,
+                0,
+                0,
+                "LOWER-IR-VERIFY-048A: bb.%zu instruction %zu addr_function must produce a temp result",
+                block->id,
+                instruction_index);
+            return 0;
+        }
+        if (!instruction->as.addr_function_name ||
+            instruction->as.addr_function_name[0] == '\0') {
+            lower_ir_set_error(error,
+                0,
+                0,
+                "LOWER-IR-VERIFY-048B: bb.%zu instruction %zu addr_function must name a function",
+                block->id,
+                instruction_index);
+            return 0;
+        }
+        if (!lower_ir_verify_value_ref(instruction->result,
+                function->next_temp_id,
+                "addr_function result",
+                error)) {
+            return 0;
+        }
+        callee = lower_ir_find_program_function(program, instruction->as.addr_function_name);
+        if (!callee) {
+            lower_ir_set_error(error,
+                0,
+                0,
+                "LOWER-IR-VERIFY-048C: bb.%zu instruction %zu addr_function references unknown function '%s'",
+                block->id,
+                instruction_index,
+                instruction->as.addr_function_name);
+            return 0;
         }
         return 1;
         }

@@ -71,6 +71,7 @@ typedef enum {
     MACHINE_IR_INSTR_MOV = 0,
     MACHINE_IR_INSTR_BINARY,
     MACHINE_IR_INSTR_CALL,
+    MACHINE_IR_INSTR_ADDR_FUNCTION,
     MACHINE_IR_INSTR_ADDR_LOCAL,
     MACHINE_IR_INSTR_ADDR_GLOBAL,
     MACHINE_IR_INSTR_LOAD_LOCAL,
@@ -97,6 +98,7 @@ typedef struct {
             MachineIrOperand *args;
             size_t arg_count;
         } call;
+        char *addr_function_name;
         MachineIrSlotRef addr_slot;
         MachineIrSlotRef load_slot;
         struct {

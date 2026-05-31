@@ -64,6 +64,8 @@ const char *ast_expression_kind_name(AstExpressionKind kind) {
         return "binary";
     case AST_EXPR_TERNARY:
         return "ternary";
+    case AST_EXPR_CLOSURE:
+        return "closure";
     default:
         return "unknown";
     }

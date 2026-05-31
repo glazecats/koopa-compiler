@@ -214,6 +214,13 @@ int machine_select_clone_program(const MachineSelectProgram *source,
                             src_op->as.call.args,
                             src_op->as.call.arg_count * sizeof(MachineSelectOperand));
                     }
+                } else if (src_op->kind == MACHINE_SELECT_OP_ADDR_FUNCTION) {
+                    dest_op->as.addr_function_name = machine_select_strdup(src_op->as.addr_function_name);
+                    if (src_op->as.addr_function_name && !dest_op->as.addr_function_name) {
+                        machine_select_set_error(error, 0, 0, "MACHINE-SELECT-062A: out of memory cloning function address");
+                        machine_select_program_free(out_program);
+                        return 0;
+                    }
                 }
             }
         }

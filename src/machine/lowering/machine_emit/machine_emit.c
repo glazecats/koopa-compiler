@@ -137,6 +137,10 @@ static int machine_emit_op_clone(MachineEmitOp *dest, const MachineEmitOp *src) 
     }
 
     *dest = *src;
+    if (src->kind == MACHINE_SELECT_OP_ADDR_FUNCTION) {
+        dest->as.addr_function_name = machine_emit_strdup(src->as.addr_function_name);
+        return !src->as.addr_function_name || dest->as.addr_function_name != NULL;
+    }
     if (!machine_emit_op_has_call_payload(src->kind)) {
         return 1;
     }
@@ -160,7 +164,15 @@ static int machine_emit_op_clone(MachineEmitOp *dest, const MachineEmitOp *src) 
 }
 
 static void machine_emit_op_free(MachineEmitOp *op) {
-    if (!op || !machine_emit_op_has_call_payload(op->kind)) {
+    if (!op) {
+        return;
+    }
+    if (op->kind == MACHINE_SELECT_OP_ADDR_FUNCTION) {
+        free(op->as.addr_function_name);
+        op->as.addr_function_name = NULL;
+        return;
+    }
+    if (!machine_emit_op_has_call_payload(op->kind)) {
         return;
     }
 

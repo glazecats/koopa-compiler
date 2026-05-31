@@ -239,6 +239,7 @@ static void value_ssa_liveness_record_instruction_uses(const ValueSsaInstruction
         value_ssa_liveness_record_use_if_not_defined(
             instruction->as.store_indirect.value, block_defs, value_count, block_uses);
         break;
+    case VALUE_SSA_INSTR_ADDR_FUNCTION:
     case VALUE_SSA_INSTR_ADDR_LOCAL:
     case VALUE_SSA_INSTR_ADDR_GLOBAL:
     case VALUE_SSA_INSTR_LOAD_LOCAL:
@@ -936,6 +937,7 @@ int value_ssa_compute_def_use_analysis(const ValueSsaFunction *function,
                 value_ssa_record_use_count(instruction->as.store_indirect.addr, analysis->use_counts);
                 value_ssa_record_use_count(instruction->as.store_indirect.value, analysis->use_counts);
                 break;
+            case VALUE_SSA_INSTR_ADDR_FUNCTION:
             case VALUE_SSA_INSTR_ADDR_LOCAL:
             case VALUE_SSA_INSTR_ADDR_GLOBAL:
             case VALUE_SSA_INSTR_LOAD_LOCAL:
@@ -1138,6 +1140,7 @@ int value_ssa_compute_def_use_analysis(const ValueSsaFunction *function,
                     return 0;
                 }
                 break;
+            case VALUE_SSA_INSTR_ADDR_FUNCTION:
             case VALUE_SSA_INSTR_ADDR_LOCAL:
             case VALUE_SSA_INSTR_ADDR_GLOBAL:
             case VALUE_SSA_INSTR_LOAD_LOCAL:

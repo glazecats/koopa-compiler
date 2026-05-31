@@ -15,6 +15,13 @@ static int machine_select_lower_memory_instruction(const MachineIrInstruction *s
     }
 
     switch (src_op->kind) {
+        case MACHINE_IR_INSTR_ADDR_FUNCTION:
+            dest_op->kind = MACHINE_SELECT_OP_ADDR_FUNCTION;
+            dest_op->as.addr_function_name = machine_select_strdup(src_op->as.addr_function_name);
+            if (src_op->as.addr_function_name && !dest_op->as.addr_function_name) {
+                return 0;
+            }
+            return 1;
         case MACHINE_IR_INSTR_ADDR_LOCAL:
             dest_op->kind = MACHINE_SELECT_OP_ADDR_LOCAL;
             dest_op->as.addr_slot = machine_select_lower_slot(src_op->as.addr_slot);

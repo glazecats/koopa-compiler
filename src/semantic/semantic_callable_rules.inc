@@ -202,6 +202,28 @@ static int semantic_check_call_expr_postorder(const AstExpression *expr, void *c
 
     visit_ctx = (CallableRuleVisitCtx *)ctx;
     callee_kind = classify_ast_call_callee(expr->as.call.callee, &called_name);
+    if (callee_kind == AST_CALL_CALLEE_CALL_RESULT) {
+        const AstExpression *callee_base = unwrap_paren_expression(expr->as.call.callee);
+        const AstExternal *external = NULL;
+        SemanticTypeDescriptor return_type;
+
+        if (callee_base && callee_base->kind == AST_EXPR_CALL &&
+            classify_ast_call_callee(callee_base->as.call.callee, &called_name) ==
+                AST_CALL_CALLEE_DIRECT_IDENTIFIER &&
+            called_name && called_name[0] != '\0') {
+            external = semantic_find_visible_function_external(
+                visit_ctx->program,
+                visit_ctx->func_index,
+                visit_ctx->include_current_external,
+                called_name);
+            if (external && external->has_function_return_signature &&
+                semantic_build_function_return_type_descriptor(external, &return_type) &&
+                return_type.kind == SEMANTIC_TYPE_KIND_FUNCTION &&
+                expr->as.call.arg_count == return_type.parameter_count) {
+                return 1;
+            }
+        }
+    }
 
     return semantic_check_single_callable_rule(visit_ctx->program,
         visit_ctx->func_index,

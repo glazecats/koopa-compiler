@@ -13,6 +13,8 @@ typedef enum {
     IR_LOWER_BINDING_ARRAY_PARAMETER,
     IR_LOWER_BINDING_PAIR_LOCAL,
     IR_LOWER_BINDING_STRUCT_LOCAL,
+    IR_LOWER_BINDING_FUNCTION_LOCAL,
+    IR_LOWER_BINDING_CLOSURE_LOCAL,
 } IrLowerBindingKind;
 
 typedef struct {
@@ -22,10 +24,15 @@ typedef struct {
     size_t array_rank;
     size_t *array_extents;
     size_t pair_second_local_id;
+    size_t aggregate_slot_count;
     const char *type_name;
+    size_t closure_capture_count;
+    size_t *closure_capture_local_ids;
+    size_t function_target_tag_local_id;
     int is_const;
     int has_const_value;
     long long const_value;
+    int from_returned_function_value_call;
 } IrLowerBinding;
 
 typedef struct {
@@ -40,10 +47,15 @@ typedef struct {
     size_t array_rank;
     const size_t *array_extents;
     size_t pair_second_local_id;
+    size_t aggregate_slot_count;
     const char *type_name;
+    size_t closure_capture_count;
+    const size_t *closure_capture_local_ids;
+    size_t function_target_tag_local_id;
     int is_const;
     int has_const_value;
     long long const_value;
+    int from_returned_function_value_call;
 } IrLowerBindingInfo;
 
 typedef struct {
@@ -96,10 +108,24 @@ typedef struct {
 } IrFunctionDeferEntryStack;
 
 typedef struct {
+    const char *binding_name;
+    const char **target_names;
+    size_t target_count;
+    size_t target_capacity;
+} IrFunctionValueTargetSet;
+
+typedef struct {
     IrProgram *program;
     const AstProgram *ast_program;
     IrFunction *function;
     AstFunctionReturnType function_return_type;
+    AstDeclarationValueKind hidden_return_aggregate_kind;
+    const char *hidden_return_type_name;
+    size_t hidden_return_first_local_id;
+    size_t hidden_return_slot_count;
+    int has_function_value_return_payload;
+    int function_value_return_is_closure_family;
+    const char *function_value_return_target_name;
     int allow_implicit_fallthrough_return;
     size_t block_id;
     int has_block;
@@ -111,17 +137,207 @@ typedef struct {
     const AstStatement **fndefer_sites;
     size_t *fndefer_counter_local_ids;
     size_t fndefer_site_count;
+    IrFunctionValueTargetSet *function_value_target_sets;
+    size_t function_value_target_set_count;
+    size_t function_value_target_set_capacity;
     const char **function_value_parameter_names;
     const char *const *function_value_parameter_targets;
+    const size_t *const *function_value_parameter_capture_local_ids;
+    const size_t *function_value_parameter_capture_counts;
     size_t function_value_parameter_count;
     IrError *error;
 } IrLowerContext;
+
+typedef struct {
+    const AstExpression *then_base;
+    const AstExpression *else_base;
+    const char *then_target_name;
+    const char *else_target_name;
+    size_t *then_capture_local_ids;
+    size_t *else_capture_local_ids;
+    size_t then_capture_count;
+    size_t else_capture_count;
+    size_t then_tag_local_id;
+    size_t else_tag_local_id;
+    int then_has_const_value;
+    int else_has_const_value;
+    long long then_const_value;
+    long long else_const_value;
+    int then_is_closure_local;
+    int else_is_closure_local;
+} IrLowerFunctionValueTernaryInfo;
+
+typedef struct {
+    const AstExternal *producer_external;
+    const char *direct_target_name;
+    const char *const *dynamic_target_names;
+    size_t dynamic_target_count;
+    size_t *owned_payload_local_ids;
+    const size_t *capture_local_ids;
+    size_t capture_count;
+    size_t dynamic_tag_local_id;
+    int is_closure_family;
+    int has_dynamic_family;
+    int has_const_tag_value;
+    long long const_tag_value;
+} IrLowerCallableObjectView;
+
+typedef struct {
+    const AstExternal *producer_external;
+    const char *direct_target_name;
+    const char *const *dynamic_target_names;
+    size_t dynamic_target_count;
+    size_t *owned_payload_local_ids;
+    size_t payload_slot_count;
+    const size_t *capture_local_ids;
+    size_t capture_count;
+    size_t dynamic_tag_local_id;
+    int is_closure_family;
+    int has_dynamic_family;
+    int has_const_tag_value;
+    long long const_tag_value;
+    int payload_has_dynamic_tag;
+    int from_returned_function_value_call;
+} IrLowerFunctionObjectDescriptor;
+
+typedef struct {
+    IrLowerFunctionObjectDescriptor descriptor;
+    const AstExternal *direct_return_call_external;
+    size_t payload_slot_count;
+    int has_identifier_binding_payload;
+} IrLowerFunctionValueReturnResolution;
 
 typedef struct {
     char *data;
     size_t length;
     size_t capacity;
 } IrStringBuilder;
+
+static void ir_init_function_object_descriptor(IrLowerFunctionObjectDescriptor *descriptor) {
+    if (!descriptor) {
+        return;
+    }
+
+    memset(descriptor, 0, sizeof(*descriptor));
+    descriptor->dynamic_tag_local_id = (size_t)-1;
+}
+
+static int ir_init_function_object_descriptor_from_binding_info(
+    const IrLowerBindingInfo *binding_info,
+    const IrFunctionValueTargetSet *target_set,
+    IrLowerFunctionObjectDescriptor *out_descriptor) {
+    int is_closure_family;
+
+    ir_init_function_object_descriptor(out_descriptor);
+    if (!binding_info || !out_descriptor ||
+        !binding_info->type_name || binding_info->type_name[0] == '\0' ||
+        (binding_info->kind != IR_LOWER_BINDING_FUNCTION_LOCAL &&
+            binding_info->kind != IR_LOWER_BINDING_CLOSURE_LOCAL)) {
+        return 0;
+    }
+
+    is_closure_family = binding_info->kind == IR_LOWER_BINDING_CLOSURE_LOCAL;
+    out_descriptor->direct_target_name = binding_info->type_name;
+    out_descriptor->dynamic_target_names = target_set ? target_set->target_names : NULL;
+    out_descriptor->dynamic_target_count = target_set ? target_set->target_count : 0u;
+    out_descriptor->capture_local_ids = binding_info->closure_capture_local_ids;
+    out_descriptor->capture_count = binding_info->closure_capture_count;
+    out_descriptor->dynamic_tag_local_id = binding_info->function_target_tag_local_id;
+    out_descriptor->is_closure_family = is_closure_family;
+    out_descriptor->has_dynamic_family =
+        binding_info->function_target_tag_local_id != (size_t)-1 &&
+        !binding_info->has_const_value;
+    out_descriptor->has_const_tag_value = binding_info->has_const_value ? 1 : 0;
+    out_descriptor->const_tag_value = binding_info->const_value;
+    out_descriptor->payload_has_dynamic_tag =
+        binding_info->function_target_tag_local_id != (size_t)-1 &&
+        (!is_closure_family || !binding_info->has_const_value);
+    out_descriptor->payload_slot_count = binding_info->closure_capture_count +
+        (out_descriptor->payload_has_dynamic_tag ? 1u : 0u);
+    out_descriptor->from_returned_function_value_call =
+        binding_info->from_returned_function_value_call;
+    return 1;
+}
+
+static int ir_init_function_object_descriptor_from_static_target(
+    const char *target_name,
+    int is_closure_family,
+    int has_const_tag_value,
+    long long const_tag_value,
+    int from_returned_function_value_call,
+    IrLowerFunctionObjectDescriptor *out_descriptor) {
+    ir_init_function_object_descriptor(out_descriptor);
+    if (!target_name || target_name[0] == '\0' || !out_descriptor) {
+        return 0;
+    }
+
+    out_descriptor->direct_target_name = target_name;
+    out_descriptor->is_closure_family = is_closure_family ? 1 : 0;
+    out_descriptor->has_const_tag_value = has_const_tag_value ? 1 : 0;
+    out_descriptor->const_tag_value = const_tag_value;
+    out_descriptor->from_returned_function_value_call =
+        from_returned_function_value_call ? 1 : 0;
+    return 1;
+}
+
+static int ir_init_function_object_descriptor_from_static_target_with_payload(
+    const char *target_name,
+    int is_closure_family,
+    int has_const_tag_value,
+    long long const_tag_value,
+    int from_returned_function_value_call,
+    const size_t *capture_local_ids,
+    size_t capture_count,
+    size_t dynamic_tag_local_id,
+    IrLowerFunctionObjectDescriptor *out_descriptor) {
+    if (!ir_init_function_object_descriptor_from_static_target(
+            target_name,
+            is_closure_family,
+            has_const_tag_value,
+            const_tag_value,
+            from_returned_function_value_call,
+            out_descriptor)) {
+        return 0;
+    }
+
+    out_descriptor->capture_local_ids = capture_local_ids;
+    out_descriptor->capture_count = capture_count;
+    out_descriptor->dynamic_tag_local_id = dynamic_tag_local_id;
+    out_descriptor->payload_has_dynamic_tag =
+        dynamic_tag_local_id != (size_t)-1 &&
+        (!is_closure_family || !has_const_tag_value);
+    out_descriptor->payload_slot_count = capture_count +
+        (out_descriptor->payload_has_dynamic_tag ? 1u : 0u);
+    return 1;
+}
+
+static int ir_init_callable_object_view_from_function_object_descriptor(
+    const IrLowerFunctionObjectDescriptor *descriptor,
+    IrLowerCallableObjectView *out_view) {
+    if (out_view) {
+        memset(out_view, 0, sizeof(*out_view));
+        out_view->dynamic_tag_local_id = (size_t)-1;
+    }
+    if (!descriptor || !out_view ||
+        !descriptor->direct_target_name ||
+        descriptor->direct_target_name[0] == '\0') {
+        return 0;
+    }
+
+    out_view->producer_external = descriptor->producer_external;
+    out_view->direct_target_name = descriptor->direct_target_name;
+    out_view->dynamic_target_names = descriptor->dynamic_target_names;
+    out_view->dynamic_target_count = descriptor->dynamic_target_count;
+    out_view->owned_payload_local_ids = descriptor->owned_payload_local_ids;
+    out_view->capture_local_ids = descriptor->capture_local_ids;
+    out_view->capture_count = descriptor->capture_count;
+    out_view->dynamic_tag_local_id = descriptor->dynamic_tag_local_id;
+    out_view->is_closure_family = descriptor->is_closure_family;
+    out_view->has_dynamic_family = descriptor->has_dynamic_family;
+    out_view->has_const_tag_value = descriptor->has_const_tag_value;
+    out_view->const_tag_value = descriptor->const_tag_value;
+    return 1;
+}
 
 static long long ir_normalize_sysy_int_value(long long value) {
     uint32_t bits = (uint32_t)value;
@@ -138,15 +354,23 @@ static int ir_lower_scope_add_binding_with_metadata(IrLowerScopeStack *stack,
     size_t array_rank,
     const size_t *array_extents,
     size_t pair_second_local_id,
+    size_t aggregate_slot_count,
     const char *type_name,
+    size_t closure_capture_count,
+    const size_t *closure_capture_local_ids,
+    size_t function_target_tag_local_id,
     int is_const,
     int has_const_value,
-    long long const_value);
+    long long const_value,
+    int from_returned_function_value_call);
 static int ir_lower_scope_lookup(const IrLowerScopeStack *stack,
     const char *name,
     size_t *out_local_id);
 static int ir_lower_scope_lookup_binding(const IrLowerScopeStack *stack,
     const char *name,
+    IrLowerBindingInfo *out_info);
+static int ir_lower_scope_lookup_binding_by_local_id(const IrLowerScopeStack *stack,
+    size_t local_id,
     IrLowerBindingInfo *out_info);
 static int ir_lower_scope_update_binding_const_value_by_local_id(IrLowerScopeStack *stack,
     size_t local_id,
@@ -203,6 +427,12 @@ static IrFunction *ir_program_find_function_mut(IrProgram *program, const char *
 static IrGlobal *ir_program_find_global_mut(IrProgram *program, const char *name);
 static const IrGlobal *ir_program_find_global(const IrProgram *program, const char *name);
 static const IrGlobal *ir_program_get_global(const IrProgram *program, size_t global_id);
+static int ir_program_append_function_shape(IrProgram *program,
+    AstFunctionReturnType return_type,
+    const AstFunctionReturnType *parameter_types,
+    size_t parameter_count,
+    size_t *out_shape_id,
+    IrError *error);
 static int ir_program_append_global(IrProgram *program,
     const char *name,
     IrGlobal **out_global,
@@ -215,6 +445,11 @@ static int ir_function_append_local(IrFunction *function,
     const char *source_name,
     int is_parameter,
     size_t *out_local_id,
+    IrError *error);
+static int ir_ensure_function_signature(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    IrFunction **out_function,
     IrError *error);
 static int ir_function_append_block(IrFunction *function,
     size_t *out_block_id,
@@ -262,6 +497,16 @@ static int ir_emit_call(IrLowerContext *ctx,
     const char *callee_name,
     const IrValueRef *args,
     size_t arg_count);
+static int ir_emit_fn_make(IrLowerContext *ctx,
+    IrValueRef destination,
+    const char *callee_name,
+    IrValueRef env,
+    size_t shape_id);
+static int ir_emit_call_indirect(IrLowerContext *ctx,
+    IrValueRef destination,
+    IrValueRef callee,
+    const IrValueRef *args,
+    size_t arg_count);
 static int ir_emit_addr_local(IrLowerContext *ctx,
     IrValueRef destination,
     size_t local_id);
@@ -303,18 +548,152 @@ static int ir_ensure_builtin_function_signature(IrProgram *program,
     const char *name,
     IrFunction **out_function,
     IrError *error);
+static int ir_build_closure_helper_name(const char *enclosing_function_name,
+    const char *local_name,
+    size_t closure_ordinal,
+    char **out_name,
+    IrError *error);
+static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
+    const AstExpression *closure_expr,
+    const char *helper_name,
+    const char *const *capture_names,
+    const size_t *capture_local_ids,
+    size_t capture_count,
+    IrError *error);
+static const AstExternal *ir_find_named_function_external_prefer_definition(const AstProgram *ast_program,
+    const char *name);
+static const AstExpression *ir_find_function_returned_closure_expr(const AstStatement *stmt);
+static const AstExpression *ir_find_function_returned_value_expr(const AstStatement *stmt);
+static int ir_function_value_return_is_closure_family(const AstProgram *ast_program,
+    const AstExternal *external,
+    int *out_is_closure);
+static int ir_function_value_return_parameter_index(const AstProgram *ast_program,
+    const AstExternal *external,
+    size_t *out_param_index);
+static int ir_function_value_return_exact_parameter_passthrough_index(const AstProgram *ast_program,
+    const AstExternal *external,
+    size_t *out_param_index);
+static int ir_function_returned_closure_payload_slot_count(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    size_t *out_slot_count);
+static int ir_collect_function_value_return_target_names(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const char ***out_target_names,
+    size_t *out_target_count,
+    IrError *error);
+static int ir_function_parameter_name_is_compatible_function_value(const AstExternal *current_external,
+    const char *name,
+    AstFunctionReturnType expected_return_type,
+    size_t expected_parameter_count);
+static int ir_build_returned_closure_helper_name(const AstExternal *external,
+    char **out_name,
+    IrError *error);
+static int ir_ensure_returned_closure_helper_function(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const char **out_target_name,
+    IrError *error);
+static int ir_resolve_function_value_return_target_name(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const char **out_target_name,
+    IrError *error);
+static int ir_resolve_function_value_wrapper_target_name(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExpression *expr,
+    const char *const *binding_names,
+    const char *const *binding_targets,
+    size_t binding_count,
+    const char **out_target_name,
+    IrError *error);
+static int ir_resolve_local_function_value_declaration_target_name(
+    const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const AstStatement *decl_stmt,
+    size_t decl_index,
+    const char *const *binding_names,
+    const char *const *binding_targets,
+    size_t binding_count,
+    const char **out_target_name,
+    IrError *error);
+static int ir_resolve_noncapturing_function_target_name(IrProgram *program,
+    const char *name,
+    const char *const *binding_names,
+    const char *const *binding_targets,
+    size_t binding_count,
+    const char **out_target_name,
+    IrError *error);
+static int ir_resolve_function_value_return_local_binding_target_name(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const char *return_name,
+    const char **out_target_name,
+    IrError *error);
+static int ir_lower_call_into_returned_closure_slots(IrLowerContext *ctx,
+    const AstExpression *call_expr,
+    const AstExternal *expected_return_function_external,
+    size_t dest_first_local_id,
+    size_t dest_slot_count);
+static int ir_lower_closure_helper_function(IrLowerContext *ctx,
+    const AstStatement *decl_stmt,
+    size_t declaration_index,
+    const char *helper_name,
+    const char *const *capture_names,
+    const size_t *capture_local_ids,
+    size_t capture_count,
+    IrError *error);
 static size_t ir_allocate_temp(IrFunction *function);
 
 static int ir_lower_return_statement(IrLowerContext *ctx, const AstStatement *stmt);
 static IrBinaryOp ir_binary_op_from_token(TokenType token_type, int *out_supported);
 static const AstExpression *ir_unwrap_paren_expression(const AstExpression *expr);
+static const AstExpression *ir_unwrap_function_value_wrapper_expression(const AstExpression *expr);
+static int ir_lower_emit_function_value_wrapper_side_effects(IrLowerContext *ctx,
+    const AstExpression *expr);
+static int ir_resolve_function_value_wrapper_direct_identifier(const IrLowerContext *ctx,
+    const AstExpression *expr,
+    const char **out_name);
+static int ir_resolve_function_value_initializer_binding(IrLowerContext *ctx,
+    const AstExpression *expr,
+    const char **out_target_name,
+    size_t **out_capture_local_ids,
+    size_t *out_capture_count,
+    size_t *out_tag_local_id,
+    int *out_has_const_value,
+    long long *out_const_value,
+    int *out_is_closure_local);
+static int ir_resolve_identifier_ternary_function_value_info(IrLowerContext *ctx,
+    const AstExpression *expr,
+    IrLowerFunctionValueTernaryInfo *out_info);
+static int ir_emit_materialized_ternary_function_value_assignment(IrLowerContext *ctx,
+    const AstExpression *condition_expr,
+    const IrLowerFunctionValueTernaryInfo *ternary_info,
+    size_t tag_local_id,
+    const size_t *capture_local_ids,
+    size_t capture_count);
 static const char *ir_extract_direct_call_callee_name(const AstExpression *callee);
 static int ir_classify_direct_identifier_expr(const AstExpression *expr, const char **out_name);
 static const char *ir_lower_lookup_function_value_target(const IrLowerContext *ctx, const char *name);
+static int ir_lower_lookup_function_value_capture_binding(const IrLowerContext *ctx,
+    const char *name,
+    const size_t **out_capture_local_ids,
+    size_t *out_capture_count);
+static int ir_lower_try_emit_dynamic_function_value_specialized_call(IrLowerContext *ctx,
+    const AstExpression *call_expr,
+    const AstExternal *callee_external,
+    const char *callee_name,
+    IrValueRef *out_value,
+    int *out_applied);
 static const AstStructType *ir_find_struct_type(const AstProgram *program, const char *name);
 static int ir_lower_expression(IrLowerContext *ctx,
     const AstExpression *expr,
     IrValueRef *out_value);
+static int ir_try_lower_function_value_assignment_statement(IrLowerContext *ctx,
+    const AstStatement *stmt,
+    int *out_handled);
 static int ir_lower_while_statement(IrLowerContext *ctx, const AstStatement *stmt);
 static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt);
 static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt);
@@ -333,6 +712,8 @@ static int ir_lower_function_core(const AstProgram *ast_program,
     const IrLowerOptions *options,
     const AstExternal *external,
     const char *const *bound_function_targets,
+    const size_t *const *bound_function_capture_local_ids,
+    const size_t *bound_function_capture_counts,
     IrError *error);
 static int ir_lower_function(const AstProgram *ast_program,
     IrProgram *program,
@@ -349,6 +730,8 @@ static int ir_lower_specialized_function_for_function_value_call(
     const IrLowerOptions *options,
     const AstExternal *external,
     const char *const *bound_function_targets,
+    const size_t *const *bound_function_capture_local_ids,
+    const size_t *bound_function_capture_counts,
     const char **out_specialized_name,
     IrError *error);
 static int ir_dependency_try_eval_condition_truthiness(const AstExpression *expr,
@@ -653,7 +1036,12 @@ static int ir_lower_emit_defer_entries_range(IrLowerContext *ctx, size_t begin_i
                         0u,
                         NULL,
                         0u,
+                        0u,
                         NULL,
+                        0u,
+                        NULL,
+                        0u,
+                        0,
                         0,
                         0,
                         0)) {
@@ -707,7 +1095,12 @@ static int ir_lower_emit_function_defer_entries(IrLowerContext *ctx) {
                         0u,
                         NULL,
                         0u,
+                        0u,
                         NULL,
+                        0u,
+                        NULL,
+                        0u,
+                        0,
                         0,
                         0,
                         0)) {

@@ -87,6 +87,7 @@ static const AstExternal *semantic_find_visible_function_external(const AstProgr
     const char *name);
 static int names_equal(const AstExternal *a, const AstExternal *b);
 static const AstExpression *unwrap_paren_expression(const AstExpression *expr);
+static const AstExpression *semantic_unwrap_function_value_wrapper_expression(const AstExpression *expr);
 static int classify_ast_call_callee(const AstExpression *callee, const char **out_name);
 static int walk_expression_postorder_with_depth(const AstExpression *expr,
     ExpressionPostVisitor visitor,
@@ -150,12 +151,21 @@ static int semantic_check_function_callable_scope_shadow_rules(const AstExternal
 static int semantic_scope_check_top_level_initializer_expression(const AstExpression *expr,
     const AstProgram *program,
     size_t external_index,
+    int allow_extension_features,
     SemanticError *error);
 static int semantic_check_function_scope_rules(const AstProgram *program,
     size_t func_index,
     const AstExternal *func,
     const SemanticAnalyzeConfig *config,
     SemanticError *error);
+static int semantic_extension_check_function_value_expression(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const AstExternal *current_func,
+    int in_call_callee,
+    SemanticError *error,
+    size_t depth);
 static int semantic_build_function_return_type_descriptor(const AstExternal *external,
     SemanticTypeDescriptor *out_type);
 static int semantic_build_top_level_declaration_type_descriptor(const AstExternal *external,
@@ -163,12 +173,37 @@ static int semantic_build_top_level_declaration_type_descriptor(const AstExterna
 static int semantic_build_function_parameter_type_descriptor(const AstExternal *external,
     size_t param_index,
     SemanticTypeDescriptor *out_type);
+static int semantic_extension_function_value_initializer_expr_matches_expected(
+    const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const AstExternal *current_func,
+    const SemanticTypeDescriptor *expected_type,
+    int *out_is_closure_backed);
 static int semantic_find_named_function_parameter_type_descriptor(const AstExternal *func,
     const char *name,
     size_t *out_index,
     SemanticTypeDescriptor *out_type);
 static int semantic_type_descriptors_are_compatible(const SemanticTypeDescriptor *lhs,
     const SemanticTypeDescriptor *rhs);
+static int semantic_function_signature_matches_type_descriptor(
+    const AstExternal *external,
+    const SemanticTypeDescriptor *expected_type);
+static int semantic_builtin_signature_matches_type_descriptor(
+    const SemanticBuiltinFunctionInfo *builtin,
+    const SemanticTypeDescriptor *expected_type);
+static int semantic_function_value_return_matches_type_descriptor(
+    const AstExternal *external,
+    const SemanticTypeDescriptor *expected_type);
+static int semantic_build_closure_type_descriptor(
+    const AstExpression *closure_expr,
+    SemanticTypeDescriptor *out_type);
+static int semantic_make_function_type_descriptor(
+    AstFunctionReturnType return_type,
+    size_t parameter_count,
+    const int *parameter_value_kinds,
+    SemanticTypeDescriptor *out_type);
 static int semantic_top_level_declarations_have_compatible_types(const AstExternal *lhs,
     const AstExternal *rhs);
 static SemanticFunctionSignatureMatchKind semantic_function_declaration_signature_match_kind(

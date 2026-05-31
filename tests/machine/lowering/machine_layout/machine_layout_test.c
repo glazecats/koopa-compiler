@@ -290,6 +290,73 @@ static int test_machine_layout_lowers_fallthrough_branch_from_machine_ir(void) {
     return ok;
 }
 
+static int test_machine_layout_lowers_addr_function_from_machine_ir(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *callee = NULL;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineLayoutProgram layout_program;
+    MachineLayoutError layout_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&layout_error, 0, sizeof(layout_error));
+    machine_ir_program_init(&machine_program);
+    machine_layout_program_init(&layout_program);
+
+    machine_program.register_bank.register_count = 1u;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1u, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0u;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_program, "callee", 0, &callee, &machine_error) ||
+        !machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_FUNCTION;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.addr_function_name = dup_text("callee");
+    if (!instruction.as.addr_function_name) {
+        machine_ir_program_free(&machine_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_register(0u), &machine_error) ||
+        !machine_layout_lower_program_from_machine_ir(&machine_program, &layout_program, &layout_error)) {
+        free(instruction.as.addr_function_name);
+        machine_ir_program_free(&machine_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+    free(instruction.as.addr_function_name);
+
+    ok = expect_dump(
+        &layout_program,
+        "machine_layout\n"
+        "function callee params=0 locals=0 spills=0\n"
+        "function main params=0 locals=0 spills=0\n"
+        "  layout.0 -> bb.0:\n"
+        "    reg.0 = addr_function callee\n"
+        "    ret reg.0\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_layout_program_free(&layout_program);
+    return ok;
+}
+
 static int test_machine_layout_lowers_void_return_from_machine_select(void) {
     MachineSelectProgram select_program;
     MachineLayoutProgram layout_program;
@@ -5808,6 +5875,9 @@ static int test_machine_layout_bridge_prefers_ready_merge_seed_over_longer_unrea
 
 int main(void) {
     if (!test_machine_layout_lowers_fallthrough_branch_from_machine_ir()) {
+        return 1;
+    }
+    if (!test_machine_layout_lowers_addr_function_from_machine_ir()) {
         return 1;
     }
     if (!test_machine_layout_lowers_void_return_from_machine_select()) {

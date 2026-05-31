@@ -263,6 +263,15 @@ int machine_ir_dump_program(const MachineIrProgram *program,
                             goto oom;
                         }
                         break;
+                    case MACHINE_IR_INSTR_ADDR_FUNCTION:
+                        if (!machine_ir_append_format(&builder,
+                                "addr_function %s",
+                                instruction->as.addr_function_name
+                                    ? instruction->as.addr_function_name
+                                    : "<null>")) {
+                            goto oom;
+                        }
+                        break;
                     case MACHINE_IR_INSTR_LOAD_LOCAL:
                     case MACHINE_IR_INSTR_LOAD_GLOBAL:
                         if (!machine_ir_append_format(&builder, "load ") ||

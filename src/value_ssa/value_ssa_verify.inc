@@ -259,6 +259,36 @@ static int value_ssa_verify_instruction(const ValueSsaProgram *program,
             }
         }
         return 1;
+    case VALUE_SSA_INSTR_ADDR_FUNCTION:
+        if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID) {
+            value_ssa_set_error(error,
+                0,
+                0,
+                "VALUE-SSA-055A: bb.%zu instruction %zu addr_function must define an SSA result",
+                block->id,
+                instruction_index);
+            return 0;
+        }
+        if (!instruction->as.addr_function_name || instruction->as.addr_function_name[0] == '\0') {
+            value_ssa_set_error(error,
+                0,
+                0,
+                "VALUE-SSA-055B: bb.%zu instruction %zu addr_function must name a function",
+                block->id,
+                instruction_index);
+            return 0;
+        }
+        if (!value_ssa_find_program_function(program, instruction->as.addr_function_name)) {
+            value_ssa_set_error(error,
+                0,
+                0,
+                "VALUE-SSA-055C: bb.%zu instruction %zu addr_function references unknown function '%s'",
+                block->id,
+                instruction_index,
+                instruction->as.addr_function_name);
+            return 0;
+        }
+        return 1;
     case VALUE_SSA_INSTR_ADDR_LOCAL:
     case VALUE_SSA_INSTR_ADDR_GLOBAL:
         if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID) {

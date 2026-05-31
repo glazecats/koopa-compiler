@@ -143,6 +143,10 @@ static int machine_layout_op_clone(MachineLayoutOp *dest, const MachineLayoutOp 
     }
 
     *dest = *src;
+    if (src->kind == MACHINE_SELECT_OP_ADDR_FUNCTION) {
+        dest->as.addr_function_name = machine_layout_strdup(src->as.addr_function_name);
+        return !src->as.addr_function_name || dest->as.addr_function_name != NULL;
+    }
     if (!machine_layout_op_has_call_payload(src->kind)) {
         return 1;
     }
@@ -167,7 +171,15 @@ static int machine_layout_op_clone(MachineLayoutOp *dest, const MachineLayoutOp 
 }
 
 static void machine_layout_op_free(MachineLayoutOp *op) {
-    if (!op || !machine_layout_op_has_call_payload(op->kind)) {
+    if (!op) {
+        return;
+    }
+    if (op->kind == MACHINE_SELECT_OP_ADDR_FUNCTION) {
+        free(op->as.addr_function_name);
+        op->as.addr_function_name = NULL;
+        return;
+    }
+    if (!machine_layout_op_has_call_payload(op->kind)) {
         return;
     }
 

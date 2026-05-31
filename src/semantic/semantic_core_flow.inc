@@ -144,8 +144,26 @@ static const AstExpression *unwrap_paren_expression(const AstExpression *expr) {
     return cur;
 }
 
+static const AstExpression *semantic_unwrap_function_value_wrapper_expression(const AstExpression *expr) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+
+    if (!base) {
+        return NULL;
+    }
+
+    if (base->kind == AST_EXPR_BINARY && base->as.binary.op == TOKEN_COMMA) {
+        return semantic_unwrap_function_value_wrapper_expression(base->as.binary.right);
+    }
+
+    if (base->kind == AST_EXPR_BINARY && base->as.binary.op == TOKEN_ASSIGN) {
+        return semantic_unwrap_function_value_wrapper_expression(base->as.binary.left);
+    }
+
+    return base;
+}
+
 static int classify_ast_call_callee(const AstExpression *callee, const char **out_name) {
-    const AstExpression *base = unwrap_paren_expression(callee);
+    const AstExpression *base = semantic_unwrap_function_value_wrapper_expression(callee);
 
     if (out_name) {
         *out_name = NULL;

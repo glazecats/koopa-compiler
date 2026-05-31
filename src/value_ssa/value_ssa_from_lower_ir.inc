@@ -255,6 +255,17 @@ static int value_ssa_convert_block_from_lower_ir_state(ValueSsaLowerIrConversion
                 free(args);
                 goto after_instruction_append;
             }
+        case LOWER_IR_INSTR_ADDR_FUNCTION:
+            output_instruction.kind = VALUE_SSA_INSTR_ADDR_FUNCTION;
+            output_instruction.has_result = 1;
+            new_value_id = value_ssa_function_allocate_value(output_function);
+            if (new_value_id == (size_t)-1) {
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-179A: SSA value allocation overflow while converting addr_function");
+                return 0;
+            }
+            output_instruction.result = value_ssa_value_id(new_value_id);
+            output_instruction.as.addr_function_name = input_instruction->as.addr_function_name;
+            break;
         case LOWER_IR_INSTR_ADDR_LOCAL:
             output_instruction.kind = VALUE_SSA_INSTR_ADDR_LOCAL;
             output_instruction.has_result = 1;
@@ -370,7 +381,7 @@ static int value_ssa_convert_block_from_lower_ir_state(ValueSsaLowerIrConversion
         }
 
 after_instruction_append:
-        if (input_instruction->has_result) {
+        if (output_instruction.has_result) {
             if (!value_ssa_rename_state_bind(state->rename_state,
                     input_instruction->result.temp_id,
                     value_ssa_value_id(new_value_id),

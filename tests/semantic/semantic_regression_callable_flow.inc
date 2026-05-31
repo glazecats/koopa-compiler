@@ -111,11 +111,11 @@ static int test_semantic_callable_diagnostic_matrix(void) {
         0,
         0},
         {"CALL-005-A",
-        "int f(){return 1;}\nint main(){return f()(1);}\n",
+        "int f(int x){return x;}\nint main(){return f(1)(1);}\n",
         "SEMA-CALL-005",
         "callee_kind=call_result",
         2,
-        22},
+        23},
         {"CALL-005-B",
         "int f(int a){return a;}\nint main(){return ((f)(1))(2);}\n",
         "SEMA-CALL-005",
@@ -123,19 +123,19 @@ static int test_semantic_callable_diagnostic_matrix(void) {
         2,
         27},
         {"CALL-005-ORDER-BEFORE-ARG-UNDECL",
-        "int f(){return 1;}\nint main(){return f()(bar);}\n",
+        "int f(int x){return x;}\nint main(){return f(1)(bar);}\n",
         "SEMA-CALL-005",
         "callee_kind=call_result",
         0,
         0},
         {"CALL-005-DECL-INIT-ORDER",
-        "int f(){return 1;}\nint main(){int x=f()(bar); return 0;}\n",
+        "int f(int x){return x;}\nint main(){int x=f(1)(bar); return 0;}\n",
         "SEMA-CALL-005",
         "callee_kind=call_result",
         0,
         0},
         {"CALL-005-FOR-COND-ORDER",
-        "int f(){return 1;}\nint main(){for(;f()(bar);){return 0;} return 0;}\n",
+        "int f(int x){return x;}\nint main(){for(;f(1)(bar);){return 0;} return 0;}\n",
         "SEMA-CALL-005",
         "callee_kind=call_result",
         0,
@@ -1528,8 +1528,8 @@ static int test_semantic_rejects_missing_function_body_during_ast_primary_phase(
 
 static int test_semantic_rejects_chained_call_as_unsupported_indirect_call(void) {
     const char *cases[] = {
-        "int f(){return 1;}\nint main(){return f()(1);}\n",
-        "int a(){return 1;}\nint main(){return a()();}\n"
+        "int f(int x){return x;}\nint main(){return f(1)(1);}\n",
+        "int a(int x){return x;}\nint main(){return a(1)(1);}\n"
     };
     size_t i;
 
@@ -1569,11 +1569,11 @@ static int test_semantic_rejects_chained_call_as_unsupported_indirect_call(void)
 
 static int test_semantic_rejects_parenthesized_call_result_forms(void) {
     const char *cases[] = {
-        "int f(){return 1;}\nint main(){return (f())();}\n",
+        "int f(int x){return x;}\nint main(){return (f(1))(2);}\n",
         "int f(int a){return a;}\nint main(){return (f(1))(2);}\n",
         "int f(int a){return a;}\nint main(){return ((f(1)))(2);}\n",
         "int f(int a){return a;}\nint main(){return ((f)(1))(2);}\n",
-        "int f(){return 1;}\nint main(){return ((f)())();}\n"
+        "int f(int x){return x;}\nint main(){return ((f)(1))(2);}\n"
     };
     size_t i;
 

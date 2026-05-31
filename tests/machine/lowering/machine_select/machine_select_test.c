@@ -3711,6 +3711,798 @@ cleanup:
     return ok;
 }
 
+static int test_machine_select_accepts_nested_struct_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Outer { struct Point p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; putint(o.p.x); putint(o.p.y); return o.z; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-FIELD-LOOKUP-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=3 spills=0") ||
+        !strstr(actual_text, "store_locali local.0, 1") ||
+        !strstr(actual_text, "store_locali local.1, 2") ||
+        !strstr(actual_text, "store_locali local.2, 3") ||
+        !strstr(actual_text, "call_void putint(reg.0)") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-FIELD-LOOKUP-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_pair_parameter_under_extension(void) {
+    static const char *source =
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int main(){ pair p={1,2}; return sum(p); }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-PARAM-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function sum params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "load_local local.0") ||
+        !strstr(actual_text, "load_local local.1") ||
+        !strstr(actual_text, "function main params=0") ||
+        !strstr(actual_text, "call sum(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-PARAM-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_pair_return_copy_init_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int main(){ pair q = mk(); return q.second; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-RETURN-COPY-INIT-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mk params=2 locals=4 spills=0") ||
+        !strstr(actual_text, "store_locali local.2, 1") ||
+        !strstr(actual_text, "store_locali local.3, 2") ||
+        !strstr(actual_text, "store_indirect reg.1, reg.0") ||
+        !strstr(actual_text, "function main params=0 locals=2 spills=0") ||
+        !strstr(actual_text, "addr_local local.0") ||
+        !strstr(actual_text, "addr_local local.1") ||
+        !strstr(actual_text, "call_void mk(reg.1, reg.0)") ||
+        !strstr(actual_text, "load_local local.1") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-RETURN-COPY-INIT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_pair_call_result_as_aggregate_call_argument_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "int sum(pair p){ return p.first + p.second; }\n"
+        "int main(){ return sum(mk()); }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-CALL-RESULT-CALLARG-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mk params=2 locals=4 spills=0") ||
+        !strstr(actual_text, "function sum params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "function main params=0 locals=2 spills=0") ||
+        !strstr(actual_text, "addr_local local.0") ||
+        !strstr(actual_text, "addr_local local.1") ||
+        !strstr(actual_text, "call_void mk(reg.1, reg.0)") ||
+        !strstr(actual_text, "reg.1 = load_local local.0") ||
+        !strstr(actual_text, "reg.0 = load_local local.1") ||
+        !strstr(actual_text, "reg.0 = call sum(reg.1, reg.0)") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-CALL-RESULT-CALLARG-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_pair_multi_hop_return_chain_under_extension(void) {
+    static const char *source =
+        "pair mk(){ pair p={1,2}; return p; }\n"
+        "pair id(pair p){ return p; }\n"
+        "pair wrap(){ return id(mk()); }\n"
+        "int main(){ pair q=wrap(); return q.second; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-MULTIHOP-RET-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mk params=2 locals=4 spills=0") ||
+        !strstr(actual_text, "function id params=4 locals=4 spills=0") ||
+        !strstr(actual_text, "function wrap params=2 locals=4 spills=0") ||
+        !strstr(actual_text, "function main params=0 locals=2 spills=0") ||
+        !strstr(actual_text, "addr_local local.2") ||
+        !strstr(actual_text, "addr_local local.3") ||
+        !strstr(actual_text, "call_void mk(reg.1, reg.0)") ||
+        !strstr(actual_text, "call_void id(reg.3, reg.2, reg.1, reg.0)") ||
+        !strstr(actual_text, "call_void wrap(reg.1, reg.0)") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-MULTIHOP-RET-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_nested_struct_multi_hop_return_chain_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "struct Mid id(struct Mid m){ return m; }\n"
+        "struct Mid wrap(){ return id(mk()); }\n"
+        "int main(){ struct Mid q=wrap(); return q.p.second + q.z; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-MULTIHOP-RET-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mk params=3 locals=6 spills=0") ||
+        !strstr(actual_text, "function id params=6 locals=6 spills=0") ||
+        !strstr(actual_text, "function wrap params=3 locals=6 spills=0") ||
+        !strstr(actual_text, "function main params=0 locals=3 spills=0") ||
+        !strstr(actual_text, "addr_local local.3") ||
+        !strstr(actual_text, "addr_local local.4") ||
+        !strstr(actual_text, "addr_local local.5") ||
+        !strstr(actual_text, "call_void mk(reg.2, reg.1, reg.0)") ||
+        !strstr(actual_text, "call_void id(reg.5, reg.4, reg.3, reg.2, reg.1, reg.0)") ||
+        !strstr(actual_text, "call_void wrap(reg.2, reg.1, reg.0)") ||
+        !strstr(actual_text, "reg.1 = load_local local.1") ||
+        !strstr(actual_text, "reg.0 = load_local local.2") ||
+        !strstr(actual_text, "reg.0 = alu.0 reg.1, reg.0") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-MULTIHOP-RET-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_nested_struct_return_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+        "int main(){ struct Mid q=mk(); return q.p.second + q.z; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-RETURN-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mk params=3 locals=6 spills=0") ||
+        !strstr(actual_text, "store_locali local.3, 1") ||
+        !strstr(actual_text, "store_locali local.4, 2") ||
+        !strstr(actual_text, "store_locali local.5, 3") ||
+        !strstr(actual_text, "store_indirect reg.1, reg.0") ||
+        !strstr(actual_text, "function main params=0 locals=3 spills=0") ||
+        !strstr(actual_text, "addr_local local.0") ||
+        !strstr(actual_text, "addr_local local.1") ||
+        !strstr(actual_text, "addr_local local.2") ||
+        !strstr(actual_text, "call_void mk(reg.2, reg.1, reg.0)") ||
+        !strstr(actual_text, "reg.0 = alu.0 reg.1, reg.0") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-RETURN-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_nested_struct_parameter_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "int sum(struct Mid m){ return m.p.first + m.p.second + m.z; }\n"
+        "int main(){ struct Mid m={{1,2},3}; return sum(m); }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-PARAM-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function sum params=3 locals=3 spills=0") ||
+        !strstr(actual_text, "load_local local.0") ||
+        !strstr(actual_text, "load_local local.1") ||
+        !strstr(actual_text, "load_local local.2") ||
+        !strstr(actual_text, "function main params=0") ||
+        !strstr(actual_text, "call sum(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-PARAM-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_nested_pair_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Outer { pair p; int z; };\n"
+        "int main(){ struct Outer o={{1,2},3}; pair q=o.p; putint(q.first); return q.second; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-PAIR-COPY-INIT-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=5 spills=0") ||
+        !strstr(actual_text, "store_locali local.0, 1") ||
+        !strstr(actual_text, "store_locali local.1, 2") ||
+        !strstr(actual_text, "store_locali local.2, 3") ||
+        !strstr(actual_text, "store_local local.3, reg.0") ||
+        !strstr(actual_text, "store_local local.4, reg.0") ||
+        !strstr(actual_text, "call_void putint(reg.0)") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-PAIR-COPY-INIT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_nested_struct_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Outer { struct Point p; int z; };\n"
+        "int main(){ struct Point q={4,5}; struct Outer o={{1,2},3}; q=o.p; putint(q.x); return q.y; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-ASSIGN-MEMBER-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=5 spills=0") ||
+        !strstr(actual_text, "store_locali local.0, 4") ||
+        !strstr(actual_text, "store_locali local.1, 5") ||
+        !strstr(actual_text, "store_locali local.2, 1") ||
+        !strstr(actual_text, "store_locali local.3, 2") ||
+        !strstr(actual_text, "store_locali local.4, 3") ||
+        !strstr(actual_text, "store_local local.0, reg.0") ||
+        !strstr(actual_text, "store_local local.1, reg.0") ||
+        !strstr(actual_text, "call_void putint(reg.0)") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-ASSIGN-MEMBER-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_deep_nested_struct_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; struct Mid m=o.m; putint(m.p.x); return m.p.y + m.z; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-STRUCT-COPY-INIT-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=7 spills=0") ||
+        !strstr(actual_text, "store_locali local.0, 1") ||
+        !strstr(actual_text, "store_locali local.1, 2") ||
+        !strstr(actual_text, "store_locali local.2, 3") ||
+        !strstr(actual_text, "store_local local.4, reg.0") ||
+        !strstr(actual_text, "store_local local.5, reg.0") ||
+        !strstr(actual_text, "store_local local.6, reg.0") ||
+        !strstr(actual_text, "call_void putint(reg.0)") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-STRUCT-COPY-INIT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_deep_nested_pair_copy_init_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; struct Mid m=o.m; putint(m.p.first); return m.p.second + m.z; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-PAIR-COPY-INIT-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=7 spills=0") ||
+        !strstr(actual_text, "store_locali local.0, 1") ||
+        !strstr(actual_text, "store_locali local.1, 2") ||
+        !strstr(actual_text, "store_locali local.2, 3") ||
+        !strstr(actual_text, "store_local local.4, reg.0") ||
+        !strstr(actual_text, "store_local local.5, reg.0") ||
+        !strstr(actual_text, "store_local local.6, reg.0") ||
+        !strstr(actual_text, "call_void putint(reg.0)") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-PAIR-COPY-INIT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_deep_nested_struct_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; putint(o.m.p.x); putint(o.m.p.y); return o.m.z + o.w; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-STRUCT-FIELD-LOOKUP-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=4 spills=0") ||
+        !strstr(actual_text, "store_locali local.0, 1") ||
+        !strstr(actual_text, "store_locali local.1, 2") ||
+        !strstr(actual_text, "store_locali local.2, 3") ||
+        !strstr(actual_text, "store_locali local.3, 4") ||
+        !strstr(actual_text, "call_void putint(reg.0)") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-STRUCT-FIELD-LOOKUP-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_deep_nested_pair_field_lookup_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Outer o={{{1,2},3},4}; putint(o.m.p.first); putint(o.m.p.second); return o.m.z + o.w; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-PAIR-FIELD-LOOKUP-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=4 spills=0") ||
+        !strstr(actual_text, "store_locali local.0, 1") ||
+        !strstr(actual_text, "store_locali local.1, 2") ||
+        !strstr(actual_text, "store_locali local.2, 3") ||
+        !strstr(actual_text, "store_locali local.3, 4") ||
+        !strstr(actual_text, "call_void putint(reg.0)") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-PAIR-FIELD-LOOKUP-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_deep_nested_struct_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Mid { struct Point p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Mid m={{7,8},9}; struct Outer o={{{1,2},3},4}; m=o.m; putint(m.p.x); return m.p.y + m.z; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-STRUCT-ASSIGN-MEMBER-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=7 spills=0") ||
+        !strstr(actual_text, "store_locali local.0, 7") ||
+        !strstr(actual_text, "store_locali local.1, 8") ||
+        !strstr(actual_text, "store_locali local.2, 9") ||
+        !strstr(actual_text, "store_locali local.3, 1") ||
+        !strstr(actual_text, "store_locali local.4, 2") ||
+        !strstr(actual_text, "store_locali local.5, 3") ||
+        !strstr(actual_text, "store_local local.0, reg.0") ||
+        !strstr(actual_text, "store_local local.1, reg.0") ||
+        !strstr(actual_text, "store_local local.2, reg.0") ||
+        !strstr(actual_text, "call_void putint(reg.0)") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-STRUCT-ASSIGN-MEMBER-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_deep_nested_pair_assignment_from_member_under_extension(void) {
+    static const char *source =
+        "struct Mid { pair p; int z; };\n"
+        "struct Outer { struct Mid m; int w; };\n"
+        "int main(){ struct Mid m={{7,8},9}; struct Outer o={{{1,2},3},4}; m=o.m; putint(m.p.first); return m.p.second + m.z; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-PAIR-ASSIGN-MEMBER-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0 locals=7 spills=0") ||
+        !strstr(actual_text, "store_locali local.0, 7") ||
+        !strstr(actual_text, "store_locali local.1, 8") ||
+        !strstr(actual_text, "store_locali local.2, 9") ||
+        !strstr(actual_text, "store_locali local.3, 1") ||
+        !strstr(actual_text, "store_locali local.4, 2") ||
+        !strstr(actual_text, "store_locali local.5, 3") ||
+        !strstr(actual_text, "store_local local.0, reg.0") ||
+        !strstr(actual_text, "store_local local.1, reg.0") ||
+        !strstr(actual_text, "store_local local.2, reg.0") ||
+        !strstr(actual_text, "call_void putint(reg.0)") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-PAIR-ASSIGN-MEMBER-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
 static int test_machine_select_rejects_recursive_float_condition_with_ternary_neighbor_under_extension(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -5616,6 +6408,757 @@ static int test_machine_select_rejects_negative_float_call_int_condition_under_e
     if (strstr(machine_error.message, "SEMA-TYPE-008") == NULL) {
         fprintf(stderr,
             "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_deep_nested_struct_copy_init_mismatch_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "struct P { int x; int y; };\n"
+            "struct Q { int x; int y; };\n"
+            "struct Mid { struct P p; int z; };\n"
+            "struct Outer { struct Mid m; int w; };\n"
+            "int main(){ struct Outer o={{{1,2},3},4}; struct Q q=o.m.p; return q.x; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-STRUCT-COPY-INIT-MISMATCH-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-AGG-006") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-STRUCT-COPY-INIT-MISMATCH-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_pair_call_result_direct_member_access_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "pair mk(){ pair p={1,2}; return p; }\n"
+            "int main(){ return mk().second; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-CALL-RESULT-MEMBER-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-AGG-003") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-CALL-RESULT-MEMBER-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_pair_call_result_as_scalar_call_argument_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "pair mk(){ pair p={1,2}; return p; }\n"
+            "int sink(int x){ return x; }\n"
+            "int main(){ return sink(mk()); }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-CALL-RESULT-SCALAR-CALLARG-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-CALL-RESULT-SCALAR-CALLARG-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_pair_multi_hop_return_chain_as_scalar_call_argument_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "pair mk(){ pair p={1,2}; return p; }\n"
+            "pair wrap(){ return mk(); }\n"
+            "int sink(int x){ return x; }\n"
+            "int main(){ return sink(wrap()); }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-MULTIHOP-SCALAR-CALLARG-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-MULTIHOP-SCALAR-CALLARG-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_pair_call_result_scalar_initializer_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "pair mk(){ pair p={1,2}; return p; }\n"
+            "int main(){ int x = mk(); return x; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-CALL-RESULT-SCALAR-INIT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-CALL-RESULT-SCALAR-INIT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_pair_call_result_scalar_assignment_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "pair mk(){ pair p={1,2}; return p; }\n"
+            "int main(){ int x = 0; x = mk(); return x; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-CALL-RESULT-SCALAR-ASSIGN-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-CALL-RESULT-SCALAR-ASSIGN-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_nested_struct_multi_hop_return_chain_scalar_initializer_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "struct Mid { pair p; int z; };\n"
+            "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+            "struct Mid id(struct Mid m){ return m; }\n"
+            "struct Mid wrap(){ return id(mk()); }\n"
+            "int main(){ int x = wrap(); return x; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-MULTIHOP-SCALAR-INIT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-MULTIHOP-SCALAR-INIT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_pair_multi_hop_return_chain_control_condition_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "pair mk(){ pair p={1,2}; return p; }\n"
+            "pair wrap(){ return mk(); }\n"
+            "int main(){ if(wrap()) return 1; return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-MULTIHOP-CONTROL-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-AGG-004") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-PAIR-MULTIHOP-CONTROL-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_nested_struct_multi_hop_return_chain_control_condition_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "struct Mid { pair p; int z; };\n"
+            "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+            "struct Mid id(struct Mid m){ return m; }\n"
+            "struct Mid wrap(){ return id(mk()); }\n"
+            "int main(){ if(wrap()) return 1; return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-MULTIHOP-CONTROL-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-AGG-004") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-MULTIHOP-CONTROL-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_nested_struct_call_result_direct_member_chain_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "struct Mid { pair p; int z; };\n"
+            "struct Mid mk(){ struct Mid m={{1,2},3}; return m; }\n"
+            "int main(){ return mk().p.second; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-CALL-RESULT-MEMBER-CHAIN-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-AGG-003") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-NESTED-STRUCT-CALL-RESULT-MEMBER-CHAIN-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_deep_nested_pair_struct_assignment_mismatch_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "struct A { pair p; int z; };\n"
+            "struct B { pair p; int z; };\n"
+            "struct Outer { struct A a; int w; };\n"
+            "int main(){ struct B b={{7,8},9}; struct Outer o={{{1,2},3},4}; b=o.a; return b.z; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-PAIR-STRUCT-ASSIGN-MISMATCH-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-AGG-006") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-PAIR-STRUCT-ASSIGN-MISMATCH-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_deep_nested_pair_initializer_too_many_items_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "struct Mid { pair p; int z; };\n"
+            "struct Outer { struct Mid m; int w; };\n"
+            "int main(){ struct Outer o={{{1,2,3},4},5}; return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-PAIR-INIT-TOO-MANY-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-AGG-002") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-PAIR-INIT-TOO-MANY-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_deep_nested_struct_initializer_too_many_items_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "struct Point { int x; int y; };\n"
+            "struct Mid { struct Point p; int z; };\n"
+            "struct Outer { struct Mid m; int w; };\n"
+            "int main(){ struct Outer o={{{1,2,3},4},5}; return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-STRUCT-INIT-TOO-MANY-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-AGG-002") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-DEEP-NESTED-STRUCT-INIT-TOO-MANY-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float pick(){ return g ? h : h; }\n"
+            "int main(){ if(pick() + 1) return 1; return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float pick(float x){ return -id(x) ? x : x; }\n"
+            "int main(float x){ if(pick(x) + 1) return 1; return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_helper_wrapped_ternary_call_compare_against_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float pick(){ return g ? h : h; }\n"
+            "int eq(){ return pick() == 0; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-COMPARE-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-007") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-COMPARE-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_compare_against_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float pick(float x){ return -id(x) ? x : x; }\n"
+            "int eq(float x){ return pick(x) == 0; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-007") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float pick(){ return g ? h : h; }\n"
+            "int bad(){ return pick(); }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-RETURN-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-005") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-RETURN-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float pick(float x){ return -id(x) ? x : x; }\n"
+            "int bad(float x){ return pick(x); }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-RETURN-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-005") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-RETURN-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "int sink(int x){ return x; }\n"
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float pick(){ return g ? h : h; }\n"
+            "int main(){ return sink(pick()); }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-CALLARG-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-CALLARG-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "int sink(int x){ return x; }\n"
+            "float id(float x){ return x; }\n"
+            "float pick(float x){ return -id(x) ? x : x; }\n"
+            "int main(){ return sink(pick(1.0)); }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-CALLARG-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-CALLARG-INT-REJECT mismatch: %s\n",
             machine_error.message);
         machine_select_program_free(&select_program);
         machine_ir_program_free(&machine_program);
@@ -9504,6 +11047,72 @@ static int test_machine_select_keeps_compare_result_when_live_out_via_store_indi
         "    reti 1\n"
         "  bb.2:\n"
         "    reti 0\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_lowers_addr_function_from_machine_ir(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 1;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_program, "callee", 0, NULL, &machine_error) ||
+        !machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_FUNCTION;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.addr_function_name = dup_text("callee");
+    if (!instruction.as.addr_function_name) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_register(0), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        free(instruction.as.addr_function_name);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(instruction.as.addr_function_name);
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function callee params=0 locals=0 spills=0\n"
+        "function main params=0 locals=0 spills=0\n"
+        "  bb.0:\n"
+        "    reg.0 = addr_function callee\n"
+        "    ret reg.0\n");
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -15429,6 +17038,54 @@ int main(void) {
         if (strstr("MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-ACCEPT", filter) != NULL) {
             return test_machine_select_accepts_nested_float_mul_div_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-SELECT-NESTED-STRUCT-FIELD-LOOKUP-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_nested_struct_field_lookup_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-PAIR-PARAM-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_pair_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-PAIR-RETURN-COPY-INIT-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_pair_return_copy_init_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-PAIR-CALL-RESULT-CALLARG-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_pair_call_result_as_aggregate_call_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-PAIR-MULTIHOP-RET-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_pair_multi_hop_return_chain_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-NESTED-STRUCT-MULTIHOP-RET-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_nested_struct_multi_hop_return_chain_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-NESTED-STRUCT-RETURN-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_nested_struct_return_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-NESTED-STRUCT-PARAM-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_nested_struct_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-NESTED-PAIR-COPY-INIT-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_nested_pair_copy_init_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-NESTED-STRUCT-ASSIGN-MEMBER-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_nested_struct_assignment_from_member_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-DEEP-NESTED-STRUCT-COPY-INIT-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_deep_nested_struct_copy_init_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-DEEP-NESTED-PAIR-COPY-INIT-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_deep_nested_pair_copy_init_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-DEEP-NESTED-STRUCT-FIELD-LOOKUP-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_deep_nested_struct_field_lookup_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-DEEP-NESTED-PAIR-FIELD-LOOKUP-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_deep_nested_pair_field_lookup_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-DEEP-NESTED-STRUCT-ASSIGN-MEMBER-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_deep_nested_struct_assignment_from_member_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-DEEP-NESTED-PAIR-ASSIGN-MEMBER-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_deep_nested_pair_assignment_from_member_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-SELECT-FLOAT-ARITH-INT-TYPE-REJECT", filter) != NULL) {
             return test_machine_select_rejects_mixed_float_int_arithmetic_under_extension() ? 0 : 1;
         }
@@ -15449,6 +17106,69 @@ int main(void) {
         }
         if (strstr("MACHINE-SELECT-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
             return test_machine_select_rejects_negative_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-DEEP-NESTED-STRUCT-COPY-INIT-MISMATCH-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_deep_nested_struct_copy_init_mismatch_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-PAIR-CALL-RESULT-MEMBER-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_pair_call_result_direct_member_access_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-PAIR-CALL-RESULT-SCALAR-CALLARG-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_pair_call_result_as_scalar_call_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-PAIR-MULTIHOP-SCALAR-CALLARG-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_pair_multi_hop_return_chain_as_scalar_call_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-PAIR-CALL-RESULT-SCALAR-INIT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_pair_call_result_scalar_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-PAIR-CALL-RESULT-SCALAR-ASSIGN-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_pair_call_result_scalar_assignment_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-NESTED-STRUCT-MULTIHOP-SCALAR-INIT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_nested_struct_multi_hop_return_chain_scalar_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-PAIR-MULTIHOP-CONTROL-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_pair_multi_hop_return_chain_control_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-NESTED-STRUCT-MULTIHOP-CONTROL-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_nested_struct_multi_hop_return_chain_control_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-NESTED-STRUCT-CALL-RESULT-MEMBER-CHAIN-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_nested_struct_call_result_direct_member_chain_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-DEEP-NESTED-PAIR-STRUCT-ASSIGN-MISMATCH-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_deep_nested_pair_struct_assignment_mismatch_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-DEEP-NESTED-PAIR-INIT-TOO-MANY-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_deep_nested_pair_initializer_too_many_items_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-DEEP-NESTED-STRUCT-INIT-TOO-MANY-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_deep_nested_struct_initializer_too_many_items_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_helper_wrapped_ternary_call_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-RETURN-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-RETURN-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension() ? 0 : 1;
         }
         if (strstr("MACHINE-SELECT-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT", filter) != NULL) {
             return test_machine_select_rejects_nested_float_tree_plus_int_condition_under_extension() ? 0 : 1;
@@ -15536,6 +17256,18 @@ int main(void) {
         }
         if (strstr("MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT", filter) != NULL) {
             return test_machine_select_rejects_unary_call_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-RETURN-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-RETURN-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-HELPER-TERNARY-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-HELPER-TERNARY-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension() ? 0 : 1;
         }
         if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-COMPARE-FLOAT-REJECT", filter) != NULL) {
             return test_machine_select_rejects_float_ternary_value_compare_against_float_under_extension() ? 0 : 1;
@@ -15821,6 +17553,54 @@ int main(void) {
     if (!test_machine_select_accepts_nested_float_mul_div_under_extension()) {
         return 1;
     }
+    if (!test_machine_select_accepts_nested_struct_field_lookup_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_pair_parameter_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_pair_return_copy_init_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_pair_call_result_as_aggregate_call_argument_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_pair_multi_hop_return_chain_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_nested_struct_multi_hop_return_chain_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_nested_struct_return_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_nested_struct_parameter_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_nested_pair_copy_init_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_nested_struct_assignment_from_member_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_deep_nested_struct_copy_init_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_deep_nested_pair_copy_init_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_deep_nested_struct_field_lookup_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_deep_nested_pair_field_lookup_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_deep_nested_struct_assignment_from_member_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_deep_nested_pair_assignment_from_member_under_extension()) {
+        return 1;
+    }
     if (!test_machine_select_rejects_mixed_float_int_arithmetic_under_extension()) {
         return 1;
     }
@@ -15842,6 +17622,69 @@ int main(void) {
     if (!test_machine_select_rejects_negative_float_call_int_condition_under_extension()) {
         return 1;
     }
+    if (!test_machine_select_rejects_deep_nested_struct_copy_init_mismatch_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_pair_call_result_direct_member_access_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_pair_call_result_as_scalar_call_argument_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_pair_multi_hop_return_chain_as_scalar_call_argument_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_pair_call_result_scalar_initializer_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_pair_call_result_scalar_assignment_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_nested_struct_multi_hop_return_chain_scalar_initializer_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_pair_multi_hop_return_chain_control_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_nested_struct_multi_hop_return_chain_control_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_nested_struct_call_result_direct_member_chain_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_deep_nested_pair_struct_assignment_mismatch_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_deep_nested_pair_initializer_too_many_items_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_deep_nested_struct_initializer_too_many_items_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_float_helper_wrapped_ternary_call_condition_plus_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_condition_plus_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_float_helper_wrapped_ternary_call_compare_against_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_compare_against_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension()) {
+        return 1;
+    }
     if (!test_machine_select_rejects_nested_float_tree_plus_int_condition_under_extension()) {
         return 1;
     }
@@ -15852,6 +17695,18 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension()) {
         return 1;
     }
     if (!test_machine_select_rejects_float_ternary_value_compare_against_float_under_extension()) {
@@ -15912,6 +17767,9 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_builds_from_machine_ir_report()) {
+        return 1;
+    }
+    if (!test_machine_select_lowers_addr_function_from_machine_ir()) {
         return 1;
     }
     if (!test_machine_select_lowers_compare_branch_terminator()) {

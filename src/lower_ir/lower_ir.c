@@ -106,6 +106,9 @@ static void lower_ir_instruction_free(LowerIrInstruction *instruction) {
         instruction->as.call.callee_name = NULL;
         instruction->as.call.args = NULL;
         instruction->as.call.arg_count = 0;
+    } else if (instruction->kind == LOWER_IR_INSTR_ADDR_FUNCTION) {
+        free(instruction->as.addr_function_name);
+        instruction->as.addr_function_name = NULL;
     }
 }
 
@@ -192,12 +195,14 @@ static int lower_ir_instruction_copy(LowerIrInstruction *destination,
     }
 
     *destination = *source;
-    if (source->kind != LOWER_IR_INSTR_CALL) {
+    if (source->kind != LOWER_IR_INSTR_CALL &&
+        source->kind != LOWER_IR_INSTR_ADDR_FUNCTION) {
         return 1;
     }
 
     destination->as.call.callee_name = NULL;
     destination->as.call.args = NULL;
+    destination->as.addr_function_name = NULL;
 
     if (source->as.call.callee_name) {
         destination->as.call.callee_name = lower_ir_strdup(source->as.call.callee_name);
@@ -219,6 +224,15 @@ static int lower_ir_instruction_copy(LowerIrInstruction *destination,
         memcpy(destination->as.call.args,
             source->as.call.args,
             source->as.call.arg_count * sizeof(LowerIrValueRef));
+    }
+
+    if (source->kind == LOWER_IR_INSTR_ADDR_FUNCTION &&
+        source->as.addr_function_name) {
+        destination->as.addr_function_name = lower_ir_strdup(source->as.addr_function_name);
+        if (!destination->as.addr_function_name) {
+            lower_ir_set_error(error, 0, 0, "LOWER-IR-003A: out of memory copying function address name");
+            return 0;
+        }
     }
 
     return 1;

@@ -140,6 +140,47 @@ static IrInstruction *find_first_call_instruction_mut(IrFunction *function) {
     return NULL;
 }
 
+static int install_function_shape(IrProgram *program,
+    AstFunctionReturnType return_type,
+    const AstFunctionReturnType *parameter_types,
+    size_t parameter_count,
+    size_t *out_shape_id) {
+    IrFunctionShape *shapes;
+    AstFunctionReturnType *copied_params = NULL;
+    size_t next_id;
+
+    if (!program || (parameter_count > 0 && !parameter_types)) {
+        return 0;
+    }
+
+    next_id = program->function_shape_count;
+    shapes = (IrFunctionShape *)realloc(program->function_shapes,
+        (next_id + 1) * sizeof(IrFunctionShape));
+    if (!shapes) {
+        return 0;
+    }
+    program->function_shapes = shapes;
+    program->function_shape_capacity = next_id + 1;
+
+    if (parameter_count > 0) {
+        copied_params = (AstFunctionReturnType *)malloc(parameter_count * sizeof(AstFunctionReturnType));
+        if (!copied_params) {
+            return 0;
+        }
+        memcpy(copied_params, parameter_types, parameter_count * sizeof(AstFunctionReturnType));
+    }
+
+    program->function_shapes[next_id].id = next_id;
+    program->function_shapes[next_id].return_type = return_type;
+    program->function_shapes[next_id].parameter_types = copied_params;
+    program->function_shapes[next_id].parameter_count = parameter_count;
+    program->function_shape_count = next_id + 1;
+    if (out_shape_id) {
+        *out_shape_id = next_id;
+    }
+    return 1;
+}
+
 static int replace_call_callee_name(IrInstruction *instruction, const char *callee_name) {
     char *replacement;
     size_t len;
@@ -1302,6 +1343,466 @@ static int test_ir_verifier_rejects_program_null_function_table(void) {
     return ok;
 }
 
+static int test_ir_verifier_accepts_callable_object_ops(void) {
+    IrProgram program;
+    IrFunction *function;
+    IrInstruction *call_instruction;
+    IrInstruction *return_instruction;
+    AstFunctionReturnType param_types[1];
+    size_t shape_id;
+    IrError error;
+    int ok;
+
+    if (!lower_source_to_ir_program(
+            "int add1_env(int env, int x){return x+1;}\nint main(){int y; y=add1_env(0, 4); return y;}\n",
+            &program)) {
+        return 0;
+    }
+
+    param_types[0] = AST_FUNCTION_RETURN_INT;
+    if (!install_function_shape(&program, AST_FUNCTION_RETURN_INT, param_types, 1, &shape_id)) {
+        fprintf(stderr, "[ir-verify] FAIL: could not install callable shape\n");
+        ir_program_free(&program);
+        return 0;
+    }
+
+    function = find_function_mut(&program, "main");
+    if (!function || function->block_count == 0 || function->blocks[0].instruction_count < 2) {
+        fprintf(stderr, "[ir-verify] FAIL: unexpected main shape for callable-object verifier test\n");
+        ir_program_free(&program);
+        return 0;
+    }
+
+    call_instruction = &function->blocks[0].instructions[0];
+    return_instruction = &function->blocks[0].instructions[1];
+
+    free(call_instruction->as.call.callee_name);
+    free(call_instruction->as.call.args);
+    call_instruction->kind = IR_INSTR_FN_MAKE;
+    call_instruction->result.kind = IR_VALUE_TEMP;
+    call_instruction->result.id = 0;
+    call_instruction->result.immediate = 0;
+    call_instruction->as.fn_make.callee_name = (char *)malloc(sizeof("add1_env"));
+    if (!call_instruction->as.fn_make.callee_name) {
+        ir_program_free(&program);
+        return 0;
+    }
+    memcpy(call_instruction->as.fn_make.callee_name, "add1_env", sizeof("add1_env"));
+    call_instruction->as.fn_make.env.kind = IR_VALUE_IMMEDIATE;
+    call_instruction->as.fn_make.env.immediate = 0;
+    call_instruction->as.fn_make.env.id = 0;
+    call_instruction->as.fn_make.shape_id = shape_id;
+
+    return_instruction->kind = IR_INSTR_CALL_INDIRECT;
+    return_instruction->result.kind = IR_VALUE_TEMP;
+    return_instruction->result.id = 1;
+    return_instruction->result.immediate = 0;
+    return_instruction->as.call_indirect.callee.kind = IR_VALUE_TEMP;
+    return_instruction->as.call_indirect.callee.id = 0;
+    return_instruction->as.call_indirect.callee.immediate = 0;
+    return_instruction->as.call_indirect.arg_count = 1;
+    return_instruction->as.call_indirect.args = (IrValueRef *)malloc(sizeof(IrValueRef));
+    if (!return_instruction->as.call_indirect.args) {
+        ir_program_free(&program);
+        return 0;
+    }
+    return_instruction->as.call_indirect.args[0].kind = IR_VALUE_IMMEDIATE;
+    return_instruction->as.call_indirect.args[0].immediate = 4;
+    return_instruction->as.call_indirect.args[0].id = 0;
+
+    function->blocks[0].terminator.as.return_value.kind = IR_VALUE_TEMP;
+    function->blocks[0].terminator.as.return_value.id = 1;
+    function->blocks[0].terminator.as.return_value.immediate = 0;
+    function->next_temp_id = 2;
+
+    ok = ir_verify_program(&program, &error);
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-verify] FAIL: callable-object program rejected at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+    }
+
+    ir_program_free(&program);
+    return ok;
+}
+
+static int test_ir_verifier_rejects_fn_make_missing_shape(void) {
+    IrProgram program;
+    IrFunction *function;
+    IrInstruction *instruction;
+    int ok;
+
+    if (!lower_source_to_ir_program(
+            "int add1_env(int env, int x){return x+1;}\nint main(){int y; y=add1_env(0, 4); return y;}\n",
+            &program)) {
+        return 0;
+    }
+
+    function = find_function_mut(&program, "main");
+    instruction = &function->blocks[0].instructions[0];
+    free(instruction->as.call.callee_name);
+    free(instruction->as.call.args);
+    instruction->kind = IR_INSTR_FN_MAKE;
+    instruction->as.fn_make.callee_name = (char *)malloc(sizeof("add1_env"));
+    if (!instruction->as.fn_make.callee_name) {
+        ir_program_free(&program);
+        return 0;
+    }
+    memcpy(instruction->as.fn_make.callee_name, "add1_env", sizeof("add1_env"));
+    instruction->as.fn_make.env.kind = IR_VALUE_IMMEDIATE;
+    instruction->as.fn_make.env.immediate = 0;
+    instruction->as.fn_make.env.id = 0;
+    instruction->as.fn_make.shape_id = 999;
+
+    ok = expect_verifier_rejects("IR-VERIFY-FN-MAKE-MISSING-SHAPE",
+        &program,
+        "IR-VERIFY-076");
+
+    ir_program_free(&program);
+    return ok;
+}
+
+static int test_ir_verifier_rejects_call_indirect_arg_mismatch(void) {
+    IrProgram program;
+    IrFunction *function;
+    IrInstruction *call_instruction;
+    IrInstruction *indirect_instruction;
+    AstFunctionReturnType param_types[1];
+    size_t shape_id;
+    int ok;
+
+    if (!lower_source_to_ir_program(
+            "int add1_env(int env, int x){return x+1;}\nint main(){int y; y=add1_env(0, 4); return y;}\n",
+            &program)) {
+        return 0;
+    }
+
+    param_types[0] = AST_FUNCTION_RETURN_INT;
+    if (!install_function_shape(&program, AST_FUNCTION_RETURN_INT, param_types, 1, &shape_id)) {
+        ir_program_free(&program);
+        return 0;
+    }
+
+    function = find_function_mut(&program, "main");
+    call_instruction = &function->blocks[0].instructions[0];
+    indirect_instruction = &function->blocks[0].instructions[1];
+
+    free(call_instruction->as.call.callee_name);
+    free(call_instruction->as.call.args);
+    call_instruction->kind = IR_INSTR_FN_MAKE;
+    call_instruction->as.fn_make.callee_name = (char *)malloc(sizeof("add1_env"));
+    if (!call_instruction->as.fn_make.callee_name) {
+        ir_program_free(&program);
+        return 0;
+    }
+    memcpy(call_instruction->as.fn_make.callee_name, "add1_env", sizeof("add1_env"));
+    call_instruction->as.fn_make.env.kind = IR_VALUE_IMMEDIATE;
+    call_instruction->as.fn_make.env.immediate = 0;
+    call_instruction->as.fn_make.env.id = 0;
+    call_instruction->as.fn_make.shape_id = shape_id;
+
+    indirect_instruction->kind = IR_INSTR_CALL_INDIRECT;
+    indirect_instruction->result.kind = IR_VALUE_TEMP;
+    indirect_instruction->result.id = 1;
+    indirect_instruction->result.immediate = 0;
+    indirect_instruction->as.call_indirect.callee.kind = IR_VALUE_TEMP;
+    indirect_instruction->as.call_indirect.callee.id = 0;
+    indirect_instruction->as.call_indirect.callee.immediate = 0;
+    indirect_instruction->as.call_indirect.arg_count = 0;
+    indirect_instruction->as.call_indirect.args = NULL;
+    function->next_temp_id = 2;
+
+    ok = expect_verifier_rejects("IR-VERIFY-CALL-INDIRECT-ARG-MISMATCH",
+        &program,
+        "IR-VERIFY-088");
+
+    ir_program_free(&program);
+    return ok;
+}
+
+static int test_ir_verifier_rejects_call_indirect_non_callable_temp(void) {
+    IrProgram program;
+    IrFunction *function;
+    IrInstruction *instruction;
+    int ok;
+
+    if (!lower_source_to_ir_program("int main(){int x=1+2; return x;}\n", &program)) {
+        return 0;
+    }
+
+    function = find_function_mut(&program, "main");
+    instruction = &function->blocks[0].instructions[1];
+    instruction->kind = IR_INSTR_CALL_INDIRECT;
+    instruction->result.kind = IR_VALUE_TEMP;
+    instruction->result.id = 1;
+    instruction->result.immediate = 0;
+    instruction->as.call_indirect.callee.kind = IR_VALUE_TEMP;
+    instruction->as.call_indirect.callee.id = 0;
+    instruction->as.call_indirect.callee.immediate = 0;
+    instruction->as.call_indirect.arg_count = 0;
+    instruction->as.call_indirect.args = NULL;
+    function->blocks[0].terminator.as.return_value.kind = IR_VALUE_TEMP;
+    function->blocks[0].terminator.as.return_value.id = 1;
+    function->blocks[0].terminator.as.return_value.immediate = 0;
+    function->next_temp_id = 2;
+
+    ok = expect_verifier_rejects("IR-VERIFY-CALL-INDIRECT-NON-CALLABLE",
+        &program,
+        "IR-VERIFY-086");
+
+    ir_program_free(&program);
+    return ok;
+}
+
+static int test_ir_verifier_accepts_call_indirect_with_moved_callable_temp(void) {
+    IrProgram program;
+    IrFunction *function;
+    IrInstruction *fn_make_instruction;
+    IrInstruction *mov_instruction;
+    IrInstruction *indirect_instruction;
+    AstFunctionReturnType param_types[1];
+    size_t shape_id;
+    IrError error;
+    int ok;
+
+    if (!lower_source_to_ir_program(
+            "int add1_env(int env, int x){return x+1;}\nint main(){int y; y=add1_env(0, 4); return y;}\n",
+            &program)) {
+        return 0;
+    }
+
+    param_types[0] = AST_FUNCTION_RETURN_INT;
+    if (!install_function_shape(&program, AST_FUNCTION_RETURN_INT, param_types, 1, &shape_id)) {
+        ir_program_free(&program);
+        return 0;
+    }
+
+    function = find_function_mut(&program, "main");
+    if (!function || function->block_count == 0 || function->blocks[0].instruction_count < 2) {
+        fprintf(stderr, "[ir-verify] FAIL: unexpected main shape for moved callable verifier test\n");
+        ir_program_free(&program);
+        return 0;
+    }
+
+    function->blocks[0].instructions = (IrInstruction *)realloc(
+        function->blocks[0].instructions,
+        3u * sizeof(IrInstruction));
+    if (!function->blocks[0].instructions) {
+        ir_program_free(&program);
+        return 0;
+    }
+    function->blocks[0].instruction_capacity = 3u;
+    function->blocks[0].instruction_count = 3u;
+
+    fn_make_instruction = &function->blocks[0].instructions[0];
+    mov_instruction = &function->blocks[0].instructions[1];
+    indirect_instruction = &function->blocks[0].instructions[2];
+
+    free(fn_make_instruction->as.call.callee_name);
+    free(fn_make_instruction->as.call.args);
+    fn_make_instruction->kind = IR_INSTR_FN_MAKE;
+    fn_make_instruction->result.kind = IR_VALUE_TEMP;
+    fn_make_instruction->result.id = 0;
+    fn_make_instruction->result.immediate = 0;
+    fn_make_instruction->as.fn_make.callee_name = (char *)malloc(sizeof("add1_env"));
+    if (!fn_make_instruction->as.fn_make.callee_name) {
+        ir_program_free(&program);
+        return 0;
+    }
+    memcpy(fn_make_instruction->as.fn_make.callee_name, "add1_env", sizeof("add1_env"));
+    fn_make_instruction->as.fn_make.env.kind = IR_VALUE_IMMEDIATE;
+    fn_make_instruction->as.fn_make.env.immediate = 0;
+    fn_make_instruction->as.fn_make.env.id = 0;
+    fn_make_instruction->as.fn_make.shape_id = shape_id;
+
+    memset(mov_instruction, 0, sizeof(*mov_instruction));
+    mov_instruction->kind = IR_INSTR_MOV;
+    mov_instruction->result.kind = IR_VALUE_TEMP;
+    mov_instruction->result.id = 1;
+    mov_instruction->result.immediate = 0;
+    mov_instruction->as.mov_value.kind = IR_VALUE_TEMP;
+    mov_instruction->as.mov_value.id = 0;
+    mov_instruction->as.mov_value.immediate = 0;
+
+    memset(indirect_instruction, 0, sizeof(*indirect_instruction));
+    indirect_instruction->kind = IR_INSTR_CALL_INDIRECT;
+    indirect_instruction->result.kind = IR_VALUE_TEMP;
+    indirect_instruction->result.id = 2;
+    indirect_instruction->result.immediate = 0;
+    indirect_instruction->as.call_indirect.callee.kind = IR_VALUE_TEMP;
+    indirect_instruction->as.call_indirect.callee.id = 1;
+    indirect_instruction->as.call_indirect.callee.immediate = 0;
+    indirect_instruction->as.call_indirect.arg_count = 1;
+    indirect_instruction->as.call_indirect.args = (IrValueRef *)malloc(sizeof(IrValueRef));
+    if (!indirect_instruction->as.call_indirect.args) {
+        ir_program_free(&program);
+        return 0;
+    }
+    indirect_instruction->as.call_indirect.args[0].kind = IR_VALUE_IMMEDIATE;
+    indirect_instruction->as.call_indirect.args[0].immediate = 4;
+    indirect_instruction->as.call_indirect.args[0].id = 0;
+
+    function->blocks[0].terminator.as.return_value.kind = IR_VALUE_TEMP;
+    function->blocks[0].terminator.as.return_value.id = 2;
+    function->blocks[0].terminator.as.return_value.immediate = 0;
+    function->next_temp_id = 3;
+
+    memset(&error, 0, sizeof(error));
+    ok = ir_verify_program(&program, &error);
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-verify] FAIL: moved callable-object program rejected at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+    }
+
+    ir_program_free(&program);
+    return ok;
+}
+
+static int test_ir_verifier_accepts_callable_projection_with_moved_callable_temp(void) {
+    IrProgram program;
+    IrFunction *function;
+    IrInstruction *fn_make_instruction;
+    IrInstruction *mov_instruction;
+    IrInstruction *project_instruction;
+    AstFunctionReturnType param_types[1];
+    size_t shape_id;
+    IrError error;
+    int ok;
+
+    if (!lower_source_to_ir_program(
+            "int add1_env(int env, int x){return x+1;}\nint main(){int y; y=add1_env(0, 4); return y;}\n",
+            &program)) {
+        return 0;
+    }
+
+    param_types[0] = AST_FUNCTION_RETURN_INT;
+    if (!install_function_shape(&program, AST_FUNCTION_RETURN_INT, param_types, 1, &shape_id)) {
+        ir_program_free(&program);
+        return 0;
+    }
+
+    function = find_function_mut(&program, "main");
+    if (!function || function->block_count == 0 || function->blocks[0].instruction_count < 2) {
+        fprintf(stderr, "[ir-verify] FAIL: unexpected main shape for moved callable projection test\n");
+        ir_program_free(&program);
+        return 0;
+    }
+
+    function->blocks[0].instructions = (IrInstruction *)realloc(
+        function->blocks[0].instructions,
+        3u * sizeof(IrInstruction));
+    if (!function->blocks[0].instructions) {
+        ir_program_free(&program);
+        return 0;
+    }
+    function->blocks[0].instruction_capacity = 3u;
+    function->blocks[0].instruction_count = 3u;
+
+    fn_make_instruction = &function->blocks[0].instructions[0];
+    mov_instruction = &function->blocks[0].instructions[1];
+    project_instruction = &function->blocks[0].instructions[2];
+
+    free(fn_make_instruction->as.call.callee_name);
+    free(fn_make_instruction->as.call.args);
+    fn_make_instruction->kind = IR_INSTR_FN_MAKE;
+    fn_make_instruction->result.kind = IR_VALUE_TEMP;
+    fn_make_instruction->result.id = 0;
+    fn_make_instruction->result.immediate = 0;
+    fn_make_instruction->as.fn_make.callee_name = (char *)malloc(sizeof("add1_env"));
+    if (!fn_make_instruction->as.fn_make.callee_name) {
+        ir_program_free(&program);
+        return 0;
+    }
+    memcpy(fn_make_instruction->as.fn_make.callee_name, "add1_env", sizeof("add1_env"));
+    fn_make_instruction->as.fn_make.env.kind = IR_VALUE_IMMEDIATE;
+    fn_make_instruction->as.fn_make.env.immediate = 7;
+    fn_make_instruction->as.fn_make.env.id = 0;
+    fn_make_instruction->as.fn_make.shape_id = shape_id;
+
+    memset(mov_instruction, 0, sizeof(*mov_instruction));
+    mov_instruction->kind = IR_INSTR_MOV;
+    mov_instruction->result.kind = IR_VALUE_TEMP;
+    mov_instruction->result.id = 1;
+    mov_instruction->result.immediate = 0;
+    mov_instruction->as.mov_value.kind = IR_VALUE_TEMP;
+    mov_instruction->as.mov_value.id = 0;
+    mov_instruction->as.mov_value.immediate = 0;
+
+    memset(project_instruction, 0, sizeof(*project_instruction));
+    project_instruction->kind = IR_INSTR_FN_ENV;
+    project_instruction->result.kind = IR_VALUE_TEMP;
+    project_instruction->result.id = 2;
+    project_instruction->result.immediate = 0;
+    project_instruction->as.fn_project_operand.kind = IR_VALUE_TEMP;
+    project_instruction->as.fn_project_operand.id = 1;
+    project_instruction->as.fn_project_operand.immediate = 0;
+
+    function->blocks[0].terminator.as.return_value.kind = IR_VALUE_TEMP;
+    function->blocks[0].terminator.as.return_value.id = 2;
+    function->blocks[0].terminator.as.return_value.immediate = 0;
+    function->next_temp_id = 3;
+
+    memset(&error, 0, sizeof(error));
+    ok = ir_verify_program(&program, &error);
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-verify] FAIL: moved callable projection program rejected at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+    }
+
+    ir_program_free(&program);
+    return ok;
+}
+
+static int test_ir_verifier_rejects_callable_projection_non_callable_temp(void) {
+    IrProgram program;
+    IrFunction *function;
+    IrInstruction *instruction;
+    int ok;
+
+    if (!lower_source_to_ir_program("int main(){int x=1+2; return x;}\n", &program)) {
+        return 0;
+    }
+
+    function = find_function_mut(&program, "main");
+    function->blocks[0].instructions = (IrInstruction *)realloc(
+        function->blocks[0].instructions,
+        2u * sizeof(IrInstruction));
+    if (!function->blocks[0].instructions) {
+        ir_program_free(&program);
+        return 0;
+    }
+    function->blocks[0].instruction_capacity = 2u;
+    function->blocks[0].instruction_count = 2u;
+    instruction = &function->blocks[0].instructions[1];
+    memset(instruction, 0, sizeof(*instruction));
+    instruction->kind = IR_INSTR_FN_ENV;
+    instruction->result.kind = IR_VALUE_TEMP;
+    instruction->result.id = 1;
+    instruction->result.immediate = 0;
+    instruction->as.fn_project_operand.kind = IR_VALUE_TEMP;
+    instruction->as.fn_project_operand.id = 0;
+    instruction->as.fn_project_operand.immediate = 0;
+    function->blocks[0].terminator.as.return_value.kind = IR_VALUE_TEMP;
+    function->blocks[0].terminator.as.return_value.id = 1;
+    function->blocks[0].terminator.as.return_value.immediate = 0;
+    function->next_temp_id = 2;
+
+    ok = expect_verifier_rejects("IR-VERIFY-CALLABLE-PROJECTION-NON-CALLABLE",
+        &program,
+        "IR-VERIFY-090");
+
+    ir_program_free(&program);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -1351,6 +1852,13 @@ int main(void) {
     ok &= test_ir_verifier_rejects_no_main_program_init_with_extra_entry_instruction();
     ok &= test_ir_verifier_rejects_reserved_init_helper_name_without_runtime_globals();
     ok &= test_ir_verifier_rejects_program_null_function_table();
+    ok &= test_ir_verifier_accepts_callable_object_ops();
+    ok &= test_ir_verifier_accepts_call_indirect_with_moved_callable_temp();
+    ok &= test_ir_verifier_accepts_callable_projection_with_moved_callable_temp();
+    ok &= test_ir_verifier_rejects_fn_make_missing_shape();
+    ok &= test_ir_verifier_rejects_call_indirect_arg_mismatch();
+    ok &= test_ir_verifier_rejects_call_indirect_non_callable_temp();
+    ok &= test_ir_verifier_rejects_callable_projection_non_callable_temp();
 
     if (!ok) {
         return 1;

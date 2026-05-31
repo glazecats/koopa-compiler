@@ -483,6 +483,7 @@ static AstStatement *alloc_ast_statement(Parser *p,
     stmt->declaration_array_extent_exprs = NULL;
     stmt->declaration_function_return_types = NULL;
     stmt->declaration_function_parameter_counts = NULL;
+    stmt->declaration_function_parameter_value_kinds = NULL;
     stmt->declaration_type_names = NULL;
     stmt->expressions = NULL;
     stmt->expression_count = 0;
@@ -665,6 +666,46 @@ static int append_size_t_array_item(Parser *p,
             set_error(p,
                 anchor_tok ? anchor_tok : peek(p),
                 "Out of memory while building AST array metadata");
+            return 0;
+        }
+        *items = new_items;
+        *capacity = next_capacity;
+    }
+
+    (*items)[count] = value;
+    return 1;
+}
+
+static int append_function_return_type_array_item(Parser *p,
+    AstFunctionReturnType **items,
+    size_t count,
+    size_t *capacity,
+    AstFunctionReturnType value,
+    const Token *anchor_tok) {
+    AstFunctionReturnType *new_items;
+    size_t next_capacity;
+
+    if (!items || !capacity) {
+        return 0;
+    }
+
+    if (count == *capacity) {
+        if (!parser_next_growth_capacity(*capacity,
+                4,
+                sizeof(AstFunctionReturnType),
+                &next_capacity)) {
+            set_error(p,
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building AST function metadata");
+            return 0;
+        }
+        new_items = (AstFunctionReturnType *)realloc(
+            *items,
+            next_capacity * sizeof(AstFunctionReturnType));
+        if (!new_items) {
+            set_error(p,
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building AST function metadata");
             return 0;
         }
         *items = new_items;
@@ -1116,6 +1157,47 @@ static int append_ast_expression_list_slot(Parser *p,
     return 1;
 }
 
+static int append_int_list_slot(Parser *p,
+    int ***items,
+    size_t index,
+    size_t *capacity,
+    int *list,
+    const Token *anchor_tok) {
+    int **new_items;
+    size_t next_capacity;
+
+    if (!items || !capacity) {
+        free(list);
+        return 0;
+    }
+
+    if (index >= *capacity) {
+        if (!parser_next_growth_capacity(*capacity, 4, sizeof(int *), &next_capacity)) {
+            set_error(p,
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building AST function metadata");
+            free(list);
+            return 0;
+        }
+        new_items = (int **)realloc(*items, next_capacity * sizeof(int *));
+        if (!new_items) {
+            set_error(p,
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building AST function metadata");
+            free(list);
+            return 0;
+        }
+        while (*capacity < next_capacity) {
+            new_items[*capacity] = NULL;
+            (*capacity)++;
+        }
+        *items = new_items;
+    }
+
+    (*items)[index] = list;
+    return 1;
+}
+
 static AstExpression *build_call_expression_node(Parser *p,
     const Token *lparen_tok,
     AstExpression *callee,
@@ -1273,6 +1355,133 @@ static AstExpression *try_parse_expression_ast_conversion(Parser *p) {
     return expr;
 }
 
+static AstExpression *parse_expression_ast_closure_literal(Parser *p, const Token *closure_tok) {
+    AstExpression *expr = NULL;
+    char **capture_names = NULL;
+    size_t capture_count = 0u;
+    size_t capture_capacity = 0u;
+    AstFunctionReturnType return_type = AST_FUNCTION_RETURN_INT;
+    char *return_type_name = NULL;
+    size_t parameter_count = 0u;
+    int has_unnamed_parameter = 0;
+    char **parameter_names = NULL;
+    int *parameter_value_kinds = NULL;
+    char **parameter_type_names = NULL;
+    AstStatement *body = NULL;
+    const Token *capture_tok = NULL;
+
+    if (!consume(p, TOKEN_LBRACKET, "'['")) {
+        return NULL;
+    }
+
+    while (!check(p, TOKEN_RBRACKET)) {
+        char *capture_name = NULL;
+
+        if (!consume_token(p, TOKEN_IDENTIFIER, "capture name", &capture_tok)) {
+            free_name_array(capture_names, capture_count);
+            return NULL;
+        }
+        capture_name = copy_token_identifier_lexeme(capture_tok);
+        if (!capture_name ||
+            !append_name_array_item(p,
+                &capture_names,
+                &capture_count,
+                &capture_capacity,
+                capture_name,
+                capture_tok)) {
+            free_name_array(capture_names, capture_count);
+            return NULL;
+        }
+        if (!match(p, TOKEN_COMMA)) {
+            break;
+        }
+    }
+
+    if (!consume(p, TOKEN_RBRACKET, "']'")) {
+        free_name_array(capture_names, capture_count);
+        return NULL;
+    }
+
+    if (match(p, TOKEN_KW_INT)) {
+        return_type = AST_FUNCTION_RETURN_INT;
+    } else if (match(p, TOKEN_KW_VOID)) {
+        return_type = AST_FUNCTION_RETURN_VOID;
+    } else {
+        set_error(p, peek(p), "Expected closure return type 'int' or 'void'");
+        free_name_array(capture_names, capture_count);
+        return NULL;
+    }
+
+    if (!consume(p, TOKEN_LPAREN, "'('")) {
+        free_name_array(capture_names, capture_count);
+        return NULL;
+    }
+    if (!parse_parameter_list(p,
+            &parameter_count,
+            &has_unnamed_parameter,
+            &parameter_names,
+            &parameter_value_kinds,
+            &parameter_type_names,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL)) {
+        free_name_array(capture_names, capture_count);
+        return NULL;
+    }
+    if (!consume(p, TOKEN_RPAREN, "')'")) {
+        free_name_array(capture_names, capture_count);
+        free_name_array(parameter_names, parameter_count);
+        free(parameter_value_kinds);
+        free_name_array(parameter_type_names, parameter_count);
+        return NULL;
+    }
+    if (has_unnamed_parameter) {
+        set_error(p,
+            closure_tok,
+            "Closure parameters must have names in the first closure slice");
+        free_name_array(capture_names, capture_count);
+        free_name_array(parameter_names, parameter_count);
+        free(parameter_value_kinds);
+        free_name_array(parameter_type_names, parameter_count);
+        return NULL;
+    }
+
+    if (!parse_compound_statement_with_local_control(p, NULL, &body)) {
+        free_name_array(capture_names, capture_count);
+        free_name_array(parameter_names, parameter_count);
+        free(parameter_value_kinds);
+        free_name_array(parameter_type_names, parameter_count);
+        return NULL;
+    }
+
+    expr = alloc_ast_expression(AST_EXPR_CLOSURE, closure_tok->line, closure_tok->column);
+    if (!expr) {
+        set_error(p, closure_tok, "Out of memory while building closure expression AST");
+        free_name_array(capture_names, capture_count);
+        free_name_array(parameter_names, parameter_count);
+        free(parameter_value_kinds);
+        free_name_array(parameter_type_names, parameter_count);
+        parser_ast_statement_free(body);
+        free(return_type_name);
+        return NULL;
+    }
+
+    expr->as.closure.capture_names = capture_names;
+    expr->as.closure.capture_name_count = capture_count;
+    expr->as.closure.return_type = return_type;
+    expr->as.closure.return_type_name = return_type_name;
+    expr->as.closure.parameter_count = parameter_count;
+    expr->as.closure.parameter_names = parameter_names;
+    expr->as.closure.parameter_value_kinds = parameter_value_kinds;
+    expr->as.closure.parameter_type_names = parameter_type_names;
+    expr->as.closure.body = body;
+    return expr;
+}
+
 static AstExpression *parse_expression_ast_primary_only(Parser *p) {
     const Token *tok;
     AstExpression *expr;
@@ -1331,6 +1540,13 @@ static AstExpression *parse_expression_ast_primary_only(Parser *p) {
 
     expr = try_parse_expression_ast_conversion(p);
     if (expr) {
+        leave_expression_recursion(p);
+        return expr;
+    }
+
+    if (match(p, TOKEN_KW_CLOSURE)) {
+        tok = previous(p);
+        expr = parse_expression_ast_closure_literal(p, tok);
         leave_expression_recursion(p);
         return expr;
     }
@@ -1883,6 +2099,59 @@ static AstExpression *parse_expression_ast_comma(Parser *p) {
     return left;
 }
 
+static int parse_closure_literal_syntax(Parser *p, const Token *closure_tok) {
+    int has_unnamed_parameter = 0;
+
+    if (!consume(p, TOKEN_LBRACKET, "'['")) {
+        return 0;
+    }
+    while (!check(p, TOKEN_RBRACKET)) {
+        if (!consume(p, TOKEN_IDENTIFIER, "capture name")) {
+            return 0;
+        }
+        if (!match(p, TOKEN_COMMA)) {
+            break;
+        }
+    }
+    if (!consume(p, TOKEN_RBRACKET, "']'")) {
+        return 0;
+    }
+
+    if (!match(p, TOKEN_KW_INT) && !match(p, TOKEN_KW_VOID)) {
+        set_error(p, peek(p), "Expected closure return type 'int' or 'void'");
+        return 0;
+    }
+    if (!consume(p, TOKEN_LPAREN, "'('")) {
+        return 0;
+    }
+    if (!parse_parameter_list(p,
+            NULL,
+            &has_unnamed_parameter,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL)) {
+        return 0;
+    }
+    if (!consume(p, TOKEN_RPAREN, "')'")) {
+        return 0;
+    }
+    if (has_unnamed_parameter) {
+        set_error(p,
+            closure_tok ? closure_tok : previous(p),
+            "Closure parameters must have names in the first closure slice");
+        return 0;
+    }
+
+    return parse_compound_statement_with_local_control(p, NULL, NULL);
+}
+
 static int parse_primary_with_flags(Parser *p,
     int *out_is_identifier_lvalue,
     int *out_is_callable_target) {
@@ -1911,6 +2180,13 @@ static int parse_primary_with_flags(Parser *p,
     }
 
     if (match(p, TOKEN_FLOAT_NUMBER)) {
+        return 1;
+    }
+
+    if (match(p, TOKEN_KW_CLOSURE)) {
+        if (!parse_closure_literal_syntax(p, previous(p))) {
+            return 0;
+        }
         return 1;
     }
 

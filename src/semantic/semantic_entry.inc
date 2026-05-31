@@ -11,11 +11,47 @@ static int semantic_validate_scalar_initializer_type(const AstExpression *expr,
     const SemanticTypeDescriptor *expected_type,
     const AstProgram *program,
     size_t func_index,
+    int allow_extension_features,
     const ScopeStack *scopes,
     SemanticError *error);
 static int semantic_find_named_function_parameter_type_descriptor(const AstExternal *func,
     const char *name,
     size_t *out_index,
+    SemanticTypeDescriptor *out_type);
+static int semantic_extension_local_function_value_argument_is_allowed(
+    const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const AstExternal *current_func);
+static int semantic_extension_function_value_initializer_expr_matches_expected(
+    const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const AstExternal *current_func,
+    const SemanticTypeDescriptor *expected_type,
+    int *out_is_closure_backed);
+static int semantic_extension_resolve_local_function_value_binding_with_expected_type(
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const AstExternal *current_func,
+    const char *name,
+    size_t max_parameter_count,
+    const SemanticTypeDescriptor *expected_type,
+    int *out_is_closure_backed,
+    const char **out_resolved_name);
+static int semantic_current_function_has_local_function_value_name(
+    const AstExternal *current_func,
+    const char *name);
+static int semantic_build_local_function_value_declaration_type_descriptor(
+    const AstStatement *stmt,
+    size_t declaration_index,
+    SemanticTypeDescriptor *out_type);
+static int semantic_current_function_find_direct_local_function_value_declaration_type_descriptor(
+    const AstExternal *current_func,
+    const char *name,
     SemanticTypeDescriptor *out_type);
 
 static int semantic_external_has_function_valued_parameters(const AstExternal *external) {
@@ -119,6 +155,10 @@ static int semantic_parameter_value_kind_maps_to_type_descriptor_kind(int parame
     case AST_PARAMETER_VALUE_FLOAT:
         *out_kind = SEMANTIC_TYPE_KIND_FLOAT;
         return 1;
+    case AST_PARAMETER_VALUE_PAIR:
+    case AST_PARAMETER_VALUE_STRUCT:
+        *out_kind = SEMANTIC_TYPE_KIND_AGGREGATE;
+        return 1;
     case AST_PARAMETER_VALUE_FUNCTION:
         *out_kind = SEMANTIC_TYPE_KIND_FUNCTION;
         return 1;
@@ -166,6 +206,19 @@ static int semantic_build_function_return_type_descriptor(const AstExternal *ext
     }
 
     memset(out_type, 0, sizeof(*out_type));
+    if (external->has_function_return_signature) {
+        out_type->kind = SEMANTIC_TYPE_KIND_FUNCTION;
+        out_type->function_return_type = external->function_return_function_return_type;
+        out_type->named_type_name = external->function_return_function_return_type_name;
+        out_type->parameter_count = external->function_return_function_parameter_count;
+        out_type->parameter_value_kinds = external->function_return_function_parameter_value_kinds;
+        out_type->parameter_function_return_types =
+            external->function_return_function_parameter_return_types;
+        out_type->parameter_function_parameter_counts =
+            external->function_return_function_parameter_parameter_counts;
+        return 1;
+    }
+
     switch (external->function_return_type) {
     case AST_FUNCTION_RETURN_INT:
         out_type->kind = SEMANTIC_TYPE_KIND_INT;
@@ -173,6 +226,15 @@ static int semantic_build_function_return_type_descriptor(const AstExternal *ext
     case AST_FUNCTION_RETURN_FLOAT:
         out_type->kind = SEMANTIC_TYPE_KIND_FLOAT;
         return 1;
+    case AST_FUNCTION_RETURN_PAIR:
+        out_type->kind = SEMANTIC_TYPE_KIND_AGGREGATE;
+        out_type->aggregate_kind = SEMANTIC_AGGREGATE_KIND_PAIR;
+        return 1;
+    case AST_FUNCTION_RETURN_STRUCT:
+        out_type->kind = SEMANTIC_TYPE_KIND_AGGREGATE;
+        out_type->aggregate_kind = SEMANTIC_AGGREGATE_KIND_STRUCT;
+        out_type->named_type_name = external->function_return_type_name;
+        return out_type->named_type_name != NULL;
     case AST_FUNCTION_RETURN_VOID:
         out_type->kind = SEMANTIC_TYPE_KIND_VOID;
         return 1;
@@ -202,6 +264,16 @@ static int semantic_build_function_parameter_type_descriptor(const AstExternal *
     }
 
     out_type->kind = kind;
+    if (kind == SEMANTIC_TYPE_KIND_AGGREGATE) {
+        out_type->aggregate_kind =
+            external->parameter_value_kinds && external->parameter_value_kinds[param_index] == AST_PARAMETER_VALUE_STRUCT
+                ? SEMANTIC_AGGREGATE_KIND_STRUCT
+                : SEMANTIC_AGGREGATE_KIND_PAIR;
+        out_type->named_type_name =
+            external->parameter_type_names
+                ? external->parameter_type_names[param_index]
+                : NULL;
+    }
     out_type->array_rank =
         external->parameter_array_ranks
             ? external->parameter_array_ranks[param_index]
@@ -243,10 +315,140 @@ static int semantic_type_descriptors_are_compatible(const SemanticTypeDescriptor
     }
 
     if (lhs->kind == SEMANTIC_TYPE_KIND_FUNCTION) {
-        return lhs->function_return_type == rhs->function_return_type &&
-            lhs->parameter_count == rhs->parameter_count;
+        size_t param_index;
+
+        if (lhs->function_return_type != rhs->function_return_type ||
+            lhs->parameter_count != rhs->parameter_count) {
+            return 0;
+        }
+
+        for (param_index = 0u; param_index < lhs->parameter_count; ++param_index) {
+            int lhs_param_kind =
+                lhs->parameter_value_kinds
+                    ? lhs->parameter_value_kinds[param_index]
+                    : AST_PARAMETER_VALUE_INT;
+            int rhs_param_kind =
+                rhs->parameter_value_kinds
+                    ? rhs->parameter_value_kinds[param_index]
+                    : AST_PARAMETER_VALUE_INT;
+
+            if (lhs_param_kind != rhs_param_kind) {
+                return 0;
+            }
+            if (lhs_param_kind == AST_PARAMETER_VALUE_FUNCTION) {
+                AstFunctionReturnType lhs_nested_return_type =
+                    lhs->parameter_function_return_types
+                        ? lhs->parameter_function_return_types[param_index]
+                        : AST_FUNCTION_RETURN_INT;
+                AstFunctionReturnType rhs_nested_return_type =
+                    rhs->parameter_function_return_types
+                        ? rhs->parameter_function_return_types[param_index]
+                        : AST_FUNCTION_RETURN_INT;
+                size_t lhs_nested_param_count =
+                    lhs->parameter_function_parameter_counts
+                        ? lhs->parameter_function_parameter_counts[param_index]
+                        : 0u;
+                size_t rhs_nested_param_count =
+                    rhs->parameter_function_parameter_counts
+                        ? rhs->parameter_function_parameter_counts[param_index]
+                        : 0u;
+
+                if (lhs_nested_return_type != rhs_nested_return_type ||
+                    lhs_nested_param_count != rhs_nested_param_count) {
+                    return 0;
+                }
+            }
+        }
+
+        return 1;
     }
 
+    return 1;
+}
+
+static int semantic_function_signature_matches_type_descriptor(
+    const AstExternal *external,
+    const SemanticTypeDescriptor *expected_type) {
+    SemanticTypeDescriptor actual_type;
+
+    if (!external || !expected_type || expected_type->kind != SEMANTIC_TYPE_KIND_FUNCTION) {
+        return 0;
+    }
+
+    memset(&actual_type, 0, sizeof(actual_type));
+    actual_type.kind = SEMANTIC_TYPE_KIND_FUNCTION;
+    actual_type.function_return_type = external->function_return_type;
+    actual_type.named_type_name = external->function_return_type_name;
+    actual_type.parameter_count = external->parameter_count;
+    actual_type.parameter_value_kinds = external->parameter_value_kinds;
+    actual_type.parameter_function_return_types = external->parameter_function_return_types;
+    actual_type.parameter_function_parameter_counts =
+        external->parameter_function_parameter_counts;
+    return semantic_type_descriptors_are_compatible(expected_type, &actual_type);
+}
+
+static int semantic_builtin_signature_matches_type_descriptor(
+    const SemanticBuiltinFunctionInfo *builtin,
+    const SemanticTypeDescriptor *expected_type) {
+    SemanticTypeDescriptor actual_type;
+
+    if (!builtin || !expected_type || expected_type->kind != SEMANTIC_TYPE_KIND_FUNCTION) {
+        return 0;
+    }
+
+    memset(&actual_type, 0, sizeof(actual_type));
+    actual_type.kind = SEMANTIC_TYPE_KIND_FUNCTION;
+    actual_type.function_return_type = builtin->return_type;
+    actual_type.parameter_count = builtin->parameter_count;
+    return semantic_type_descriptors_are_compatible(expected_type, &actual_type);
+}
+
+static int semantic_function_value_return_matches_type_descriptor(
+    const AstExternal *external,
+    const SemanticTypeDescriptor *expected_type) {
+    SemanticTypeDescriptor actual_type;
+
+    if (!external || !expected_type || expected_type->kind != SEMANTIC_TYPE_KIND_FUNCTION ||
+        !external->has_function_return_signature) {
+        return 0;
+    }
+    if (!semantic_build_function_return_type_descriptor(external, &actual_type) ||
+        actual_type.kind != SEMANTIC_TYPE_KIND_FUNCTION) {
+        return 0;
+    }
+    return semantic_type_descriptors_are_compatible(expected_type, &actual_type);
+}
+
+static int semantic_build_closure_type_descriptor(
+    const AstExpression *closure_expr,
+    SemanticTypeDescriptor *out_type) {
+    if (!closure_expr || closure_expr->kind != AST_EXPR_CLOSURE || !out_type) {
+        return 0;
+    }
+
+    memset(out_type, 0, sizeof(*out_type));
+    out_type->kind = SEMANTIC_TYPE_KIND_FUNCTION;
+    out_type->function_return_type = closure_expr->as.closure.return_type;
+    out_type->named_type_name = closure_expr->as.closure.return_type_name;
+    out_type->parameter_count = closure_expr->as.closure.parameter_count;
+    out_type->parameter_value_kinds = closure_expr->as.closure.parameter_value_kinds;
+    return 1;
+}
+
+static int semantic_make_function_type_descriptor(
+    AstFunctionReturnType return_type,
+    size_t parameter_count,
+    const int *parameter_value_kinds,
+    SemanticTypeDescriptor *out_type) {
+    if (!out_type) {
+        return 0;
+    }
+
+    memset(out_type, 0, sizeof(*out_type));
+    out_type->kind = SEMANTIC_TYPE_KIND_FUNCTION;
+    out_type->function_return_type = return_type;
+    out_type->parameter_count = parameter_count;
+    out_type->parameter_value_kinds = parameter_value_kinds;
     return 1;
 }
 
@@ -306,9 +508,12 @@ static SemanticFunctionSignatureMatchKind semantic_function_declaration_signatur
             return SEMANTIC_FUNCTION_SIGNATURE_MISMATCH_PARAMETER_KIND;
         }
 
-        if (lhs_type.kind == SEMANTIC_TYPE_KIND_FUNCTION &&
+        if ((lhs_type.kind == SEMANTIC_TYPE_KIND_FUNCTION ||
+                lhs_type.kind == SEMANTIC_TYPE_KIND_AGGREGATE) &&
             !semantic_type_descriptors_are_compatible(&lhs_type, &rhs_type)) {
-            return SEMANTIC_FUNCTION_SIGNATURE_MISMATCH_NESTED_SIGNATURE;
+            return lhs_type.kind == SEMANTIC_TYPE_KIND_FUNCTION
+                ? SEMANTIC_FUNCTION_SIGNATURE_MISMATCH_NESTED_SIGNATURE
+                : SEMANTIC_FUNCTION_SIGNATURE_MISMATCH_PARAMETER_KIND;
         }
     }
 
@@ -340,6 +545,62 @@ static int semantic_extension_function_value_arg_matches_parameter(const AstExpr
         return 0;
     }
 
+    {
+        const AstExpression *arg_base = semantic_unwrap_function_value_wrapper_expression(arg_expr);
+        if (arg_base && arg_base->kind == AST_EXPR_TERNARY) {
+            const AstExpression *then_base =
+                unwrap_paren_expression(arg_base->as.ternary.then_expr);
+            const AstExpression *else_base =
+                unwrap_paren_expression(arg_base->as.ternary.else_expr);
+
+            if (!then_base || !else_base ||
+                then_base->kind != AST_EXPR_IDENTIFIER ||
+                else_base->kind != AST_EXPR_IDENTIFIER) {
+                return 0;
+            }
+            return semantic_extension_function_value_arg_matches_parameter(
+                    then_base,
+                    program,
+                    func_index,
+                    include_current_external,
+                    current_func,
+                    callee_external,
+                    param_index) &&
+                semantic_extension_function_value_arg_matches_parameter(
+                    else_base,
+                    program,
+                    func_index,
+                    include_current_external,
+                    current_func,
+                    callee_external,
+                    param_index);
+        }
+        if (arg_base && arg_base->kind == AST_EXPR_CLOSURE) {
+            return semantic_closure_signature_matches_expected(arg_base, &expected_param_type);
+        }
+        if (arg_base && arg_base->kind == AST_EXPR_CALL) {
+            const char *called_name = NULL;
+            const AstExternal *visible_function = NULL;
+
+            if (classify_ast_call_callee(arg_base->as.call.callee, &called_name) != AST_CALL_CALLEE_DIRECT_IDENTIFIER ||
+                !called_name || called_name[0] == '\0') {
+                return 0;
+            }
+            visible_function = semantic_find_visible_function_external(
+                program,
+                func_index,
+                include_current_external,
+                called_name);
+            if (!visible_function ||
+                !semantic_function_value_return_matches_type_descriptor(
+                    visible_function,
+                    &expected_param_type)) {
+                return 0;
+            }
+            return 1;
+        }
+    }
+
     if (classify_ast_call_callee(arg_expr, &arg_name) != AST_CALL_CALLEE_DIRECT_IDENTIFIER ||
         !arg_name || arg_name[0] == '\0') {
         return 0;
@@ -354,8 +615,32 @@ static int semantic_extension_function_value_arg_matches_parameter(const AstExpr
                 NULL,
                 &current_param_type) &&
             current_param_type.kind == SEMANTIC_TYPE_KIND_FUNCTION) {
-            return current_param_type.parameter_count == expected_param_type.parameter_count &&
-                current_param_type.function_return_type == expected_param_type.function_return_type;
+            return semantic_type_descriptors_are_compatible(
+                &expected_param_type,
+                &current_param_type);
+        }
+    }
+
+    if (current_func && program) {
+        int closure_backed = 0;
+        const char *resolved_name = NULL;
+
+        if (semantic_extension_resolve_local_function_value_binding_with_expected_type(
+                program,
+                func_index,
+                include_current_external,
+                current_func,
+                arg_name,
+                expected_param_type.parameter_count,
+                &expected_param_type,
+                &closure_backed,
+                &resolved_name)) {
+            if (closure_backed) {
+                return 1;
+            }
+            if (resolved_name) {
+                arg_name = resolved_name;
+            }
         }
     }
 
@@ -369,12 +654,377 @@ static int semantic_extension_function_value_arg_matches_parameter(const AstExpr
         if (!builtin) {
             return 0;
         }
-        return builtin->parameter_count == expected_param_type.parameter_count &&
-            builtin->return_type == expected_param_type.function_return_type;
+        return semantic_builtin_signature_matches_type_descriptor(
+            builtin,
+            &expected_param_type);
     }
 
-    return arg_function->parameter_count == expected_param_type.parameter_count &&
-        arg_function->function_return_type == expected_param_type.function_return_type;
+    return semantic_function_signature_matches_type_descriptor(
+        arg_function,
+        &expected_param_type);
+}
+
+static int semantic_current_function_has_local_function_value_name(
+    const AstExternal *current_func,
+    const char *name) {
+    const AstStatement *body = NULL;
+    size_t child_index;
+
+    if (!current_func || !name || name[0] == '\0' ||
+        !current_func->function_body ||
+        current_func->function_body->kind != AST_STMT_COMPOUND) {
+        return 0;
+    }
+
+    body = current_func->function_body;
+    for (child_index = 0u; child_index < body->child_count; ++child_index) {
+        const AstStatement *child = body->children ? body->children[child_index] : NULL;
+        size_t decl_index;
+
+        if (!child || child->kind != AST_STMT_DECLARATION ||
+            !child->declaration_names || !child->declaration_value_kinds) {
+            continue;
+        }
+        for (decl_index = 0u; decl_index < child->declaration_name_count; ++decl_index) {
+            if (child->declaration_names[decl_index] &&
+                strcmp(child->declaration_names[decl_index], name) == 0 &&
+                child->declaration_value_kinds[decl_index] == AST_DECLARATION_VALUE_FUNCTION) {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int semantic_build_local_function_value_declaration_type_descriptor(
+    const AstStatement *stmt,
+    size_t declaration_index,
+    SemanticTypeDescriptor *out_type) {
+    if (!out_type) {
+        return 0;
+    }
+
+    memset(out_type, 0, sizeof(*out_type));
+    out_type->kind = SEMANTIC_TYPE_KIND_INVALID;
+    if (!stmt ||
+        stmt->kind != AST_STMT_DECLARATION ||
+        !stmt->declaration_value_kinds ||
+        declaration_index >= stmt->declaration_name_count ||
+        stmt->declaration_value_kinds[declaration_index] != AST_DECLARATION_VALUE_FUNCTION) {
+        return 0;
+    }
+
+    out_type->kind = SEMANTIC_TYPE_KIND_FUNCTION;
+    out_type->function_return_type =
+        stmt->declaration_function_return_types
+            ? stmt->declaration_function_return_types[declaration_index]
+            : AST_FUNCTION_RETURN_INT;
+    out_type->parameter_count =
+        stmt->declaration_function_parameter_counts
+            ? stmt->declaration_function_parameter_counts[declaration_index]
+            : 0u;
+    out_type->parameter_value_kinds =
+        stmt->declaration_function_parameter_value_kinds
+            ? stmt->declaration_function_parameter_value_kinds[declaration_index]
+            : NULL;
+    return 1;
+}
+
+static int semantic_current_function_find_direct_local_function_value_declaration_type_descriptor(
+    const AstExternal *current_func,
+    const char *name,
+    SemanticTypeDescriptor *out_type) {
+    const AstStatement *body = NULL;
+    size_t child_index;
+
+    if (out_type) {
+        memset(out_type, 0, sizeof(*out_type));
+        out_type->kind = SEMANTIC_TYPE_KIND_INVALID;
+    }
+    if (!current_func || !name || name[0] == '\0' ||
+        !current_func->function_body ||
+        current_func->function_body->kind != AST_STMT_COMPOUND) {
+        return 0;
+    }
+
+    body = current_func->function_body;
+    for (child_index = 0u; child_index < body->child_count; ++child_index) {
+        const AstStatement *child = body->children ? body->children[child_index] : NULL;
+        size_t decl_index;
+
+        if (!child || child->kind != AST_STMT_DECLARATION ||
+            !child->declaration_names || !child->declaration_value_kinds) {
+            continue;
+        }
+        for (decl_index = 0u; decl_index < child->declaration_name_count; ++decl_index) {
+            if (child->declaration_names[decl_index] &&
+                strcmp(child->declaration_names[decl_index], name) == 0 &&
+                child->declaration_value_kinds[decl_index] == AST_DECLARATION_VALUE_FUNCTION) {
+                return semantic_build_local_function_value_declaration_type_descriptor(
+                    child,
+                    decl_index,
+                    out_type);
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int semantic_extension_resolve_local_function_value_binding_with_expected_type(
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const AstExternal *current_func,
+    const char *name,
+    size_t max_parameter_count,
+    const SemanticTypeDescriptor *expected_type,
+    int *out_is_closure_backed,
+    const char **out_resolved_name) {
+    const AstStatement *body = NULL;
+    size_t child_index;
+
+    if (out_is_closure_backed) {
+        *out_is_closure_backed = 0;
+    }
+    if (out_resolved_name) {
+        *out_resolved_name = NULL;
+    }
+    if (!current_func || !name || name[0] == '\0' ||
+        !expected_type ||
+        expected_type->kind != SEMANTIC_TYPE_KIND_FUNCTION ||
+        !current_func->function_body ||
+        current_func->function_body->kind != AST_STMT_COMPOUND) {
+        return 0;
+    }
+
+    body = current_func->function_body;
+    for (child_index = 0u; child_index < body->child_count; ++child_index) {
+        const AstStatement *child = body->children ? body->children[child_index] : NULL;
+        size_t decl_index;
+
+        if (!child || child->kind != AST_STMT_DECLARATION ||
+            !child->declaration_names || !child->declaration_value_kinds ||
+            !child->expressions) {
+            continue;
+        }
+        for (decl_index = 0u; decl_index < child->declaration_name_count &&
+                decl_index < child->expression_count; ++decl_index) {
+            const AstExpression *init_expr;
+            const AstExpression *init_base;
+            SemanticTypeDescriptor local_type;
+
+            if (!child->declaration_names[decl_index] ||
+                strcmp(child->declaration_names[decl_index], name) != 0 ||
+                child->declaration_value_kinds[decl_index] != AST_DECLARATION_VALUE_FUNCTION) {
+                continue;
+            }
+            if (!semantic_build_local_function_value_declaration_type_descriptor(
+                    child,
+                    decl_index,
+                    &local_type) ||
+                !semantic_type_descriptors_are_compatible(expected_type, &local_type) ||
+                local_type.parameter_count > max_parameter_count) {
+                return 0;
+            }
+
+            init_expr = child->expressions[decl_index];
+            init_base = unwrap_paren_expression(init_expr);
+            if (!init_base) {
+                return 0;
+            }
+            if (init_base->kind == AST_EXPR_CLOSURE) {
+                if (out_is_closure_backed) {
+                    *out_is_closure_backed = 1;
+                }
+                if (out_resolved_name) {
+                    *out_resolved_name = child->declaration_names[decl_index];
+                }
+                return 1;
+            }
+            if (init_base->kind == AST_EXPR_CALL) {
+                const char *called_name = NULL;
+                const AstExternal *visible_function = NULL;
+
+                if (classify_ast_call_callee(init_base->as.call.callee, &called_name) !=
+                        AST_CALL_CALLEE_DIRECT_IDENTIFIER ||
+                    !called_name || called_name[0] == '\0') {
+                    return 0;
+                }
+                visible_function = semantic_find_visible_function_external(
+                    program,
+                    func_index,
+                    1,
+                    called_name);
+                if (!visible_function ||
+                    !semantic_function_value_return_matches_type_descriptor(
+                        visible_function,
+                        expected_type)) {
+                    return 0;
+                }
+                if (out_is_closure_backed) {
+                    *out_is_closure_backed = 1;
+                }
+                if (out_resolved_name) {
+                    *out_resolved_name = child->declaration_names[decl_index];
+                }
+                return 1;
+            }
+            if (init_base->kind == AST_EXPR_IDENTIFIER && init_base->as.identifier.name) {
+                const char *resolved_name = init_base->as.identifier.name;
+                const AstExternal *visible_function = semantic_find_visible_function_external(
+                    program,
+                    func_index,
+                    include_current_external,
+                    resolved_name);
+                if (visible_function &&
+                    semantic_function_signature_matches_type_descriptor(
+                        visible_function,
+                        expected_type)) {
+                    if (out_resolved_name) {
+                        *out_resolved_name = visible_function->name;
+                    }
+                    return 1;
+                }
+                if (semantic_builtin_signature_matches_type_descriptor(
+                        semantic_find_builtin_function(resolved_name),
+                        expected_type)) {
+                    if (out_resolved_name) {
+                        *out_resolved_name = resolved_name;
+                    }
+                    return 1;
+                }
+                return semantic_extension_resolve_local_function_value_binding_with_expected_type(
+                    program,
+                    func_index,
+                    include_current_external,
+                    current_func,
+                    resolved_name,
+                    max_parameter_count,
+                    expected_type,
+                    out_is_closure_backed,
+                    out_resolved_name);
+            }
+            return 0;
+        }
+    }
+
+    return 0;
+}
+
+static int semantic_extension_local_function_value_assignment_statement_is_allowed(
+    const AstStatement *stmt,
+    const AstProgram *program,
+    size_t func_index,
+    const AstExternal *current_func) {
+    const AstExpression *expr = NULL;
+    const AstExpression *base = NULL;
+    const AstExpression *lhs_base = NULL;
+    const AstExpression *rhs_base = NULL;
+    const char *rhs_name = NULL;
+    SemanticTypeDescriptor expected_type;
+    int lhs_closure_backed = 0;
+
+    if (!stmt || stmt->kind != AST_STMT_EXPRESSION ||
+        stmt->expression_count != 1u || !stmt->expressions ||
+        !current_func || !current_func->function_body ||
+        current_func->function_body->kind != AST_STMT_COMPOUND) {
+        return 0;
+    }
+
+    expr = stmt->expressions[0];
+    base = unwrap_paren_expression(expr);
+    if (!base || base->kind != AST_EXPR_BINARY || base->as.binary.op != TOKEN_ASSIGN) {
+        return 0;
+    }
+    lhs_base = unwrap_paren_expression(base->as.binary.left);
+    rhs_base = unwrap_paren_expression(base->as.binary.right);
+    if (!lhs_base || !rhs_base ||
+        lhs_base->kind != AST_EXPR_IDENTIFIER || !lhs_base->as.identifier.name) {
+        return 0;
+    }
+
+    if (!semantic_current_function_find_direct_local_function_value_declaration_type_descriptor(
+            current_func,
+            lhs_base->as.identifier.name,
+            &expected_type) ||
+        expected_type.kind != SEMANTIC_TYPE_KIND_FUNCTION) {
+        return 0;
+    }
+    if (current_func && program &&
+        !semantic_extension_resolve_local_function_value_binding_with_expected_type(
+            program,
+            func_index,
+            1,
+            current_func,
+            lhs_base->as.identifier.name,
+            expected_type.parameter_count,
+            &expected_type,
+            &lhs_closure_backed,
+            NULL)) {
+        return 0;
+    }
+
+    if (rhs_base->kind == AST_EXPR_TERNARY) {
+        return semantic_extension_function_value_initializer_expr_matches_expected(
+            base->as.binary.right,
+            program,
+            func_index,
+            1,
+            current_func,
+            &expected_type,
+            NULL);
+    }
+
+    if (rhs_base->kind != AST_EXPR_IDENTIFIER || !rhs_base->as.identifier.name) {
+        return 0;
+    }
+
+    rhs_name = rhs_base->as.identifier.name;
+    if (current_func &&
+        semantic_function_parameter_name_is_function_valued(current_func, rhs_name)) {
+        return 0;
+    }
+    if (current_func && program) {
+        int rhs_closure_backed = 0;
+        if (semantic_extension_resolve_local_function_value_binding_with_expected_type(
+                program,
+                func_index,
+                1,
+                current_func,
+                rhs_name,
+                expected_type.parameter_count,
+                &expected_type,
+                &rhs_closure_backed,
+                NULL)) {
+            return lhs_closure_backed == rhs_closure_backed;
+        }
+    }
+        if (program) {
+            const AstExternal *visible_function = semantic_find_visible_function_external(
+                program,
+                func_index,
+                1,
+                rhs_name);
+        if (visible_function && visible_function->kind == AST_EXTERNAL_FUNCTION) {
+            return !lhs_closure_backed &&
+                semantic_function_signature_matches_type_descriptor(
+                    visible_function,
+                    &expected_type);
+        }
+    }
+    {
+        const SemanticBuiltinFunctionInfo *builtin = semantic_find_builtin_function(rhs_name);
+        if (builtin) {
+            return !lhs_closure_backed &&
+                semantic_builtin_signature_matches_type_descriptor(
+                    builtin,
+                    &expected_type);
+        }
+    }
+
+    return 0;
 }
 
 static int semantic_extension_check_function_value_expression(const AstExpression *expr,
@@ -409,6 +1059,16 @@ static int semantic_extension_check_function_value_expression(const AstExpressio
                     expr->line,
                     expr->column,
                     "SEMA-EXT-017: uses of function-valued parameters are not yet enabled in the current extension semantic slice");
+                return 0;
+            }
+            if (current_func &&
+                semantic_current_function_has_local_function_value_name(
+                    current_func,
+                    expr->as.identifier.name)) {
+                semantic_set_error(error,
+                    expr->line,
+                    expr->column,
+                    "SEMA-EXT-019: function values are not yet enabled in the current extension semantic slice");
                 return 0;
             }
 
@@ -494,6 +1154,47 @@ static int semantic_extension_check_function_value_expression(const AstExpressio
                 error,
                 depth + 1u);
     case AST_EXPR_BINARY:
+        if (in_call_callee &&
+            expr->as.binary.op == TOKEN_COMMA) {
+            return semantic_extension_check_function_value_expression(
+                    expr->as.binary.left,
+                    program,
+                    func_index,
+                    include_current_external,
+                    current_func,
+                    0,
+                    error,
+                    depth + 1u) &&
+                semantic_extension_check_function_value_expression(
+                    expr->as.binary.right,
+                    program,
+                    func_index,
+                    include_current_external,
+                    current_func,
+                    1,
+                    error,
+                    depth + 1u);
+        }
+        if (in_call_callee && expr->as.binary.op == TOKEN_ASSIGN) {
+            return semantic_extension_check_function_value_expression(
+                    expr->as.binary.left,
+                    program,
+                    func_index,
+                    include_current_external,
+                    current_func,
+                    1,
+                    error,
+                    depth + 1u) &&
+                semantic_extension_check_function_value_expression(
+                    expr->as.binary.right,
+                    program,
+                    func_index,
+                    include_current_external,
+                    current_func,
+                    1,
+                    error,
+                    depth + 1u);
+        }
         return semantic_extension_check_function_value_expression(
                 expr->as.binary.left,
                 program,
@@ -528,7 +1229,7 @@ static int semantic_extension_check_function_value_expression(const AstExpressio
                 func_index,
                 include_current_external,
                 current_func,
-                0,
+                in_call_callee,
                 error,
                 depth + 1u) &&
             semantic_extension_check_function_value_expression(
@@ -537,9 +1238,11 @@ static int semantic_extension_check_function_value_expression(const AstExpressio
                 func_index,
                 include_current_external,
                 current_func,
-                0,
+                in_call_callee,
                 error,
                 depth + 1u);
+    case AST_EXPR_CLOSURE:
+        return 1;
     case AST_EXPR_CALL: {
         const char *called_name = NULL;
         const AstExternal *visible_function = NULL;
@@ -620,6 +1323,10 @@ static int semantic_extension_check_function_value_expression(const AstExpressio
                 param_type.kind == SEMANTIC_TYPE_KIND_FUNCTION;
 
             if (expects_function_value) {
+                const AstExpression *arg_base =
+                    semantic_unwrap_function_value_wrapper_expression(expr->as.call.args[i]);
+                int arg_is_supported_ternary =
+                    arg_base && arg_base->kind == AST_EXPR_TERNARY;
                 if (!semantic_extension_function_value_arg_matches_parameter(
                         expr->as.call.args[i],
                         program,
@@ -632,6 +1339,20 @@ static int semantic_extension_check_function_value_expression(const AstExpressio
                         expr->line,
                         expr->column,
                         "SEMA-EXT-018: calls to functions with function-valued parameters are not yet enabled in the current extension semantic slice");
+                    return 0;
+                }
+                if (!(arg_base && arg_base->kind == AST_EXPR_CLOSURE) &&
+                    !arg_is_supported_ternary &&
+                    !semantic_extension_local_function_value_argument_is_allowed(
+                        expr->as.call.args[i],
+                        program,
+                        func_index,
+                        include_current_external,
+                        current_func)) {
+                    semantic_set_error(error,
+                        expr->line,
+                        expr->column,
+                        "SEMA-EXT-019: function values are not yet enabled in the current extension semantic slice");
                     return 0;
                 }
                 continue;
@@ -660,6 +1381,344 @@ static int semantic_extension_check_function_value_expression(const AstExpressio
     }
 }
 
+static int semantic_extension_local_function_value_initializer_is_allowed(
+    const AstStatement *stmt,
+    size_t declaration_index,
+    const AstProgram *program,
+    size_t func_index,
+    const AstExternal *current_func) {
+    const AstExpression *expr;
+    const AstExpression *base;
+    const AstExternal *visible_function;
+    SemanticTypeDescriptor expected_type;
+
+    if (!stmt ||
+        stmt->kind != AST_STMT_DECLARATION ||
+        !stmt->declaration_value_kinds ||
+        declaration_index >= stmt->declaration_name_count ||
+        stmt->declaration_value_kinds[declaration_index] != AST_DECLARATION_VALUE_FUNCTION ||
+        !stmt->expressions ||
+        declaration_index >= stmt->expression_count) {
+        return 0;
+    }
+    expr = stmt->expressions[declaration_index];
+    base = semantic_unwrap_function_value_wrapper_expression(expr);
+    if (!base) {
+        return 0;
+    }
+    if (!semantic_make_function_type_descriptor(
+            stmt->declaration_function_return_types
+                ? stmt->declaration_function_return_types[declaration_index]
+                : AST_FUNCTION_RETURN_INT,
+            stmt->declaration_function_parameter_counts
+                ? stmt->declaration_function_parameter_counts[declaration_index]
+                : 0u,
+            stmt->declaration_function_parameter_value_kinds
+                ? stmt->declaration_function_parameter_value_kinds[declaration_index]
+                : NULL,
+            &expected_type)) {
+        return 0;
+    }
+
+    if (base->kind == AST_EXPR_TERNARY) {
+        return semantic_extension_function_value_initializer_expr_matches_expected(
+            expr,
+            program,
+            func_index,
+            1,
+            current_func,
+            &expected_type,
+            NULL);
+    }
+    if (base->kind == AST_EXPR_CALL) {
+        const char *called_name = NULL;
+
+        if (classify_ast_call_callee(base->as.call.callee, &called_name) != AST_CALL_CALLEE_DIRECT_IDENTIFIER ||
+            !called_name || called_name[0] == '\0') {
+            return 0;
+        }
+        visible_function = semantic_find_visible_function_external(
+            program,
+            func_index,
+            1,
+            called_name);
+        return visible_function != NULL &&
+            semantic_function_value_return_matches_type_descriptor(
+                visible_function,
+                &expected_type);
+    }
+    if (base->kind != AST_EXPR_IDENTIFIER || !base->as.identifier.name) {
+        return 0;
+    }
+
+    if (current_func &&
+        semantic_function_parameter_name_is_function_valued(current_func, base->as.identifier.name)) {
+        return 1;
+    }
+
+    if (stmt &&
+        stmt->declaration_names &&
+        stmt->declaration_value_kinds) {
+        size_t prior_decl_index;
+
+        for (prior_decl_index = 0u; prior_decl_index < declaration_index; ++prior_decl_index) {
+            if (stmt->declaration_names[prior_decl_index] &&
+                strcmp(stmt->declaration_names[prior_decl_index], base->as.identifier.name) == 0 &&
+                stmt->declaration_value_kinds[prior_decl_index] == AST_DECLARATION_VALUE_FUNCTION) {
+                return 1;
+            }
+        }
+    }
+
+    if (current_func &&
+        current_func->function_body &&
+        current_func->function_body->kind == AST_STMT_COMPOUND) {
+        const AstStatement *body = current_func->function_body;
+        size_t child_index;
+
+        for (child_index = 0u; child_index < body->child_count; ++child_index) {
+            const AstStatement *child = body->children ? body->children[child_index] : NULL;
+            size_t local_decl_index;
+
+            if (!child || child == stmt ||
+                child->kind != AST_STMT_DECLARATION ||
+                !child->declaration_names ||
+                !child->declaration_value_kinds) {
+                continue;
+            }
+            for (local_decl_index = 0u; local_decl_index < child->declaration_name_count; ++local_decl_index) {
+                if (child->declaration_names[local_decl_index] &&
+                    strcmp(child->declaration_names[local_decl_index], base->as.identifier.name) == 0 &&
+                    child->declaration_value_kinds[local_decl_index] == AST_DECLARATION_VALUE_FUNCTION) {
+                    return 1;
+                }
+            }
+        }
+    }
+
+    visible_function = semantic_find_visible_function_external(
+        program,
+        func_index,
+        1,
+        base->as.identifier.name);
+    return visible_function != NULL;
+}
+
+static int semantic_extension_local_function_value_argument_is_allowed(
+    const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const AstExternal *current_func) {
+    const char *arg_name = NULL;
+
+    {
+        const AstExpression *base = semantic_unwrap_function_value_wrapper_expression(expr);
+        if (base && base->kind == AST_EXPR_TERNARY) {
+            const AstExpression *then_base = unwrap_paren_expression(base->as.ternary.then_expr);
+            const AstExpression *else_base = unwrap_paren_expression(base->as.ternary.else_expr);
+
+            if (!then_base || !else_base ||
+                then_base->kind != AST_EXPR_IDENTIFIER ||
+                else_base->kind != AST_EXPR_IDENTIFIER) {
+                return 0;
+            }
+            return semantic_extension_local_function_value_argument_is_allowed(
+                    then_base,
+                    program,
+                    func_index,
+                    include_current_external,
+                    current_func) &&
+                semantic_extension_local_function_value_argument_is_allowed(
+                    else_base,
+                    program,
+                    func_index,
+                    include_current_external,
+                    current_func);
+        }
+        if (base && base->kind == AST_EXPR_CLOSURE) {
+            return 1;
+        }
+        if (base && base->kind == AST_EXPR_CALL) {
+            const char *called_name = NULL;
+            const AstExternal *visible_function = NULL;
+
+            if (classify_ast_call_callee(base->as.call.callee, &called_name) != AST_CALL_CALLEE_DIRECT_IDENTIFIER ||
+                !called_name || called_name[0] == '\0') {
+                return 0;
+            }
+            visible_function = semantic_find_visible_function_external(
+                program,
+                func_index,
+                include_current_external,
+                called_name);
+            return visible_function != NULL && visible_function->has_function_return_signature;
+        }
+    }
+
+    if (!expr ||
+        classify_ast_call_callee(expr, &arg_name) != AST_CALL_CALLEE_DIRECT_IDENTIFIER ||
+        !arg_name || arg_name[0] == '\0') {
+        return 0;
+    }
+
+    if (current_func &&
+        semantic_function_parameter_name_is_function_valued(current_func, arg_name)) {
+        return 1;
+    }
+
+    if (current_func &&
+        semantic_current_function_find_direct_local_function_value_declaration_type_descriptor(
+            current_func,
+            arg_name,
+            &(SemanticTypeDescriptor){0})) {
+        return 1;
+    }
+
+    if (semantic_find_visible_function_external(
+            program,
+            func_index,
+            include_current_external,
+            arg_name)) {
+        return 1;
+    }
+
+    return semantic_find_builtin_function(arg_name) != NULL;
+}
+
+static int semantic_extension_function_value_initializer_expr_matches_expected(
+    const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const AstExternal *current_func,
+    const SemanticTypeDescriptor *expected_type,
+    int *out_is_closure_backed) {
+    const AstExpression *base;
+    const AstExternal *visible_function = NULL;
+    int closure_backed = 0;
+
+    if (out_is_closure_backed) {
+        *out_is_closure_backed = 0;
+    }
+    if (!expr || !expected_type || expected_type->kind != SEMANTIC_TYPE_KIND_FUNCTION) {
+        return 0;
+    }
+
+    base = semantic_unwrap_function_value_wrapper_expression(expr);
+    if (!base) {
+        return 0;
+    }
+
+    if (base->kind == AST_EXPR_TERNARY) {
+        const AstExpression *then_base =
+            unwrap_paren_expression(base->as.ternary.then_expr);
+        const AstExpression *else_base =
+            unwrap_paren_expression(base->as.ternary.else_expr);
+        int then_closure_backed = 0;
+        int else_closure_backed = 0;
+
+        if (!then_base || !else_base ||
+            then_base->kind != AST_EXPR_IDENTIFIER ||
+            else_base->kind != AST_EXPR_IDENTIFIER) {
+            return 0;
+        }
+        if (!semantic_extension_function_value_initializer_expr_matches_expected(
+                then_base,
+                program,
+                func_index,
+                include_current_external,
+                current_func,
+                expected_type,
+                &then_closure_backed) ||
+            !semantic_extension_function_value_initializer_expr_matches_expected(
+                else_base,
+                program,
+                func_index,
+                include_current_external,
+                current_func,
+                expected_type,
+                &else_closure_backed)) {
+            return 0;
+        }
+        if (then_closure_backed != else_closure_backed) {
+            return 0;
+        }
+        if (out_is_closure_backed) {
+            *out_is_closure_backed = then_closure_backed;
+        }
+        return 1;
+    }
+
+    if (base->kind == AST_EXPR_CALL) {
+        const char *called_name = NULL;
+
+        if (classify_ast_call_callee(base->as.call.callee, &called_name) != AST_CALL_CALLEE_DIRECT_IDENTIFIER ||
+            !called_name || called_name[0] == '\0') {
+            return 0;
+        }
+        visible_function = semantic_find_visible_function_external(
+            program,
+            func_index,
+            1,
+            called_name);
+        if (!visible_function ||
+            !semantic_function_value_return_matches_type_descriptor(
+                visible_function,
+                expected_type)) {
+            return 0;
+        }
+        if (out_is_closure_backed) {
+            *out_is_closure_backed = 1;
+        }
+        return 1;
+    }
+
+    if (base->kind == AST_EXPR_IDENTIFIER && base->as.identifier.name) {
+        if (current_func && program) {
+            const char *resolved_name = NULL;
+            if (semantic_extension_resolve_local_function_value_binding_with_expected_type(
+                    program,
+                    func_index,
+                    include_current_external,
+                    current_func,
+                    base->as.identifier.name,
+                    expected_type->parameter_count,
+                    expected_type,
+                    &closure_backed,
+                    &resolved_name)) {
+                if (out_is_closure_backed) {
+                    *out_is_closure_backed = closure_backed;
+                }
+                return 1;
+            }
+        }
+
+        visible_function = semantic_find_visible_function_external(
+            program,
+            func_index,
+            include_current_external,
+            base->as.identifier.name);
+        if (visible_function) {
+            return semantic_function_signature_matches_type_descriptor(
+                visible_function,
+                expected_type);
+        }
+
+        {
+            const SemanticBuiltinFunctionInfo *builtin =
+                semantic_find_builtin_function(base->as.identifier.name);
+            if (builtin) {
+                return semantic_builtin_signature_matches_type_descriptor(
+                    builtin,
+                    expected_type);
+            }
+        }
+    }
+
+    return 0;
+}
+
 static int semantic_extension_check_function_value_statement(const AstStatement *stmt,
     const AstProgram *program,
     size_t func_index,
@@ -672,6 +1731,31 @@ static int semantic_extension_check_function_value_statement(const AstStatement 
     }
 
     for (i = 0u; i < stmt->expression_count; ++i) {
+        if (stmt->kind == AST_STMT_RETURN && current_func) {
+            SemanticTypeDescriptor return_type;
+
+            if (semantic_scope_build_function_return_type_descriptor(current_func, &return_type) &&
+                return_type.kind == SEMANTIC_TYPE_KIND_FUNCTION) {
+                continue;
+            }
+        }
+        if (stmt->kind == AST_STMT_DECLARATION &&
+            semantic_extension_local_function_value_initializer_is_allowed(
+                stmt,
+                i,
+                program,
+                func_index,
+                current_func)) {
+            continue;
+        }
+        if (i == 0u &&
+            semantic_extension_local_function_value_assignment_statement_is_allowed(
+                stmt,
+                program,
+                func_index,
+                current_func)) {
+            continue;
+        }
         if (!semantic_extension_check_function_value_expression(
                 stmt->expressions ? stmt->expressions[i] : NULL,
                 program,
@@ -735,8 +1819,8 @@ int semantic_analyze_program_with_options(
             semantic_set_error(error, 0, 0, "SEMA-STRUCT-001: struct type must have a name");
             return 0;
         }
-        if (lhs_struct->field_count == 0u || !lhs_struct->field_names) {
-            semantic_set_error(error, 0, 0, "SEMA-STRUCT-002: current extension struct slice requires at least one int field");
+        if (lhs_struct->field_count == 0u || !lhs_struct->field_names || !lhs_struct->field_value_kinds) {
+            semantic_set_error(error, 0, 0, "SEMA-STRUCT-002: current extension struct slice requires at least one supported field");
             return 0;
         }
         for (j = 0u; j < lhs_struct->field_count; ++j) {
@@ -744,6 +1828,22 @@ int semantic_analyze_program_with_options(
 
             if (!lhs_struct->field_names[j] || lhs_struct->field_names[j][0] == '\0') {
                 semantic_set_error(error, 0, 0, "SEMA-STRUCT-007: struct fields must have names");
+                return 0;
+            }
+            switch (lhs_struct->field_value_kinds[j]) {
+            case AST_DECLARATION_VALUE_INT:
+            case AST_DECLARATION_VALUE_PAIR:
+                break;
+            case AST_DECLARATION_VALUE_STRUCT:
+                if (!lhs_struct->field_type_names ||
+                    !lhs_struct->field_type_names[j] ||
+                    !semantic_find_struct_type(program, lhs_struct->field_type_names[j])) {
+                    semantic_set_error(error, 0, 0, "SEMA-STRUCT-004: unknown struct type in struct field declaration");
+                    return 0;
+                }
+                break;
+            default:
+                semantic_set_error(error, 0, 0, "SEMA-STRUCT-009: unsupported struct field type in current extension slice");
                 return 0;
             }
             for (k = j + 1u; k < lhs_struct->field_count; ++k) {
@@ -813,6 +1913,7 @@ int semantic_analyze_program_with_options(
             if (!semantic_scope_check_top_level_initializer_expression(lhs->declaration_initializer,
                 program,
                 i,
+                config.allow_extension_features,
                 error)) {
                 return 0;
             }
@@ -821,6 +1922,7 @@ int semantic_analyze_program_with_options(
                     &declaration_type,
                     program,
                     i,
+                    config.allow_extension_features,
                     NULL,
                     error)) {
                 return 0;
@@ -844,6 +1946,16 @@ int semantic_analyze_program_with_options(
                 SemanticTypeDescriptor param_type;
 
                 if (semantic_build_function_parameter_type_descriptor(lhs, param_index, &param_type) &&
+                    param_type.kind == SEMANTIC_TYPE_KIND_AGGREGATE) {
+                    semantic_set_error(error,
+                        lhs->line,
+                        lhs->column,
+                        param_type.aggregate_kind == SEMANTIC_AGGREGATE_KIND_PAIR
+                            ? "SEMA-EXT-020: 'pair' is available only under -extension mode"
+                            : "SEMA-EXT-021: 'struct' is available only under -extension mode");
+                    return 0;
+                }
+                if (semantic_build_function_parameter_type_descriptor(lhs, param_index, &param_type) &&
                     param_type.kind == SEMANTIC_TYPE_KIND_FUNCTION) {
                     semantic_set_error(error,
                         lhs->line,
@@ -854,12 +1966,68 @@ int semantic_analyze_program_with_options(
             }
         }
 
+        if (lhs->kind == AST_EXTERNAL_FUNCTION &&
+            lhs->has_function_return_signature &&
+            !config.allow_extension_features) {
+            semantic_set_error(error,
+                lhs->line,
+                lhs->column,
+                "SEMA-EXT-015: function-valued returns are available only under -extension mode");
+            return 0;
+        }
+
+        if (lhs->kind == AST_EXTERNAL_FUNCTION &&
+            lhs->has_function_return_signature &&
+            config.allow_extension_features &&
+            lhs->is_function_definition &&
+            lhs->function_body) {
+            if (!semantic_check_function_return_shape_rules(lhs, error)) {
+                return 0;
+            }
+            if (!semantic_function_valued_return_definition_has_consistent_closure_family(
+                    lhs,
+                    program,
+                    i,
+                    error)) {
+                return 0;
+            }
+        }
+
+        if (lhs->kind == AST_EXTERNAL_FUNCTION && !config.allow_extension_features) {
+            if (lhs->function_return_type == AST_FUNCTION_RETURN_PAIR) {
+                semantic_set_error(error,
+                    lhs->line,
+                    lhs->column,
+                    "SEMA-EXT-020: 'pair' is available only under -extension mode");
+                return 0;
+            }
+            if (lhs->function_return_type == AST_FUNCTION_RETURN_STRUCT) {
+                semantic_set_error(error,
+                    lhs->line,
+                    lhs->column,
+                    "SEMA-EXT-021: 'struct' is available only under -extension mode");
+                return 0;
+            }
+        }
+
+        if (lhs->kind == AST_EXTERNAL_FUNCTION &&
+            lhs->function_return_type == AST_FUNCTION_RETURN_STRUCT &&
+            (!lhs->function_return_type_name ||
+                !semantic_find_struct_type(program, lhs->function_return_type_name))) {
+            semantic_set_error(error,
+                lhs->line,
+                lhs->column,
+                "SEMA-STRUCT-004: unknown struct type in local declaration");
+            return 0;
+        }
+
         if (lhs->kind == AST_EXTERNAL_FUNCTION && lhs->is_function_definition) {
             if (!semantic_check_function_callable_scope_shadow_rules(lhs, error)) {
                 return 0;
             }
 
-            if (!semantic_check_function_callable_rules(program, i, lhs, error)) {
+            if (!config.allow_extension_features &&
+                !semantic_check_function_callable_rules(program, i, lhs, error)) {
                 return 0;
             }
 
@@ -877,7 +2045,8 @@ int semantic_analyze_program_with_options(
                 return 0;
             }
 
-             if (!semantic_check_function_return_shape_rules(lhs, error)) {
+             if (!lhs->has_function_return_signature &&
+                    !semantic_check_function_return_shape_rules(lhs, error)) {
                 return 0;
             }
 

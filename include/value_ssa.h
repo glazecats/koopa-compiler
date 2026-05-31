@@ -55,6 +55,7 @@ typedef enum {
     VALUE_SSA_INSTR_MOV = 0,
     VALUE_SSA_INSTR_BINARY,
     VALUE_SSA_INSTR_CALL,
+    VALUE_SSA_INSTR_ADDR_FUNCTION,
     VALUE_SSA_INSTR_ADDR_LOCAL,
     VALUE_SSA_INSTR_ADDR_GLOBAL,
     VALUE_SSA_INSTR_LOAD_LOCAL,
@@ -111,6 +112,7 @@ typedef struct {
             ValueSsaValueRef *args;
             size_t arg_count;
         } call;
+        char *addr_function_name;
         ValueSsaSlotRef addr_slot;
         ValueSsaSlotRef load_slot;
         struct {

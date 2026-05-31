@@ -15,6 +15,10 @@ static void ir_basic_block_free(IrBasicBlock *block) {
         if (block->instructions[i].kind == IR_INSTR_CALL) {
             free(block->instructions[i].as.call.callee_name);
             free(block->instructions[i].as.call.args);
+        } else if (block->instructions[i].kind == IR_INSTR_FN_MAKE) {
+            free(block->instructions[i].as.fn_make.callee_name);
+        } else if (block->instructions[i].kind == IR_INSTR_CALL_INDIRECT) {
+            free(block->instructions[i].as.call_indirect.args);
         }
     }
 
@@ -70,11 +74,24 @@ static void ir_global_free(IrGlobal *global) {
     global->has_runtime_initializer = 0;
 }
 
+static void ir_function_shape_free(IrFunctionShape *shape) {
+    if (!shape) {
+        return;
+    }
+
+    free(shape->parameter_types);
+    shape->parameter_types = NULL;
+    shape->parameter_count = 0;
+}
+
 void ir_program_init(IrProgram *program) {
     if (!program) {
         return;
     }
 
+    program->function_shapes = NULL;
+    program->function_shape_count = 0;
+    program->function_shape_capacity = 0;
     program->globals = NULL;
     program->global_count = 0;
     program->global_capacity = 0;
@@ -89,6 +106,14 @@ void ir_program_free(IrProgram *program) {
     if (!program) {
         return;
     }
+
+    for (i = 0; i < program->function_shape_count; ++i) {
+        ir_function_shape_free(&program->function_shapes[i]);
+    }
+    free(program->function_shapes);
+    program->function_shapes = NULL;
+    program->function_shape_count = 0;
+    program->function_shape_capacity = 0;
 
     for (i = 0; i < program->global_count; ++i) {
         ir_global_free(&program->globals[i]);
@@ -208,6 +233,64 @@ static int ir_program_append_global(IrProgram *program,
     }
     return 1;
 }
+
+static int ir_program_append_function_shape(IrProgram *program,
+    AstFunctionReturnType return_type,
+    const AstFunctionReturnType *parameter_types,
+    size_t parameter_count,
+    size_t *out_shape_id,
+    IrError *error) {
+    IrFunctionShape *new_shapes;
+    size_t next_capacity;
+    IrFunctionShape *shape;
+
+    if (!program || (parameter_count > 0 && !parameter_types)) {
+        ir_set_error(error, 0, 0, "IR-INT-042: invalid function shape append contract");
+        return 0;
+    }
+
+    if (program->function_shape_count == program->function_shape_capacity) {
+        if (!ir_next_growth_capacity(program->function_shape_capacity,
+                4,
+                sizeof(IrFunctionShape),
+                &next_capacity)) {
+            ir_set_error(error, 0, 0, "IR-INT-043: function shape storage capacity overflow");
+            return 0;
+        }
+        new_shapes = (IrFunctionShape *)realloc(program->function_shapes,
+            next_capacity * sizeof(IrFunctionShape));
+        if (!new_shapes) {
+            ir_set_error(error, 0, 0, "IR-INT-044: out of memory while growing IR function shapes");
+            return 0;
+        }
+        program->function_shapes = new_shapes;
+        program->function_shape_capacity = next_capacity;
+    }
+
+    shape = &program->function_shapes[program->function_shape_count];
+    shape->id = program->function_shape_count;
+    shape->return_type = return_type;
+    shape->parameter_types = NULL;
+    shape->parameter_count = parameter_count;
+    if (parameter_count > 0) {
+        shape->parameter_types = (AstFunctionReturnType *)malloc(
+            parameter_count * sizeof(AstFunctionReturnType));
+        if (!shape->parameter_types) {
+            ir_set_error(error, 0, 0, "IR-INT-045: out of memory while copying function shape parameters");
+            return 0;
+        }
+        memcpy(shape->parameter_types,
+            parameter_types,
+            parameter_count * sizeof(AstFunctionReturnType));
+    }
+
+    program->function_shape_count += 1;
+    if (out_shape_id) {
+        *out_shape_id = shape->id;
+    }
+    return 1;
+}
+
 
 static IrFunction *ir_program_find_function_mut(IrProgram *program, const char *name) {
     size_t i;
@@ -644,6 +727,81 @@ static int ir_emit_call(IrLowerContext *ctx,
 
     return 1;
 }
+
+static int ir_emit_fn_make(IrLowerContext *ctx,
+    IrValueRef destination,
+    const char *callee_name,
+    IrValueRef env,
+    size_t shape_id) {
+    IrInstruction instruction;
+    IrBasicBlock *block = ir_lower_current_block(ctx);
+    size_t name_length;
+
+    if (!ctx || !block || !callee_name) {
+        return 0;
+    }
+
+    instruction.kind = IR_INSTR_FN_MAKE;
+    instruction.result = destination;
+    instruction.as.fn_make.callee_name = NULL;
+    instruction.as.fn_make.env = env;
+    instruction.as.fn_make.shape_id = shape_id;
+
+    name_length = strlen(callee_name);
+    instruction.as.fn_make.callee_name = (char *)malloc(name_length + 1);
+    if (!instruction.as.fn_make.callee_name) {
+        ir_set_error(ctx->error, 0, 0, "IR-INT-046: out of memory while copying IR fn_make callee");
+        return 0;
+    }
+    memcpy(instruction.as.fn_make.callee_name, callee_name, name_length + 1);
+
+    if (!ir_block_append_instruction(block, &instruction, ctx->error)) {
+        free(instruction.as.fn_make.callee_name);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int ir_emit_call_indirect(IrLowerContext *ctx,
+    IrValueRef destination,
+    IrValueRef callee,
+    const IrValueRef *args,
+    size_t arg_count) {
+    IrInstruction instruction;
+    IrBasicBlock *block = ir_lower_current_block(ctx);
+
+    if (!ctx || !block) {
+        return 0;
+    }
+
+    instruction.kind = IR_INSTR_CALL_INDIRECT;
+    instruction.result = destination;
+    instruction.as.call_indirect.callee = callee;
+    instruction.as.call_indirect.args = NULL;
+    instruction.as.call_indirect.arg_count = arg_count;
+
+    if (arg_count > 0) {
+        instruction.as.call_indirect.args =
+            (IrValueRef *)malloc(arg_count * sizeof(IrValueRef));
+        if (!instruction.as.call_indirect.args) {
+            ir_set_error(ctx->error,
+                0,
+                0,
+                "IR-INT-047: out of memory while copying IR indirect call arguments");
+            return 0;
+        }
+        memcpy(instruction.as.call_indirect.args, args, arg_count * sizeof(IrValueRef));
+    }
+
+    if (!ir_block_append_instruction(block, &instruction, ctx->error)) {
+        free(instruction.as.call_indirect.args);
+        return 0;
+    }
+
+    return 1;
+}
+
 
 static int ir_emit_addr_local(IrLowerContext *ctx,
     IrValueRef destination,

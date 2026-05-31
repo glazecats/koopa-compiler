@@ -28,6 +28,7 @@ typedef enum {
     TOKEN_KW_UNLESS,
     TOKEN_KW_PAIR,
     TOKEN_KW_STRUCT,
+    TOKEN_KW_CLOSURE,
 
     TOKEN_PLUS,
     TOKEN_MINUS,

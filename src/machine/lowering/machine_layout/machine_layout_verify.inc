@@ -223,6 +223,14 @@ int machine_layout_verify_program(const MachineLayoutProgram *program, MachineLa
                         }
                         break;
                     }
+                    case MACHINE_SELECT_OP_ADDR_FUNCTION:
+                        if (!op->has_result ||
+                            !op->as.addr_function_name ||
+                            op->as.addr_function_name[0] == '\0') {
+                            machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-127A: invalid addr_function op");
+                            return 0;
+                        }
+                        break;
                     case MACHINE_SELECT_OP_ADDR_LOCAL:
                     case MACHINE_SELECT_OP_ADDR_GLOBAL:
                         if (!op->has_result ||

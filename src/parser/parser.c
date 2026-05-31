@@ -26,9 +26,19 @@ typedef struct {
 typedef struct {
     const Token *name_tok;
     AstFunctionReturnType return_type;
+    char *return_type_name;
+    int has_function_return_signature;
+    AstFunctionReturnType function_return_function_return_type;
+    char *function_return_function_return_type_name;
+    size_t function_return_function_parameter_count;
+    int *function_return_function_parameter_value_kinds;
+    char **function_return_function_parameter_type_names;
+    AstFunctionReturnType *function_return_function_parameter_return_types;
+    size_t *function_return_function_parameter_parameter_counts;
     size_t parameter_count;
     char **parameter_names;
     int *parameter_value_kinds;
+    char **parameter_type_names;
     size_t *parameter_array_ranks;
     AstExpression ***parameter_array_extent_exprs;
     AstFunctionReturnType *parameter_function_return_types;
@@ -81,6 +91,9 @@ static int parse_declaration(Parser *p,
     char ***out_decl_names,
     size_t *out_decl_name_count,
     int **out_decl_value_kinds,
+    AstFunctionReturnType **out_decl_function_return_types,
+    size_t **out_decl_function_parameter_counts,
+    int ***out_decl_function_parameter_value_kinds,
     char ***out_decl_type_names,
     size_t **out_decl_array_ranks,
     AstExpression ****out_decl_array_extent_exprs,
@@ -91,6 +104,7 @@ static int parse_parameter_list(Parser *p,
     int *out_has_unnamed_parameter,
     char ***out_parameter_names,
     int **out_parameter_value_kinds,
+    char ***out_parameter_type_names,
     size_t **out_parameter_array_ranks,
     AstExpression ****out_parameter_array_extent_exprs,
     AstFunctionReturnType **out_parameter_function_return_types,
@@ -98,6 +112,7 @@ static int parse_parameter_list(Parser *p,
     int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns);
+static AstExpression *parse_expression_ast_closure_literal(Parser *p, const Token *closure_tok);
 static void parsed_function_signature_init(ParsedFunctionSignature *signature);
 static void parsed_function_signature_release(ParsedFunctionSignature *signature);
 static int parse_function_external_signature(Parser *p,
@@ -110,9 +125,19 @@ static int parse_function_external_definition_body(Parser *p,
 static int parse_function_external(Parser *p,
     const Token **out_name_token,
     AstFunctionReturnType *out_return_type,
+    char **out_return_type_name,
+    int *out_has_function_return_signature,
+    AstFunctionReturnType *out_function_return_function_return_type,
+    char **out_function_return_function_return_type_name,
+    size_t *out_function_return_function_parameter_count,
+    int **out_function_return_function_parameter_value_kinds,
+    char ***out_function_return_function_parameter_type_names,
+    AstFunctionReturnType **out_function_return_function_parameter_return_types,
+    size_t **out_function_return_function_parameter_parameter_counts,
     size_t *out_parameter_count,
     char ***out_parameter_names,
     int **out_parameter_value_kinds,
+    char ***out_parameter_type_names,
     size_t **out_parameter_array_ranks,
     AstExpression ****out_parameter_array_extent_exprs,
     AstFunctionReturnType **out_parameter_function_return_types,

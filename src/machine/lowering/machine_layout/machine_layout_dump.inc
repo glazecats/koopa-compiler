@@ -193,6 +193,14 @@ int machine_layout_dump_program(const MachineLayoutProgram *program,
                             return 0;
                         }
                         break;
+                    case MACHINE_SELECT_OP_ADDR_FUNCTION:
+                        if (!machine_layout_append_format(&builder,
+                                "addr_function %s",
+                                op->as.addr_function_name ? op->as.addr_function_name : "<null>")) {
+                            free(builder.data);
+                            return 0;
+                        }
+                        break;
                     case MACHINE_SELECT_OP_ADDR_GLOBAL:
                         if (!machine_layout_append_format(&builder, "addr_global global.%zu", op->as.addr_slot.id)) {
                             free(builder.data);

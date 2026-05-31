@@ -351,6 +351,9 @@ static void machine_select_op_free(MachineSelectOp *op) {
         op->as.call.callee_name = NULL;
         op->as.call.args = NULL;
         op->as.call.arg_count = 0;
+    } else if (op->kind == MACHINE_SELECT_OP_ADDR_FUNCTION) {
+        free(op->as.addr_function_name);
+        op->as.addr_function_name = NULL;
     }
 }
 

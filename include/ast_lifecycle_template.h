@@ -56,6 +56,12 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_STATEMENT_FREE_FN(AstStatement *stmt) {
     free(stmt->declaration_array_extent_exprs);
     free(stmt->declaration_function_return_types);
     free(stmt->declaration_function_parameter_counts);
+    if (stmt->declaration_function_parameter_value_kinds) {
+        for (i = 0; i < stmt->declaration_name_count; ++i) {
+            free(stmt->declaration_function_parameter_value_kinds[i]);
+        }
+    }
+    free(stmt->declaration_function_parameter_value_kinds);
     if (stmt->capture_names) {
         for (i = 0; i < stmt->capture_name_count; ++i) {
             free(stmt->capture_names[i]);
@@ -89,7 +95,14 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_PROGRAM_CLEAR_FN(AstProgram *program) {
                 free(program->struct_types[i].field_names[j]);
             }
         }
+        if (program->struct_types[i].field_type_names) {
+            for (j = 0; j < program->struct_types[i].field_count; ++j) {
+                free(program->struct_types[i].field_type_names[j]);
+            }
+        }
         free(program->struct_types[i].field_names);
+        free(program->struct_types[i].field_value_kinds);
+        free(program->struct_types[i].field_type_names);
     }
     free(program->struct_types);
     program->struct_types = NULL;
@@ -99,6 +112,17 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_PROGRAM_CLEAR_FN(AstProgram *program) {
     for (i = 0; i < program->count; ++i) {
         size_t j;
         free(program->externals[i].name);
+        free(program->externals[i].function_return_type_name);
+        free(program->externals[i].function_return_function_return_type_name);
+        free(program->externals[i].function_return_function_parameter_value_kinds);
+        free(program->externals[i].function_return_function_parameter_return_types);
+        free(program->externals[i].function_return_function_parameter_parameter_counts);
+        if (program->externals[i].function_return_function_parameter_type_names) {
+            for (j = 0; j < program->externals[i].function_return_function_parameter_count; ++j) {
+                free(program->externals[i].function_return_function_parameter_type_names[j]);
+            }
+        }
+        free(program->externals[i].function_return_function_parameter_type_names);
         free(program->externals[i].declaration_type_name);
         if (program->externals[i].declaration_array_extent_exprs) {
             for (j = 0; j < program->externals[i].declaration_array_rank; ++j) {
@@ -111,8 +135,14 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_PROGRAM_CLEAR_FN(AstProgram *program) {
                 free(program->externals[i].parameter_names[j]);
             }
         }
+        if (program->externals[i].parameter_type_names) {
+            for (j = 0; j < program->externals[i].parameter_count; ++j) {
+                free(program->externals[i].parameter_type_names[j]);
+            }
+        }
         free(program->externals[i].parameter_names);
         free(program->externals[i].parameter_value_kinds);
+        free(program->externals[i].parameter_type_names);
         if (program->externals[i].parameter_array_extent_exprs) {
             for (j = 0; j < program->externals[i].parameter_count; ++j) {
                 size_t k;
@@ -185,6 +215,15 @@ AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *progr
 
     external.kind = kind;
     external.function_return_type = AST_FUNCTION_RETURN_INT;
+    external.function_return_type_name = NULL;
+    external.has_function_return_signature = 0;
+    external.function_return_function_return_type = AST_FUNCTION_RETURN_INT;
+    external.function_return_function_return_type_name = NULL;
+    external.function_return_function_parameter_count = 0u;
+    external.function_return_function_parameter_value_kinds = NULL;
+    external.function_return_function_parameter_return_types = NULL;
+    external.function_return_function_parameter_parameter_counts = NULL;
+    external.function_return_function_parameter_type_names = NULL;
     external.declaration_value_kind = AST_DECLARATION_VALUE_INT;
     external.declaration_type_name = NULL;
     external.name = NULL;
@@ -197,6 +236,7 @@ AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *progr
     external.parameter_count = 0;
     external.parameter_names = NULL;
     external.parameter_value_kinds = NULL;
+    external.parameter_type_names = NULL;
     external.parameter_array_ranks = NULL;
     external.parameter_array_extent_exprs = NULL;
     external.parameter_function_return_types = NULL;
@@ -281,6 +321,31 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_EXPRESSION_FREE_FN(AstExpression *expr) 
         AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.ternary.then_expr);
         AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.ternary.else_expr);
         break;
+    case AST_EXPR_CLOSURE: {
+        size_t i;
+        if (expr->as.closure.capture_names) {
+            for (i = 0; i < expr->as.closure.capture_name_count; ++i) {
+                free(expr->as.closure.capture_names[i]);
+            }
+        }
+        if (expr->as.closure.parameter_names) {
+            for (i = 0; i < expr->as.closure.parameter_count; ++i) {
+                free(expr->as.closure.parameter_names[i]);
+            }
+        }
+        if (expr->as.closure.parameter_type_names) {
+            for (i = 0; i < expr->as.closure.parameter_count; ++i) {
+                free(expr->as.closure.parameter_type_names[i]);
+            }
+        }
+        free(expr->as.closure.capture_names);
+        free(expr->as.closure.return_type_name);
+        free(expr->as.closure.parameter_names);
+        free(expr->as.closure.parameter_value_kinds);
+        free(expr->as.closure.parameter_type_names);
+        AST_LIFECYCLE_STATEMENT_FREE_FN(expr->as.closure.body);
+        break;
+    }
     case AST_EXPR_NUMBER:
     case AST_EXPR_FLOAT_LITERAL:
     default:

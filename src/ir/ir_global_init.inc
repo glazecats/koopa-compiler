@@ -46,6 +46,9 @@ static const IrBuiltinFunctionInfo k_ir_builtin_functions[] = {
     {"__builtin_i2f32", AST_FUNCTION_RETURN_FLOAT, 1u, k_ir_builtin_int_unary_param_types},
 };
 
+static const AstExpression *ir_find_local_function_value_initializer_expr(const AstExternal *external,
+    const char *name);
+
 static int ir_function_find_last_unterminated_block(const IrFunction *function,
     size_t *out_block_id);
 
@@ -85,11 +88,6 @@ static int ir_builtin_function_matches_signature(const char *name,
         builtin->return_type == expected_return_type;
 }
 
-static int ir_function_parameter_count_matches_external(const IrFunction *function,
-    const AstExternal *external) {
-    return function && external && function->parameter_count == external->parameter_count;
-}
-
 static AstFunctionReturnType ir_scalar_declaration_value_kind_to_return_type(int declaration_value_kind) {
     return declaration_value_kind == AST_DECLARATION_VALUE_FLOAT
         ? AST_FUNCTION_RETURN_FLOAT
@@ -100,6 +98,2022 @@ static AstFunctionReturnType ir_scalar_parameter_value_kind_to_return_type(int p
     return parameter_value_kind == AST_PARAMETER_VALUE_FLOAT
         ? AST_FUNCTION_RETURN_FLOAT
         : AST_FUNCTION_RETURN_INT;
+}
+
+static int ir_function_return_type_as_aggregate_kind(const AstExternal *external,
+    AstDeclarationValueKind *out_kind) {
+    if (out_kind) {
+        *out_kind = AST_DECLARATION_VALUE_INT;
+    }
+    if (!external || !out_kind) {
+        return 0;
+    }
+
+    switch (external->function_return_type) {
+    case AST_FUNCTION_RETURN_PAIR:
+        *out_kind = AST_DECLARATION_VALUE_PAIR;
+        return 1;
+    case AST_FUNCTION_RETURN_STRUCT:
+        *out_kind = AST_DECLARATION_VALUE_STRUCT;
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static const AstExternal *ir_find_named_function_external_prefer_definition(const AstProgram *ast_program,
+    const char *name) {
+    const AstExternal *fallback = NULL;
+    size_t external_index;
+
+    if (!ast_program || !name || name[0] == '\0') {
+        return NULL;
+    }
+
+    for (external_index = 0u; external_index < ast_program->count; ++external_index) {
+        const AstExternal *candidate = &ast_program->externals[external_index];
+
+        if (candidate->kind != AST_EXTERNAL_FUNCTION ||
+            !candidate->name ||
+            strcmp(candidate->name, name) != 0) {
+            continue;
+        }
+        if (!fallback) {
+            fallback = candidate;
+        }
+        if (candidate->is_function_definition && candidate->function_body) {
+            return candidate;
+        }
+    }
+
+    return fallback;
+}
+
+static const AstExpression *ir_find_function_returned_closure_expr(const AstStatement *stmt) {
+    size_t child_index;
+
+    if (!stmt) {
+        return NULL;
+    }
+    if (stmt->kind == AST_STMT_RETURN) {
+        const AstExpression *expr =
+            (stmt->expressions && stmt->expression_count > 0u) ? stmt->expressions[0] : NULL;
+        const AstExpression *base = ir_unwrap_paren_expression(expr);
+
+        return (base && base->kind == AST_EXPR_CLOSURE) ? base : NULL;
+    }
+
+    for (child_index = 0u; child_index < stmt->child_count; ++child_index) {
+        const AstExpression *found = ir_find_function_returned_closure_expr(
+            stmt->children ? stmt->children[child_index] : NULL);
+        if (found) {
+            return found;
+        }
+    }
+
+    return NULL;
+}
+
+static const AstExpression *ir_find_function_returned_value_expr(const AstStatement *stmt) {
+    size_t child_index;
+
+    if (!stmt) {
+        return NULL;
+    }
+    if (stmt->kind == AST_STMT_RETURN) {
+        const AstExpression *expr =
+            (stmt->expressions && stmt->expression_count > 0u) ? stmt->expressions[0] : NULL;
+        return ir_unwrap_paren_expression(expr);
+    }
+
+    for (child_index = 0u; child_index < stmt->child_count; ++child_index) {
+        const AstExpression *found = ir_find_function_returned_value_expr(
+            stmt->children ? stmt->children[child_index] : NULL);
+        if (found) {
+            return found;
+        }
+    }
+
+    return NULL;
+}
+
+static int ir_function_value_return_is_closure_family(const AstProgram *ast_program,
+    const AstExternal *external,
+    int *out_is_closure) {
+    const AstExternal *resolved_external = external;
+    const AstExpression *return_expr = NULL;
+
+    if (out_is_closure) {
+        *out_is_closure = 0;
+    }
+    if (!external || !external->has_function_return_signature || !out_is_closure) {
+        return 0;
+    }
+
+    if (external->function_body == NULL && external->name) {
+        resolved_external = ir_find_named_function_external_prefer_definition(ast_program, external->name);
+    }
+    if (!resolved_external || !resolved_external->function_body) {
+        *out_is_closure = 0;
+        return 1;
+    }
+
+    return_expr = ir_find_function_returned_value_expr(resolved_external->function_body);
+    if (!return_expr) {
+        return 0;
+    }
+
+    return_expr = ir_unwrap_function_value_wrapper_expression(return_expr);
+    if (!return_expr) {
+        return 0;
+    }
+    if (return_expr->kind == AST_EXPR_IDENTIFIER && return_expr->as.identifier.name) {
+        const AstExpression *init_expr =
+            ir_find_local_function_value_initializer_expr(resolved_external, return_expr->as.identifier.name);
+        const AstExpression *init_base = ir_unwrap_function_value_wrapper_expression(init_expr);
+
+        if (ir_function_parameter_name_is_compatible_function_value(
+                resolved_external,
+                return_expr->as.identifier.name,
+                resolved_external->function_return_function_return_type,
+                resolved_external->function_return_function_parameter_count)) {
+            *out_is_closure = 0;
+            return 1;
+        }
+        if (init_base) {
+            if (init_base->kind == AST_EXPR_CLOSURE) {
+                *out_is_closure = 1;
+                return 1;
+            }
+            if (init_base->kind == AST_EXPR_CALL) {
+                const AstExpression *callee_base =
+                    ir_unwrap_function_value_wrapper_expression(init_base->as.call.callee);
+                const AstExternal *callee_external = NULL;
+
+                if (!callee_base || callee_base->kind != AST_EXPR_IDENTIFIER || !callee_base->as.identifier.name) {
+                    return 0;
+                }
+                callee_external =
+                    ir_find_named_function_external_prefer_definition(ast_program, callee_base->as.identifier.name);
+                if (!callee_external || !callee_external->has_function_return_signature) {
+                    return 0;
+                }
+                return ir_function_value_return_is_closure_family(
+                    ast_program,
+                    callee_external,
+                    out_is_closure);
+            }
+        }
+    }
+
+    if (return_expr->kind == AST_EXPR_TERNARY) {
+        const AstExpression *then_expr =
+            ir_unwrap_function_value_wrapper_expression(return_expr->as.ternary.then_expr);
+        const AstExpression *else_expr =
+            ir_unwrap_function_value_wrapper_expression(return_expr->as.ternary.else_expr);
+        int then_is_closure = 0;
+        int else_is_closure = 0;
+
+        if (!then_expr || !else_expr ||
+            then_expr->kind != AST_EXPR_IDENTIFIER ||
+            else_expr->kind != AST_EXPR_IDENTIFIER) {
+            return 0;
+        }
+        {
+            const AstExpression *then_init_expr =
+                ir_find_local_function_value_initializer_expr(resolved_external, then_expr->as.identifier.name);
+            const AstExpression *else_init_expr =
+                ir_find_local_function_value_initializer_expr(resolved_external, else_expr->as.identifier.name);
+            const AstExpression *then_init_base = ir_unwrap_function_value_wrapper_expression(then_init_expr);
+            const AstExpression *else_init_base = ir_unwrap_function_value_wrapper_expression(else_init_expr);
+
+            if (!then_init_base || !else_init_base) {
+                return 0;
+            }
+            if (then_init_base->kind == AST_EXPR_CLOSURE) {
+                then_is_closure = 1;
+            } else if (then_init_base->kind == AST_EXPR_CALL) {
+                const AstExpression *callee_base =
+                    ir_unwrap_function_value_wrapper_expression(then_init_base->as.call.callee);
+                const AstExternal *callee_external = NULL;
+
+                if (!callee_base || callee_base->kind != AST_EXPR_IDENTIFIER || !callee_base->as.identifier.name) {
+                    return 0;
+                }
+                callee_external =
+                    ir_find_named_function_external_prefer_definition(ast_program, callee_base->as.identifier.name);
+                if (!callee_external ||
+                    !ir_function_value_return_is_closure_family(ast_program, callee_external, &then_is_closure)) {
+                    return 0;
+                }
+            }
+            if (else_init_base->kind == AST_EXPR_CLOSURE) {
+                else_is_closure = 1;
+            } else if (else_init_base->kind == AST_EXPR_CALL) {
+                const AstExpression *callee_base =
+                    ir_unwrap_function_value_wrapper_expression(else_init_base->as.call.callee);
+                const AstExternal *callee_external = NULL;
+
+                if (!callee_base || callee_base->kind != AST_EXPR_IDENTIFIER || !callee_base->as.identifier.name) {
+                    return 0;
+                }
+                callee_external =
+                    ir_find_named_function_external_prefer_definition(ast_program, callee_base->as.identifier.name);
+                if (!callee_external ||
+                    !ir_function_value_return_is_closure_family(ast_program, callee_external, &else_is_closure)) {
+                    return 0;
+                }
+            }
+        }
+        if (then_is_closure != else_is_closure) {
+            return 0;
+        }
+        *out_is_closure = then_is_closure;
+        return 1;
+    }
+
+    if (return_expr->kind == AST_EXPR_CALL) {
+        const AstExpression *callee_base =
+            ir_unwrap_function_value_wrapper_expression(return_expr->as.call.callee);
+        const AstExternal *callee_external = NULL;
+
+        if (!callee_base || callee_base->kind != AST_EXPR_IDENTIFIER || !callee_base->as.identifier.name) {
+            return 0;
+        }
+        callee_external =
+            ir_find_named_function_external_prefer_definition(ast_program, callee_base->as.identifier.name);
+        if (!callee_external || !callee_external->has_function_return_signature) {
+            return 0;
+        }
+        return ir_function_value_return_is_closure_family(
+            ast_program,
+            callee_external,
+            out_is_closure);
+    }
+
+    *out_is_closure = return_expr->kind == AST_EXPR_CLOSURE ? 1 : 0;
+    return 1;
+}
+
+static int ir_function_value_return_parameter_index(const AstProgram *ast_program,
+    const AstExternal *external,
+    size_t *out_param_index) {
+    const AstExternal *resolved_external = external;
+    const AstExpression *return_expr = NULL;
+    size_t param_index;
+
+    if (out_param_index) {
+        *out_param_index = (size_t)-1;
+    }
+    if (!external || !external->has_function_return_signature || !out_param_index) {
+        return 0;
+    }
+    if (external->function_body == NULL && external->name) {
+        resolved_external = ir_find_named_function_external_prefer_definition(ast_program, external->name);
+    }
+    if (!resolved_external || !resolved_external->function_body) {
+        return 1;
+    }
+
+    return_expr = ir_find_function_returned_value_expr(resolved_external->function_body);
+    return_expr = ir_unwrap_function_value_wrapper_expression(return_expr);
+    if (!return_expr ||
+        return_expr->kind != AST_EXPR_IDENTIFIER ||
+        !return_expr->as.identifier.name ||
+        !resolved_external->parameter_names) {
+        return 1;
+    }
+
+    for (param_index = 0u; param_index < resolved_external->parameter_count; ++param_index) {
+        if (resolved_external->parameter_names[param_index] &&
+            strcmp(resolved_external->parameter_names[param_index], return_expr->as.identifier.name) == 0 &&
+            ir_function_parameter_name_is_compatible_function_value(
+                resolved_external,
+                return_expr->as.identifier.name,
+                resolved_external->function_return_function_return_type,
+                resolved_external->function_return_function_parameter_count)) {
+            *out_param_index = param_index;
+            return 1;
+        }
+    }
+
+    return 1;
+}
+
+static int ir_function_value_return_exact_parameter_passthrough_index(const AstProgram *ast_program,
+    const AstExternal *external,
+    size_t *out_param_index) {
+    const AstExternal *resolved_external = external;
+    const AstStatement *body = NULL;
+    const AstStatement *return_stmt = NULL;
+    const AstExpression *return_expr = NULL;
+    size_t param_index;
+
+    if (out_param_index) {
+        *out_param_index = (size_t)-1;
+    }
+    if (!external || !external->has_function_return_signature || !out_param_index) {
+        return 0;
+    }
+    if (external->function_body == NULL && external->name) {
+        resolved_external = ir_find_named_function_external_prefer_definition(ast_program, external->name);
+    }
+    if (!resolved_external || !resolved_external->function_body) {
+        return 0;
+    }
+
+    body = resolved_external->function_body;
+    if (body->kind != AST_STMT_COMPOUND ||
+        body->child_count != 1u ||
+        !body->children ||
+        !body->children[0] ||
+        body->children[0]->kind != AST_STMT_RETURN ||
+        body->children[0]->expression_count != 1u) {
+        return 0;
+    }
+
+    return_stmt = body->children[0];
+    return_expr =
+        (return_stmt->expressions && return_stmt->expression_count > 0u)
+            ? return_stmt->expressions[0]
+            : NULL;
+    return_expr = ir_unwrap_function_value_wrapper_expression(return_expr);
+    if (!return_expr ||
+        return_expr->kind != AST_EXPR_IDENTIFIER ||
+        !return_expr->as.identifier.name ||
+        !resolved_external->parameter_names) {
+        return 0;
+    }
+
+    for (param_index = 0u; param_index < resolved_external->parameter_count; ++param_index) {
+        if (resolved_external->parameter_names[param_index] &&
+            strcmp(resolved_external->parameter_names[param_index], return_expr->as.identifier.name) == 0 &&
+            ir_function_parameter_name_is_compatible_function_value(
+                resolved_external,
+                return_expr->as.identifier.name,
+                resolved_external->function_return_function_return_type,
+                resolved_external->function_return_function_parameter_count)) {
+            *out_param_index = param_index;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int ir_function_returned_closure_payload_slot_count(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    size_t *out_slot_count) {
+    const AstExternal *resolved_external = external;
+    const AstExpression *return_expr = NULL;
+
+    if (out_slot_count) {
+        *out_slot_count = 0u;
+    }
+    if (!external || !out_slot_count || !external->has_function_return_signature) {
+        return 0;
+    }
+
+    resolved_external = external;
+    if (external->function_body == NULL && external->name) {
+        resolved_external = ir_find_named_function_external_prefer_definition(ast_program, external->name);
+    }
+    if (!resolved_external || !resolved_external->function_body) {
+        *out_slot_count = 0u;
+        return 1;
+    }
+
+    return_expr = ir_find_function_returned_value_expr(resolved_external->function_body);
+    if (!return_expr) {
+        return 0;
+    }
+    return_expr = ir_unwrap_function_value_wrapper_expression(return_expr);
+    if (!return_expr) {
+        return 0;
+    }
+    if (return_expr->kind == AST_EXPR_IDENTIFIER && return_expr->as.identifier.name) {
+        const AstExpression *init_expr =
+            ir_find_local_function_value_initializer_expr(resolved_external, return_expr->as.identifier.name);
+        const AstExpression *init_base = ir_unwrap_function_value_wrapper_expression(init_expr);
+        size_t return_param_index = (size_t)-1;
+
+        if (ir_function_value_return_parameter_index(ast_program, resolved_external, &return_param_index) &&
+            return_param_index != (size_t)-1) {
+            *out_slot_count = 1u;
+            return 1;
+        }
+        if (init_base) {
+            if (init_base->kind == AST_EXPR_CLOSURE) {
+                size_t slot_count = init_base->as.closure.capture_name_count;
+
+                if (program) {
+                    const char **returned_target_names = NULL;
+                    size_t returned_target_count = 0u;
+
+                    if (!ir_collect_function_value_return_target_names(
+                            ast_program,
+                            program,
+                            resolved_external,
+                            &returned_target_names,
+                            &returned_target_count,
+                            NULL)) {
+                        free(returned_target_names);
+                        return 0;
+                    }
+                    if (returned_target_count > 1u) {
+                        slot_count += 1u;
+                    }
+                    free(returned_target_names);
+                }
+                *out_slot_count = slot_count;
+                return 1;
+            }
+            if (init_base->kind == AST_EXPR_CALL) {
+                const AstExpression *callee_base =
+                    ir_unwrap_function_value_wrapper_expression(init_base->as.call.callee);
+                const AstExternal *callee_external = NULL;
+
+                if (!callee_base || callee_base->kind != AST_EXPR_IDENTIFIER || !callee_base->as.identifier.name) {
+                    return 0;
+                }
+                callee_external =
+                    ir_find_named_function_external_prefer_definition(ast_program, callee_base->as.identifier.name);
+                if (!callee_external) {
+                    return 0;
+                }
+                return ir_function_returned_closure_payload_slot_count(
+                    ast_program,
+                    program,
+                    callee_external,
+                    out_slot_count);
+            }
+        }
+    }
+    if (return_expr->kind == AST_EXPR_TERNARY) {
+        const AstExpression *then_expr =
+            ir_unwrap_function_value_wrapper_expression(return_expr->as.ternary.then_expr);
+        const AstExpression *else_expr =
+            ir_unwrap_function_value_wrapper_expression(return_expr->as.ternary.else_expr);
+        const AstExpression *then_init_expr = NULL;
+        const AstExpression *else_init_expr = NULL;
+        const AstExpression *then_init_base = NULL;
+        const AstExpression *else_init_base = NULL;
+
+        if (!then_expr || !else_expr ||
+            then_expr->kind != AST_EXPR_IDENTIFIER ||
+            else_expr->kind != AST_EXPR_IDENTIFIER) {
+            return 0;
+        }
+        then_init_expr =
+            ir_find_local_function_value_initializer_expr(resolved_external, then_expr->as.identifier.name);
+        else_init_expr =
+            ir_find_local_function_value_initializer_expr(resolved_external, else_expr->as.identifier.name);
+        then_init_base = ir_unwrap_function_value_wrapper_expression(then_init_expr);
+        else_init_base = ir_unwrap_function_value_wrapper_expression(else_init_expr);
+        if (!then_init_base || !else_init_base) {
+            return 0;
+        }
+        if (then_init_base->kind == AST_EXPR_CLOSURE &&
+            else_init_base->kind == AST_EXPR_CLOSURE) {
+            size_t slot_count = then_init_base->as.closure.capture_name_count;
+
+            if (else_init_base->as.closure.capture_name_count != slot_count) {
+                return 0;
+            }
+            if (program) {
+                const char **returned_target_names = NULL;
+                size_t returned_target_count = 0u;
+
+                if (!ir_collect_function_value_return_target_names(
+                        ast_program,
+                        program,
+                        resolved_external,
+                        &returned_target_names,
+                        &returned_target_count,
+                        NULL)) {
+                    free(returned_target_names);
+                    return 0;
+                }
+                if (returned_target_count > 1u) {
+                    slot_count += 1u;
+                }
+                free(returned_target_names);
+            }
+            *out_slot_count = slot_count;
+            return 1;
+        }
+        if (then_init_base->kind == AST_EXPR_CALL &&
+            else_init_base->kind == AST_EXPR_CALL) {
+            const AstExpression *callee_base =
+                ir_unwrap_function_value_wrapper_expression(then_init_base->as.call.callee);
+            const AstExternal *callee_external = NULL;
+
+            if (!callee_base || callee_base->kind != AST_EXPR_IDENTIFIER || !callee_base->as.identifier.name) {
+                return 0;
+            }
+            callee_external =
+                ir_find_named_function_external_prefer_definition(ast_program, callee_base->as.identifier.name);
+            if (!callee_external) {
+                return 0;
+            }
+            return ir_function_returned_closure_payload_slot_count(
+                ast_program,
+                program,
+                callee_external,
+                out_slot_count);
+        }
+        *out_slot_count = 1u;
+        return 1;
+    }
+    if (return_expr->kind == AST_EXPR_CALL) {
+        const AstExpression *callee_base =
+            ir_unwrap_function_value_wrapper_expression(return_expr->as.call.callee);
+        const AstExternal *callee_external = NULL;
+
+        if (!callee_base || callee_base->kind != AST_EXPR_IDENTIFIER || !callee_base->as.identifier.name) {
+            return 0;
+        }
+        callee_external =
+            ir_find_named_function_external_prefer_definition(ast_program, callee_base->as.identifier.name);
+        if (!callee_external) {
+            return 0;
+        }
+        return ir_function_returned_closure_payload_slot_count(
+            ast_program,
+            program,
+            callee_external,
+            out_slot_count);
+    }
+    if (return_expr->kind != AST_EXPR_CLOSURE) {
+        *out_slot_count = 1u;
+        return 1;
+    }
+
+    *out_slot_count = return_expr->as.closure.capture_name_count;
+    return 1;
+}
+
+static int ir_build_returned_closure_helper_name(const AstExternal *external,
+    char **out_name,
+    IrError *error) {
+    const AstExpression *closure_expr = NULL;
+    size_t needed = 0u;
+    char *name = NULL;
+
+    if (out_name) {
+        *out_name = NULL;
+    }
+    if (!external || !external->name || external->name[0] == '\0' || !external->function_body || !out_name) {
+        ir_set_error(error, 0, 0, "IR-INT-091: invalid returned-closure helper naming contract");
+        return 0;
+    }
+
+    closure_expr = ir_find_function_returned_closure_expr(external->function_body);
+    if (!closure_expr) {
+        ir_set_error(error, external->line, external->column,
+            "IR-INT-092: returned-closure helper naming requires a closure return expression");
+        return 0;
+    }
+
+    needed = strlen(external->name) + 48u;
+    name = (char *)malloc(needed);
+    if (!name) {
+        ir_set_error(error, external->line, external->column,
+            "IR-INT-093: out of memory while naming returned-closure helper");
+        return 0;
+    }
+
+    snprintf(name,
+        needed,
+        "%s__retclosure_%d_%d",
+        external->name,
+        closure_expr->line,
+        closure_expr->column);
+    *out_name = name;
+    return 1;
+}
+
+static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
+    const AstExpression *closure_expr,
+    const char *helper_name,
+    const char *const *capture_names,
+    const size_t *capture_local_ids,
+    size_t capture_count,
+    IrError *error) {
+    AstExternal synthetic_external;
+    IrFunction *function = NULL;
+    char **parameter_names = NULL;
+    int *parameter_value_kinds = NULL;
+    int *parameter_name_lines = NULL;
+    int *parameter_name_columns = NULL;
+    size_t parameter_count = 0u;
+    size_t parameter_index = 0u;
+    int ok = 0;
+
+    if (!ctx || !ctx->ast_program || !ctx->program || !closure_expr ||
+        closure_expr->kind != AST_EXPR_CLOSURE || !helper_name || helper_name[0] == '\0') {
+        ir_set_error(error, 0, 0, "IR-INT-094: invalid direct closure helper lowering contract");
+        return 0;
+    }
+
+    parameter_count = capture_count + closure_expr->as.closure.parameter_count;
+    if (parameter_count > 0u) {
+        parameter_names = (char **)calloc(parameter_count, sizeof(char *));
+        parameter_value_kinds = (int *)calloc(parameter_count, sizeof(int));
+        parameter_name_lines = (int *)calloc(parameter_count, sizeof(int));
+        parameter_name_columns = (int *)calloc(parameter_count, sizeof(int));
+        if (!parameter_names || !parameter_value_kinds || !parameter_name_lines || !parameter_name_columns) {
+            ir_set_error(error, closure_expr->line, closure_expr->column,
+                "IR-INT-095: out of memory while building direct closure helper signature");
+            goto cleanup;
+        }
+    }
+
+    for (parameter_index = 0u; parameter_index < capture_count; ++parameter_index) {
+        parameter_names[parameter_index] = (char *)(capture_names ? capture_names[parameter_index] : NULL);
+        parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_INT;
+        parameter_name_lines[parameter_index] = closure_expr->line;
+        parameter_name_columns[parameter_index] = closure_expr->column;
+    }
+    for (parameter_index = 0u; parameter_index < closure_expr->as.closure.parameter_count; ++parameter_index) {
+        size_t dest_index = capture_count + parameter_index;
+
+        parameter_names[dest_index] =
+            closure_expr->as.closure.parameter_names
+                ? closure_expr->as.closure.parameter_names[parameter_index]
+                : NULL;
+        parameter_value_kinds[dest_index] =
+            closure_expr->as.closure.parameter_value_kinds
+                ? closure_expr->as.closure.parameter_value_kinds[parameter_index]
+                : AST_PARAMETER_VALUE_INT;
+        parameter_name_lines[dest_index] = closure_expr->line;
+        parameter_name_columns[dest_index] = closure_expr->column;
+    }
+
+    memset(&synthetic_external, 0, sizeof(synthetic_external));
+    synthetic_external.kind = AST_EXTERNAL_FUNCTION;
+    synthetic_external.function_return_type = closure_expr->as.closure.return_type;
+    synthetic_external.name = (char *)helper_name;
+    synthetic_external.name_length = strlen(helper_name);
+    synthetic_external.parameter_count = parameter_count;
+    synthetic_external.parameter_names = parameter_names;
+    synthetic_external.parameter_value_kinds = parameter_value_kinds;
+    synthetic_external.parameter_name_lines = parameter_name_lines;
+    synthetic_external.parameter_name_columns = parameter_name_columns;
+    synthetic_external.is_function_definition = 1;
+    synthetic_external.function_body = closure_expr->as.closure.body;
+    synthetic_external.line = closure_expr->line;
+    synthetic_external.column = closure_expr->column;
+
+    function = ir_program_find_function_mut(ctx->program, helper_name);
+    if (function && function->has_body) {
+        ok = 1;
+        goto cleanup;
+    }
+    ok = ir_lower_function_core(
+        ctx->ast_program,
+        ctx->program,
+        NULL,
+        NULL,
+        &synthetic_external,
+        NULL,
+        NULL,
+        NULL,
+        error);
+    (void)capture_local_ids;
+
+cleanup:
+    free(parameter_names);
+    free(parameter_value_kinds);
+    free(parameter_name_lines);
+    free(parameter_name_columns);
+    return ok;
+}
+
+static int ir_ensure_returned_closure_helper_function(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const char **out_target_name,
+    IrError *error) {
+    const AstExpression *closure_expr = NULL;
+    IrLowerContext helper_ctx;
+    char *helper_name = NULL;
+    int ok = 0;
+
+    if (out_target_name) {
+        *out_target_name = NULL;
+    }
+    if (!ast_program || !program || !external || !external->function_body || !out_target_name) {
+        ir_set_error(error, 0, 0, "IR-INT-096: invalid returned-closure helper ensure contract");
+        return 0;
+    }
+
+    closure_expr = ir_find_function_returned_closure_expr(external->function_body);
+    if (!closure_expr) {
+        ir_set_error(error, external->line, external->column,
+            "IR-INT-097: returned-closure helper ensure requires a closure return expression");
+        return 0;
+    }
+    if (!ir_build_returned_closure_helper_name(external, &helper_name, error)) {
+        return 0;
+    }
+
+    memset(&helper_ctx, 0, sizeof(helper_ctx));
+    helper_ctx.ast_program = ast_program;
+    helper_ctx.program = program;
+    ok = ir_lower_closure_helper_function_from_expr(
+        &helper_ctx,
+        closure_expr,
+        helper_name,
+        (const char *const *)closure_expr->as.closure.capture_names,
+        NULL,
+        closure_expr->as.closure.capture_name_count,
+        error);
+    if (ok) {
+        IrFunction *helper_function = ir_program_find_function_mut(program, helper_name);
+        if (!helper_function || !helper_function->name) {
+            ir_set_error(error, external->line, external->column,
+                "IR-INT-098: returned-closure helper disappeared after lowering");
+            ok = 0;
+        } else {
+            *out_target_name = helper_function->name;
+        }
+    }
+
+    free(helper_name);
+    return ok;
+}
+
+static int ir_resolve_local_function_value_declaration_target_name(
+    const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const AstStatement *decl_stmt,
+    size_t decl_index,
+    const char *const *binding_names,
+    const char *const *binding_targets,
+    size_t binding_count,
+    const char **out_target_name,
+    IrError *error) {
+    const AstExpression *init_expr = NULL;
+    const AstExpression *base = NULL;
+
+    if (out_target_name) {
+        *out_target_name = NULL;
+    }
+    if (!ast_program || !program || !external || !external->name || !decl_stmt ||
+        !decl_stmt->declaration_names || !decl_stmt->expressions ||
+        decl_index >= decl_stmt->declaration_name_count ||
+        decl_index >= decl_stmt->expression_count || !out_target_name) {
+        return 0;
+    }
+
+    init_expr = decl_stmt->expressions[decl_index];
+    base = ir_unwrap_function_value_wrapper_expression(init_expr);
+    if (!base) {
+        return 0;
+    }
+
+    if (base->kind == AST_EXPR_CLOSURE) {
+        IrLowerContext helper_ctx;
+        char *helper_name = NULL;
+        const char *resolved_name = NULL;
+        int ok = 0;
+        size_t closure_ordinal =
+            ((size_t)(decl_stmt->line > 0 ? decl_stmt->line : 0) << 16) |
+            (size_t)((decl_stmt->column > 0 ? decl_stmt->column : 0) + decl_index);
+
+        if (!decl_stmt->declaration_names[decl_index] ||
+            decl_stmt->declaration_names[decl_index][0] == '\0' ||
+            !ir_build_closure_helper_name(
+                external->name,
+                decl_stmt->declaration_names[decl_index],
+                closure_ordinal,
+                &helper_name,
+                error)) {
+            free(helper_name);
+            return 0;
+        }
+
+        memset(&helper_ctx, 0, sizeof(helper_ctx));
+        helper_ctx.ast_program = ast_program;
+        helper_ctx.program = program;
+        ok = ir_lower_closure_helper_function_from_expr(
+            &helper_ctx,
+            base,
+            helper_name,
+            (const char *const *)base->as.closure.capture_names,
+            NULL,
+            base->as.closure.capture_name_count,
+            error);
+        if (ok) {
+            IrFunction *helper_function = ir_program_find_function_mut(program, helper_name);
+            if (!helper_function || !helper_function->name) {
+                ir_set_error(error,
+                    decl_stmt->line,
+                    decl_stmt->column,
+                    "IR-INT-098: local returned-closure helper disappeared after lowering");
+                ok = 0;
+            } else {
+                resolved_name = helper_function->name;
+            }
+        }
+
+        free(helper_name);
+        if (!ok) {
+            return 0;
+        }
+        *out_target_name = resolved_name;
+        return resolved_name != NULL;
+    }
+
+    return ir_resolve_function_value_wrapper_target_name(
+        ast_program,
+        program,
+        init_expr,
+        binding_names,
+        binding_targets,
+        binding_count,
+        out_target_name,
+        error);
+}
+
+static int ir_resolve_function_value_return_target_name(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const char **out_target_name,
+    IrError *error) {
+    const AstExternal *resolved_external = external;
+    const AstExpression *return_expr = NULL;
+    const char *name = NULL;
+    IrFunction *builtin_function = NULL;
+    IrFunction *existing_function = NULL;
+
+    if (out_target_name) {
+        *out_target_name = NULL;
+    }
+    if (!ast_program || !program || !external || !out_target_name) {
+        ir_set_error(error, 0, 0, "IR-INT-099: invalid function-value return target resolution contract");
+        return 0;
+    }
+    if (external->function_body == NULL && external->name) {
+        resolved_external = ir_find_named_function_external_prefer_definition(ast_program, external->name);
+    }
+    if (!resolved_external || !resolved_external->function_body) {
+        return 1;
+    }
+
+    return_expr = ir_find_function_returned_value_expr(resolved_external->function_body);
+    if (!return_expr) {
+        ir_set_error(error, external->line, external->column,
+            "IR-INT-100: function-value return target resolution requires a return expression");
+        return 0;
+    }
+    return_expr = ir_unwrap_function_value_wrapper_expression(return_expr);
+    if (!return_expr) {
+        ir_set_error(error, external->line, external->column,
+            "IR-INT-101: function-value return target resolution currently requires a closure literal or direct function identifier");
+        return 0;
+    }
+    if (return_expr->kind == AST_EXPR_CLOSURE) {
+        return ir_ensure_returned_closure_helper_function(
+            ast_program,
+            program,
+            resolved_external,
+            out_target_name,
+            error);
+    }
+    if (return_expr->kind == AST_EXPR_CALL) {
+        const AstExpression *callee_base =
+            ir_unwrap_function_value_wrapper_expression(return_expr->as.call.callee);
+        const AstExternal *callee_external = NULL;
+
+        if (!callee_base || callee_base->kind != AST_EXPR_IDENTIFIER || !callee_base->as.identifier.name) {
+            ir_set_error(error, external->line, external->column,
+                "IR-INT-101: function-value return target resolution currently requires a closure literal or direct function identifier");
+            return 0;
+        }
+        callee_external =
+            ir_find_named_function_external_prefer_definition(ast_program, callee_base->as.identifier.name);
+        if (!callee_external || !callee_external->has_function_return_signature) {
+            ir_set_error(error, external->line, external->column,
+                "IR-INT-101: function-value return target resolution currently requires a closure literal or direct function identifier");
+            return 0;
+        }
+        return ir_resolve_function_value_return_target_name(
+            ast_program,
+            program,
+            callee_external,
+            out_target_name,
+            error);
+    }
+    if (return_expr->kind == AST_EXPR_TERNARY) {
+        const AstExpression *then_expr =
+            ir_unwrap_function_value_wrapper_expression(return_expr->as.ternary.then_expr);
+        const AstExpression *else_expr =
+            ir_unwrap_function_value_wrapper_expression(return_expr->as.ternary.else_expr);
+        const char *then_target_name = NULL;
+        const char *else_target_name = NULL;
+
+        if (!then_expr || !else_expr ||
+            then_expr->kind != AST_EXPR_IDENTIFIER ||
+            else_expr->kind != AST_EXPR_IDENTIFIER) {
+            ir_set_error(error, external->line, external->column,
+                "IR-INT-101: function-value return target resolution currently requires a closure literal or direct function identifier");
+            return 0;
+        }
+        if ((!ir_resolve_function_value_return_local_binding_target_name(
+                    ast_program,
+                    program,
+                    resolved_external,
+                    then_expr->as.identifier.name,
+                    &then_target_name,
+                    error) &&
+                !ir_resolve_noncapturing_function_target_name(
+                    program,
+                    then_expr->as.identifier.name,
+                    NULL,
+                    NULL,
+                    0u,
+                    &then_target_name,
+                    error)) ||
+            (!ir_resolve_function_value_return_local_binding_target_name(
+                    ast_program,
+                    program,
+                    resolved_external,
+                    else_expr->as.identifier.name,
+                    &else_target_name,
+                    error) &&
+                !ir_resolve_noncapturing_function_target_name(
+                    program,
+                    else_expr->as.identifier.name,
+                    NULL,
+                    NULL,
+                    0u,
+                    &else_target_name,
+                    error)) ||
+            !then_target_name || !else_target_name || then_target_name[0] == '\0') {
+            ir_set_error(error, external->line, external->column,
+                "IR-INT-101: function-value return target resolution currently requires a closure literal or direct function identifier");
+            return 0;
+        }
+        *out_target_name = then_target_name;
+        return 1;
+    }
+    if (return_expr->kind != AST_EXPR_IDENTIFIER || !return_expr->as.identifier.name) {
+        ir_set_error(error, external->line, external->column,
+            "IR-INT-101: function-value return target resolution currently requires a closure literal or direct function identifier");
+        return 0;
+    }
+
+    name = return_expr->as.identifier.name;
+    if (ir_function_parameter_name_is_compatible_function_value(
+            resolved_external,
+            name,
+            resolved_external->function_return_function_return_type,
+            resolved_external->function_return_function_parameter_count)) {
+        return 1;
+    }
+    if (ir_resolve_function_value_return_local_binding_target_name(
+            ast_program,
+            program,
+            resolved_external,
+            name,
+            out_target_name,
+            error)) {
+        return 1;
+    }
+    existing_function = ir_program_find_function_mut(program, name);
+    if (existing_function && existing_function->name) {
+        *out_target_name = existing_function->name;
+        return 1;
+    }
+    if (ir_ensure_builtin_function_signature(program, name, &builtin_function, error) &&
+        builtin_function && builtin_function->name) {
+        *out_target_name = builtin_function->name;
+        return 1;
+    }
+
+    ir_set_error(error, external->line, external->column,
+        "IR-INT-102: function-value return target '%s' is not available during IR lowering",
+        name);
+    return 0;
+}
+
+static int ir_resolve_noncapturing_function_target_name(IrProgram *program,
+    const char *name,
+    const char *const *binding_names,
+    const char *const *binding_targets,
+    size_t binding_count,
+    const char **out_target_name,
+    IrError *error) {
+    size_t binding_index;
+    IrFunction *builtin_function = NULL;
+    IrFunction *existing_function = NULL;
+
+    if (out_target_name) {
+        *out_target_name = NULL;
+    }
+    if (!program || !name || name[0] == '\0' || !out_target_name) {
+        return 0;
+    }
+
+    for (binding_index = binding_count; binding_index > 0u; --binding_index) {
+        if (binding_names &&
+            binding_names[binding_index - 1u] &&
+            strcmp(binding_names[binding_index - 1u], name) == 0) {
+            if (!binding_targets || !binding_targets[binding_index - 1u] ||
+                binding_targets[binding_index - 1u][0] == '\0') {
+                return 0;
+            }
+            *out_target_name = binding_targets[binding_index - 1u];
+            return 1;
+        }
+    }
+
+    existing_function = ir_program_find_function_mut(program, name);
+    if (existing_function && existing_function->name) {
+        *out_target_name = existing_function->name;
+        return 1;
+    }
+    if (ir_ensure_builtin_function_signature(program, name, &builtin_function, error) &&
+        builtin_function && builtin_function->name) {
+        *out_target_name = builtin_function->name;
+        return 1;
+    }
+
+    return 0;
+}
+
+static const AstExpression *ir_find_local_function_value_initializer_expr(const AstExternal *external,
+    const char *name) {
+    const AstStatement *body = NULL;
+    size_t child_index;
+
+    if (!external || !name || name[0] == '\0' ||
+        !external->function_body ||
+        external->function_body->kind != AST_STMT_COMPOUND) {
+        return NULL;
+    }
+
+    body = external->function_body;
+    for (child_index = 0u; child_index < body->child_count; ++child_index) {
+        const AstStatement *child = body->children ? body->children[child_index] : NULL;
+        size_t decl_index;
+
+        if (!child || child->kind != AST_STMT_DECLARATION ||
+            !child->declaration_names || !child->declaration_value_kinds ||
+            !child->expressions) {
+            continue;
+        }
+        for (decl_index = 0u; decl_index < child->declaration_name_count &&
+                decl_index < child->expression_count; ++decl_index) {
+            if (!child->declaration_names[decl_index] ||
+                strcmp(child->declaration_names[decl_index], name) != 0 ||
+                child->declaration_value_kinds[decl_index] != AST_DECLARATION_VALUE_FUNCTION) {
+                continue;
+            }
+            return child->expressions[decl_index];
+        }
+    }
+
+    return NULL;
+}
+
+static int ir_resolve_function_value_wrapper_target_name(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExpression *expr,
+    const char *const *binding_names,
+    const char *const *binding_targets,
+    size_t binding_count,
+    const char **out_target_name,
+    IrError *error) {
+    const AstExpression *base = ir_unwrap_paren_expression(expr);
+
+    if (out_target_name) {
+        *out_target_name = NULL;
+    }
+    if (!ast_program || !program || !base || !out_target_name) {
+        return 0;
+    }
+
+    if (base->kind == AST_EXPR_BINARY && base->as.binary.op == TOKEN_COMMA) {
+        return ir_resolve_function_value_wrapper_target_name(
+            ast_program,
+            program,
+            base->as.binary.right,
+            binding_names,
+            binding_targets,
+            binding_count,
+            out_target_name,
+            error);
+    }
+
+    if (base->kind == AST_EXPR_BINARY && base->as.binary.op == TOKEN_ASSIGN) {
+        return ir_resolve_function_value_wrapper_target_name(
+            ast_program,
+            program,
+            base->as.binary.right,
+            binding_names,
+            binding_targets,
+            binding_count,
+            out_target_name,
+            error);
+    }
+
+    if (base->kind == AST_EXPR_IDENTIFIER && base->as.identifier.name) {
+        return ir_resolve_noncapturing_function_target_name(
+            program,
+            base->as.identifier.name,
+            binding_names,
+            binding_targets,
+            binding_count,
+            out_target_name,
+            error);
+    }
+
+    if (base->kind == AST_EXPR_CALL) {
+        const AstExpression *callee_base =
+            ir_unwrap_function_value_wrapper_expression(base->as.call.callee);
+        const AstExternal *callee_external = NULL;
+
+        if (!callee_base || callee_base->kind != AST_EXPR_IDENTIFIER || !callee_base->as.identifier.name) {
+            return 0;
+        }
+
+        callee_external =
+            ir_find_named_function_external_prefer_definition(ast_program, callee_base->as.identifier.name);
+        if (!callee_external || !callee_external->has_function_return_signature) {
+            return 0;
+        }
+
+        return ir_resolve_function_value_return_target_name(
+            ast_program,
+            program,
+            callee_external,
+            out_target_name,
+            error);
+    }
+
+    return 0;
+}
+
+static int ir_resolve_function_value_return_local_binding_target_name(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const char *return_name,
+    const char **out_target_name,
+    IrError *error) {
+    const AstStatement *body = NULL;
+    const char **binding_names = NULL;
+    const char **binding_targets = NULL;
+    size_t binding_count = 0u;
+    size_t child_index;
+    int ok = 0;
+
+    if (out_target_name) {
+        *out_target_name = NULL;
+    }
+    if (!ast_program || !program || !external || !return_name || return_name[0] == '\0' ||
+        !external->function_body || external->function_body->kind != AST_STMT_COMPOUND ||
+        !out_target_name) {
+        return 0;
+    }
+
+    body = external->function_body;
+    for (child_index = 0u; child_index < body->child_count; ++child_index) {
+        const AstStatement *child = body->children ? body->children[child_index] : NULL;
+        if (!child) {
+            continue;
+        }
+
+        if (child->kind == AST_STMT_DECLARATION) {
+            size_t decl_index;
+            for (decl_index = 0u; decl_index < child->declaration_name_count &&
+                    decl_index < child->expression_count; ++decl_index) {
+                const char *decl_name =
+                    child->declaration_names ? child->declaration_names[decl_index] : NULL;
+                int decl_value_kind =
+                    child->declaration_value_kinds ? child->declaration_value_kinds[decl_index] : AST_DECLARATION_VALUE_INT;
+                const char *resolved_target = NULL;
+
+                if (!decl_name || decl_name[0] == '\0' ||
+                    decl_value_kind != AST_DECLARATION_VALUE_FUNCTION) {
+                    continue;
+                }
+                if (!ir_resolve_local_function_value_declaration_target_name(
+                        ast_program,
+                        program,
+                        external,
+                        child,
+                        decl_index,
+                        binding_names,
+                        binding_targets,
+                        binding_count,
+                        &resolved_target,
+                        error)) {
+                    continue;
+                }
+                binding_names = (const char **)realloc(binding_names, (binding_count + 1u) * sizeof(const char *));
+                binding_targets = (const char **)realloc(binding_targets, (binding_count + 1u) * sizeof(const char *));
+                if (!binding_names || !binding_targets) {
+                    free(binding_names);
+                    free(binding_targets);
+                    return 0;
+                }
+                binding_names[binding_count] = decl_name;
+                binding_targets[binding_count] = resolved_target;
+                binding_count += 1u;
+            }
+            continue;
+        }
+
+        if (child->kind == AST_STMT_EXPRESSION &&
+            child->expression_count == 1u &&
+            child->expressions) {
+            const AstExpression *expr = child->expressions[0];
+            const AstExpression *expr_base = ir_unwrap_paren_expression(expr);
+            if (expr_base && expr_base->kind == AST_EXPR_BINARY && expr_base->as.binary.op == TOKEN_ASSIGN) {
+                const AstExpression *lhs_base = ir_unwrap_paren_expression(expr_base->as.binary.left);
+                const AstExpression *rhs_base = ir_unwrap_paren_expression(expr_base->as.binary.right);
+                const char *resolved_target = NULL;
+                size_t binding_index;
+
+                if (lhs_base && rhs_base &&
+                    lhs_base->kind == AST_EXPR_IDENTIFIER && lhs_base->as.identifier.name &&
+                    rhs_base->kind == AST_EXPR_IDENTIFIER && rhs_base->as.identifier.name &&
+                    ir_resolve_noncapturing_function_target_name(
+                        program,
+                        rhs_base->as.identifier.name,
+                        binding_names,
+                        binding_targets,
+                        binding_count,
+                        &resolved_target,
+                        error)) {
+                    for (binding_index = binding_count; binding_index > 0u; --binding_index) {
+                        if (binding_names[binding_index - 1u] &&
+                            strcmp(binding_names[binding_index - 1u], lhs_base->as.identifier.name) == 0) {
+                            binding_targets[binding_index - 1u] = resolved_target;
+                            break;
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+
+        if (child->kind == AST_STMT_RETURN) {
+            const AstExpression *return_expr =
+                (child->expressions && child->expression_count > 0u) ? child->expressions[0] : NULL;
+            const AstExpression *return_base =
+                ir_unwrap_function_value_wrapper_expression(return_expr);
+
+            if (return_base &&
+                return_base->kind == AST_EXPR_IDENTIFIER &&
+                return_base->as.identifier.name &&
+                strcmp(return_base->as.identifier.name, return_name) == 0) {
+                ok = ir_resolve_function_value_wrapper_target_name(
+                    ast_program,
+                    program,
+                    return_expr,
+                    binding_names,
+                    binding_targets,
+                    binding_count,
+                    out_target_name,
+                    error);
+                free(binding_names);
+                free(binding_targets);
+                return ok;
+            }
+            continue;
+        }
+    }
+
+    if (out_target_name) {
+        size_t binding_index;
+        for (binding_index = binding_count; binding_index > 0u; --binding_index) {
+            if (binding_names[binding_index - 1u] &&
+                strcmp(binding_names[binding_index - 1u], return_name) == 0 &&
+                binding_targets[binding_index - 1u] &&
+                binding_targets[binding_index - 1u][0] != '\0') {
+                *out_target_name = binding_targets[binding_index - 1u];
+                free(binding_names);
+                free(binding_targets);
+                return 1;
+            }
+        }
+    }
+    free(binding_names);
+    free(binding_targets);
+    return 0;
+}
+
+static int ir_collect_function_value_return_target_names_append_unique(
+    const char ***io_target_names,
+    size_t *io_target_count,
+    const char *target_name) {
+    const char **new_target_names = NULL;
+    size_t index;
+
+    if (!io_target_names || !io_target_count || !target_name || target_name[0] == '\0') {
+        return 0;
+    }
+
+    for (index = 0u; index < *io_target_count; ++index) {
+        if ((*io_target_names)[index] && strcmp((*io_target_names)[index], target_name) == 0) {
+            return 1;
+        }
+    }
+
+    new_target_names =
+        (const char **)realloc((void *)*io_target_names, (*io_target_count + 1u) * sizeof(const char *));
+    if (!new_target_names) {
+        return 0;
+    }
+    *io_target_names = new_target_names;
+    (*io_target_names)[(*io_target_count)++] = target_name;
+    return 1;
+}
+
+static int ir_collect_function_value_return_target_names_bind_name(
+    const char ***io_binding_names,
+    const char ***io_binding_targets,
+    size_t *io_binding_count,
+    const char *binding_name,
+    const char *target_name) {
+    const char **new_binding_names = NULL;
+    const char **new_binding_targets = NULL;
+    size_t binding_index;
+
+    if (!io_binding_names || !io_binding_targets || !io_binding_count ||
+        !binding_name || binding_name[0] == '\0' || !target_name || target_name[0] == '\0') {
+        return 0;
+    }
+
+    for (binding_index = *io_binding_count; binding_index > 0u; --binding_index) {
+        if ((*io_binding_names)[binding_index - 1u] &&
+            strcmp((*io_binding_names)[binding_index - 1u], binding_name) == 0) {
+            (*io_binding_targets)[binding_index - 1u] = target_name;
+            return 1;
+        }
+    }
+
+    new_binding_names =
+        (const char **)realloc((void *)*io_binding_names, (*io_binding_count + 1u) * sizeof(const char *));
+    if (!new_binding_names) {
+        return 0;
+    }
+    *io_binding_names = new_binding_names;
+    new_binding_targets =
+        (const char **)realloc((void *)*io_binding_targets, (*io_binding_count + 1u) * sizeof(const char *));
+    if (!new_binding_targets) {
+        return 0;
+    }
+    *io_binding_targets = new_binding_targets;
+    (*io_binding_names)[*io_binding_count] = binding_name;
+    (*io_binding_targets)[*io_binding_count] = target_name;
+    *io_binding_count += 1u;
+    return 1;
+}
+
+static int ir_collect_function_value_wrapper_target_names(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExpression *expr,
+    const char *const *binding_names,
+    const char *const *binding_targets,
+    size_t binding_count,
+    const char ***io_target_names,
+    size_t *io_target_count,
+    IrError *error) {
+    const AstExpression *base = ir_unwrap_paren_expression(expr);
+    const char *target_name = NULL;
+
+    if (!ast_program || !program || !base || !io_target_names || !io_target_count) {
+        return 0;
+    }
+
+    if (base->kind == AST_EXPR_BINARY && base->as.binary.op == TOKEN_COMMA) {
+        return ir_collect_function_value_wrapper_target_names(
+            ast_program,
+            program,
+            base->as.binary.right,
+            binding_names,
+            binding_targets,
+            binding_count,
+            io_target_names,
+            io_target_count,
+            error);
+    }
+
+    if (base->kind == AST_EXPR_BINARY && base->as.binary.op == TOKEN_ASSIGN) {
+        return ir_collect_function_value_wrapper_target_names(
+            ast_program,
+            program,
+            base->as.binary.right,
+            binding_names,
+            binding_targets,
+            binding_count,
+            io_target_names,
+            io_target_count,
+            error);
+    }
+
+    if (base->kind == AST_EXPR_TERNARY) {
+        if (!ir_collect_function_value_wrapper_target_names(
+                ast_program,
+                program,
+                base->as.ternary.then_expr,
+                binding_names,
+                binding_targets,
+                binding_count,
+                io_target_names,
+                io_target_count,
+                error)) {
+            return 0;
+        }
+        return ir_collect_function_value_wrapper_target_names(
+            ast_program,
+            program,
+            base->as.ternary.else_expr,
+            binding_names,
+            binding_targets,
+            binding_count,
+            io_target_names,
+            io_target_count,
+            error);
+    }
+
+    if (base->kind == AST_EXPR_CALL) {
+        const AstExpression *callee_base =
+            ir_unwrap_function_value_wrapper_expression(base->as.call.callee);
+        const AstExternal *callee_external = NULL;
+        const char **returned_target_names = NULL;
+        size_t returned_target_count = 0u;
+        size_t target_index;
+        int ok = 1;
+
+        if (!callee_base || callee_base->kind != AST_EXPR_IDENTIFIER || !callee_base->as.identifier.name) {
+            return 0;
+        }
+
+        callee_external =
+            ir_find_named_function_external_prefer_definition(ast_program, callee_base->as.identifier.name);
+        if (!callee_external || !callee_external->has_function_return_signature) {
+            return 0;
+        }
+
+        if (!ir_collect_function_value_return_target_names(
+                ast_program,
+                program,
+                callee_external,
+                &returned_target_names,
+                &returned_target_count,
+                error)) {
+            return 0;
+        }
+
+        for (target_index = 0u; target_index < returned_target_count; ++target_index) {
+            if (!returned_target_names[target_index] ||
+                !ir_collect_function_value_return_target_names_append_unique(
+                    io_target_names,
+                    io_target_count,
+                    returned_target_names[target_index])) {
+                ok = 0;
+                break;
+            }
+        }
+
+        free(returned_target_names);
+        return ok;
+    }
+
+    if (!ir_resolve_function_value_wrapper_target_name(
+            ast_program,
+            program,
+            expr,
+            binding_names,
+            binding_targets,
+            binding_count,
+            &target_name,
+            error) ||
+        !target_name || target_name[0] == '\0') {
+        return 0;
+    }
+
+    return ir_collect_function_value_return_target_names_append_unique(
+        io_target_names,
+        io_target_count,
+        target_name);
+}
+
+static int ir_collect_function_value_return_targets_in_statement(
+    const AstProgram *ast_program,
+    const AstExternal *external,
+    const AstStatement *stmt,
+    IrProgram *program,
+    const char *tracked_return_name,
+    const char ***io_binding_names,
+    const char ***io_binding_targets,
+    size_t *io_binding_count,
+    const char ***io_target_names,
+    size_t *io_target_count,
+    IrError *error) {
+    size_t child_index;
+
+    if (!ast_program || !stmt) {
+        return 1;
+    }
+
+    if (stmt->kind == AST_STMT_DECLARATION) {
+        size_t decl_index;
+        for (decl_index = 0u; decl_index < stmt->declaration_name_count &&
+                decl_index < stmt->expression_count; ++decl_index) {
+            const char *decl_name =
+                stmt->declaration_names ? stmt->declaration_names[decl_index] : NULL;
+            int decl_value_kind =
+                stmt->declaration_value_kinds ? stmt->declaration_value_kinds[decl_index] : AST_DECLARATION_VALUE_INT;
+            const char *resolved_target = NULL;
+
+            if (!decl_name || decl_name[0] == '\0' ||
+                decl_value_kind != AST_DECLARATION_VALUE_FUNCTION ||
+                !program ||
+                !ir_resolve_local_function_value_declaration_target_name(
+                    ast_program,
+                    program,
+                    external,
+                    stmt,
+                    decl_index,
+                    *io_binding_names,
+                    *io_binding_targets,
+                    *io_binding_count,
+                    &resolved_target,
+                    error) ||
+                !ir_collect_function_value_return_target_names_bind_name(
+                    io_binding_names,
+                    io_binding_targets,
+                    io_binding_count,
+                    decl_name,
+                    resolved_target)) {
+                continue;
+            }
+            if (tracked_return_name &&
+                strcmp(tracked_return_name, decl_name) == 0 &&
+                !ir_collect_function_value_return_target_names_append_unique(
+                    io_target_names,
+                    io_target_count,
+                    resolved_target)) {
+                return 0;
+            }
+        }
+    } else if (stmt->kind == AST_STMT_EXPRESSION &&
+        stmt->expression_count == 1u &&
+        stmt->expressions) {
+        const AstExpression *expr = stmt->expressions[0];
+        const AstExpression *expr_base = ir_unwrap_paren_expression(expr);
+        if (expr_base && expr_base->kind == AST_EXPR_BINARY && expr_base->as.binary.op == TOKEN_ASSIGN) {
+            const AstExpression *lhs_base = ir_unwrap_paren_expression(expr_base->as.binary.left);
+            const AstExpression *rhs_base = ir_unwrap_paren_expression(expr_base->as.binary.right);
+            const char *resolved_target = NULL;
+
+            if (lhs_base && rhs_base &&
+                lhs_base->kind == AST_EXPR_IDENTIFIER && lhs_base->as.identifier.name &&
+                rhs_base->kind == AST_EXPR_IDENTIFIER && rhs_base->as.identifier.name &&
+                program &&
+                ir_resolve_noncapturing_function_target_name(
+                    program,
+                    rhs_base->as.identifier.name,
+                    *io_binding_names,
+                    *io_binding_targets,
+                    *io_binding_count,
+                    &resolved_target,
+                    error) &&
+                !ir_collect_function_value_return_target_names_bind_name(
+                    io_binding_names,
+                    io_binding_targets,
+                    io_binding_count,
+                    lhs_base->as.identifier.name,
+                    resolved_target)) {
+                return 0;
+            }
+            if (tracked_return_name &&
+                strcmp(tracked_return_name, lhs_base->as.identifier.name) == 0 &&
+                !ir_collect_function_value_return_target_names_append_unique(
+                    io_target_names,
+                    io_target_count,
+                    resolved_target)) {
+                return 0;
+            }
+        }
+    } else if (stmt->kind == AST_STMT_RETURN) {
+        const AstExpression *return_expr =
+            (stmt->expressions && stmt->expression_count > 0u) ? stmt->expressions[0] : NULL;
+        if (program &&
+            !ir_collect_function_value_wrapper_target_names(
+                ast_program,
+                program,
+                return_expr,
+                *io_binding_names,
+                *io_binding_targets,
+                *io_binding_count,
+                io_target_names,
+                io_target_count,
+                error)) {
+            return 0;
+        }
+    }
+
+    for (child_index = 0u; child_index < stmt->child_count; ++child_index) {
+        if (!ir_collect_function_value_return_targets_in_statement(
+                ast_program,
+                external,
+                stmt->children ? stmt->children[child_index] : NULL,
+                program,
+                tracked_return_name,
+                io_binding_names,
+                io_binding_targets,
+                io_binding_count,
+                io_target_names,
+                io_target_count,
+                error)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int ir_collect_function_value_return_target_names(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const char ***out_target_names,
+    size_t *out_target_count,
+    IrError *error) {
+    const AstExternal *resolved_external = external;
+    const AstExpression *return_expr = NULL;
+    const AstExpression *return_base = NULL;
+    const char *tracked_return_name = NULL;
+    const char **binding_names = NULL;
+    const char **binding_targets = NULL;
+    size_t binding_count = 0u;
+    const char **target_names = NULL;
+    size_t target_count = 0u;
+    int ok = 0;
+
+    if (out_target_names) {
+        *out_target_names = NULL;
+    }
+    if (out_target_count) {
+        *out_target_count = 0u;
+    }
+    if (!ast_program || !external || !external->has_function_return_signature ||
+        !out_target_names || !out_target_count) {
+        return 0;
+    }
+
+    if (external->function_body == NULL && external->name) {
+        resolved_external = ir_find_named_function_external_prefer_definition(ast_program, external->name);
+    }
+    if (!resolved_external || !resolved_external->function_body) {
+        *out_target_names = NULL;
+        *out_target_count = 0u;
+        return 1;
+    }
+    return_expr = ir_find_function_returned_value_expr(resolved_external->function_body);
+    return_base = ir_unwrap_function_value_wrapper_expression(return_expr);
+    if (return_base && return_base->kind == AST_EXPR_IDENTIFIER && return_base->as.identifier.name) {
+        tracked_return_name = return_base->as.identifier.name;
+        if (ir_function_parameter_name_is_compatible_function_value(
+                resolved_external,
+                tracked_return_name,
+                resolved_external->function_return_function_return_type,
+                resolved_external->function_return_function_parameter_count)) {
+            *out_target_names = NULL;
+            *out_target_count = 0u;
+            return 1;
+        }
+    }
+    if (!ir_collect_function_value_return_targets_in_statement(
+            ast_program,
+            resolved_external,
+            resolved_external->function_body,
+            program,
+            tracked_return_name,
+            &binding_names,
+            &binding_targets,
+            &binding_count,
+            &target_names,
+            &target_count,
+            error)) {
+        goto cleanup;
+    }
+
+    *out_target_names = target_names;
+    *out_target_count = target_count;
+    target_names = NULL;
+    target_count = 0u;
+    ok = 1;
+
+cleanup:
+    free(binding_names);
+    free(binding_targets);
+    free(target_names);
+    if (!ok) {
+        if (out_target_names) {
+            *out_target_names = NULL;
+        }
+        if (out_target_count) {
+            *out_target_count = 0u;
+        }
+    }
+    return ok;
+}
+
+static int ir_aggregate_slot_count_for_kind_and_type_name(const AstProgram *ast_program,
+    AstDeclarationValueKind aggregate_kind,
+    const char *type_name,
+    size_t *out_slot_count) {
+    const AstStructType *struct_type;
+    size_t field_index;
+    size_t slot_count = 0u;
+
+    if (out_slot_count) {
+        *out_slot_count = 0u;
+    }
+    if (!out_slot_count) {
+        return 0;
+    }
+
+    if (aggregate_kind == AST_DECLARATION_VALUE_PAIR) {
+        *out_slot_count = 2u;
+        return 1;
+    }
+    if (aggregate_kind != AST_DECLARATION_VALUE_STRUCT) {
+        return 0;
+    }
+
+    struct_type = ir_find_struct_type(ast_program, type_name);
+    if (!struct_type || !struct_type->field_value_kinds) {
+        return 0;
+    }
+
+    for (field_index = 0u; field_index < struct_type->field_count; ++field_index) {
+        size_t field_slots = 0u;
+        int field_value_kind = struct_type->field_value_kinds[field_index];
+
+        switch (field_value_kind) {
+        case AST_DECLARATION_VALUE_INT:
+        case AST_DECLARATION_VALUE_FLOAT:
+            field_slots = 1u;
+            break;
+        case AST_DECLARATION_VALUE_PAIR:
+        case AST_DECLARATION_VALUE_STRUCT:
+            if (!ir_aggregate_slot_count_for_kind_and_type_name(
+                    ast_program,
+                    (AstDeclarationValueKind)field_value_kind,
+                    struct_type->field_type_names ? struct_type->field_type_names[field_index] : NULL,
+                    &field_slots)) {
+                return 0;
+            }
+            break;
+        default:
+            return 0;
+        }
+        slot_count += field_slots;
+    }
+
+    *out_slot_count = slot_count;
+    return slot_count > 0u;
+}
+
+static int ir_parameter_value_kind_as_aggregate_kind(int parameter_value_kind,
+    AstDeclarationValueKind *out_kind) {
+    if (out_kind) {
+        *out_kind = AST_DECLARATION_VALUE_INT;
+    }
+    if (!out_kind) {
+        return 0;
+    }
+
+    switch (parameter_value_kind) {
+    case AST_PARAMETER_VALUE_PAIR:
+        *out_kind = AST_DECLARATION_VALUE_PAIR;
+        return 1;
+    case AST_PARAMETER_VALUE_STRUCT:
+        *out_kind = AST_DECLARATION_VALUE_STRUCT;
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int ir_aggregate_slot_count_for_parameter(const AstProgram *ast_program,
+    const AstExternal *external,
+    size_t param_index,
+    size_t *out_slot_count) {
+    AstDeclarationValueKind aggregate_kind;
+
+    if (out_slot_count) {
+        *out_slot_count = 0u;
+    }
+    if (!external || !out_slot_count || param_index >= external->parameter_count) {
+        return 0;
+    }
+
+    if (!ir_parameter_value_kind_as_aggregate_kind(
+            external->parameter_value_kinds
+                ? external->parameter_value_kinds[param_index]
+                : AST_PARAMETER_VALUE_INT,
+            &aggregate_kind)) {
+        return 0;
+    }
+
+    return ir_aggregate_slot_count_for_kind_and_type_name(
+        ast_program,
+        aggregate_kind,
+        external->parameter_type_names ? external->parameter_type_names[param_index] : NULL,
+        out_slot_count);
+}
+
+static int ir_function_source_parameter_slot_count(const AstProgram *ast_program,
+    const AstExternal *external,
+    size_t param_index,
+    size_t *out_slot_count) {
+    AstDeclarationValueKind aggregate_kind;
+
+    if (out_slot_count) {
+        *out_slot_count = 0u;
+    }
+    if (!external || !out_slot_count || param_index >= external->parameter_count) {
+        return 0;
+    }
+
+    if (ir_parameter_value_kind_as_aggregate_kind(
+            external->parameter_value_kinds
+                ? external->parameter_value_kinds[param_index]
+                : AST_PARAMETER_VALUE_INT,
+            &aggregate_kind)) {
+        return ir_aggregate_slot_count_for_parameter(ast_program, external, param_index, out_slot_count);
+    }
+
+    *out_slot_count = 1u;
+    return 1;
+}
+
+static int ir_function_lowered_parameter_count(const AstProgram *ast_program,
+    const AstExternal *external,
+    size_t *out_parameter_count) {
+    size_t param_index;
+    size_t total = 0u;
+
+    if (out_parameter_count) {
+        *out_parameter_count = 0u;
+    }
+    if (!external || !out_parameter_count) {
+        return 0;
+    }
+
+    for (param_index = 0u; param_index < external->parameter_count; ++param_index) {
+        size_t slot_count = 0u;
+
+        if (!ir_function_source_parameter_slot_count(ast_program, external, param_index, &slot_count)) {
+            return 0;
+        }
+        total += slot_count;
+    }
+
+    *out_parameter_count = total;
+    return 1;
+}
+
+static int ir_function_lowered_return_slot_count(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    size_t *out_slot_count) {
+    AstDeclarationValueKind aggregate_kind;
+
+    if (out_slot_count) {
+        *out_slot_count = 0u;
+    }
+    if (!external || !out_slot_count) {
+        return 0;
+    }
+
+    if (external->has_function_return_signature) {
+        return ir_function_returned_closure_payload_slot_count(ast_program, program, external, out_slot_count);
+    }
+
+    if (!ir_function_return_type_as_aggregate_kind(external, &aggregate_kind)) {
+        return 1;
+    }
+
+    return ir_aggregate_slot_count_for_kind_and_type_name(
+        ast_program,
+        aggregate_kind,
+        external->function_return_type_name,
+        out_slot_count);
+}
+
+static int ir_function_total_lowered_parameter_count(const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    size_t *out_parameter_count) {
+    size_t source_parameter_count = 0u;
+    size_t return_slot_count = 0u;
+
+    if (out_parameter_count) {
+        *out_parameter_count = 0u;
+    }
+    if (!external || !out_parameter_count) {
+        return 0;
+    }
+
+    if (!ir_function_lowered_parameter_count(ast_program, external, &source_parameter_count) ||
+        !ir_function_lowered_return_slot_count(ast_program, program, external, &return_slot_count)) {
+        return 0;
+    }
+
+    *out_parameter_count = source_parameter_count + return_slot_count;
+    return 1;
+}
+
+static size_t ir_function_specialized_hidden_capture_count_for_parameter(
+    const AstExternal *external,
+    size_t param_index,
+    const size_t *bound_function_capture_counts) {
+    if (!external ||
+        param_index >= external->parameter_count ||
+        !external->parameter_value_kinds ||
+        external->parameter_value_kinds[param_index] != AST_PARAMETER_VALUE_FUNCTION ||
+        !bound_function_capture_counts) {
+        return 0u;
+    }
+
+    return bound_function_capture_counts[param_index];
+}
+
+static size_t ir_function_specialized_lowered_parameter_count(
+    const AstProgram *ast_program,
+    const AstExternal *external,
+    const char *const *bound_function_targets,
+    const size_t *bound_function_capture_counts) {
+    size_t param_index;
+    size_t total = 0u;
+    size_t return_slot_count = 0u;
+
+    if (!external) {
+        return 0u;
+    }
+    if (!ir_function_lowered_return_slot_count(ast_program, NULL, external, &return_slot_count)) {
+        return 0u;
+    }
+    total += return_slot_count;
+
+    for (param_index = 0u; param_index < external->parameter_count; ++param_index) {
+        size_t slot_count = 0u;
+
+        if (external->parameter_value_kinds &&
+            external->parameter_value_kinds[param_index] == AST_PARAMETER_VALUE_FUNCTION &&
+            bound_function_targets &&
+            bound_function_targets[param_index] &&
+            bound_function_targets[param_index][0] != '\0') {
+            total += ir_function_specialized_hidden_capture_count_for_parameter(
+                external,
+                param_index,
+                bound_function_capture_counts);
+            continue;
+        }
+
+        if (!ir_function_source_parameter_slot_count(ast_program, external, param_index, &slot_count)) {
+            return 0u;
+        }
+        total += slot_count;
+    }
+
+    return total;
+}
+
+static AstFunctionReturnType ir_lowered_function_return_type(const AstExternal *external) {
+    return external &&
+            external->has_function_return_signature
+        ? AST_FUNCTION_RETURN_VOID
+        : external &&
+            (external->function_return_type == AST_FUNCTION_RETURN_PAIR ||
+                external->function_return_type == AST_FUNCTION_RETURN_STRUCT)
+        ? AST_FUNCTION_RETURN_VOID
+        : (external ? external->function_return_type : AST_FUNCTION_RETURN_INT);
+}
+
+static int ir_function_parameter_count_matches_external(const AstProgram *ast_program,
+    IrProgram *program,
+    const IrFunction *function,
+    const AstExternal *external) {
+    size_t lowered_parameter_count = 0u;
+
+    return function &&
+        external &&
+        ir_function_total_lowered_parameter_count(ast_program, program, external, &lowered_parameter_count) &&
+        function->parameter_count == lowered_parameter_count;
 }
 
 static int ir_apply_array_rank_to_local(IrFunction *function,
@@ -727,12 +2741,14 @@ static int ir_eval_global_initializer_expr(const IrProgram *program,
     }
 }
 
-static int ir_ensure_function_signature(IrProgram *program,
+static int ir_ensure_function_signature(const AstProgram *ast_program,
+    IrProgram *program,
     const AstExternal *external,
     IrFunction **out_function,
     IrError *error) {
     IrFunction *function;
-    size_t i;
+    size_t param_index;
+    size_t physical_param_index = 0u;
 
     if (!program || !external || !external->name || external->name[0] == '\0') {
         ir_set_error(error, 0, 0, "IR-INT-058: invalid function signature lowering contract");
@@ -744,34 +2760,76 @@ static int ir_ensure_function_signature(IrProgram *program,
             return 0;
         }
     }
-    function->return_type = external->function_return_type;
+    function->return_type = ir_lowered_function_return_type(external);
 
     if (function->local_count == 0 && function->parameter_count == 0 &&
-        external->parameter_count > 0) {
-        for (i = 0; i < external->parameter_count; ++i) {
+        (external->parameter_count > 0 ||
+            external->has_function_return_signature ||
+            external->function_return_type == AST_FUNCTION_RETURN_PAIR ||
+            external->function_return_type == AST_FUNCTION_RETURN_STRUCT)) {
+        size_t return_slot_count = 0u;
+        size_t return_slot_index;
+
+        if (!ir_function_lowered_return_slot_count(ast_program, program, external, &return_slot_count)) {
+            ir_set_error(error,
+                external->line,
+                external->column,
+                "IR-LOWER-020: function '%s' return lowering shape is unsupported",
+                external->name);
+            return 0;
+        }
+        for (return_slot_index = 0u; return_slot_index < return_slot_count; ++return_slot_index) {
+            char hidden_name[32];
+
+            snprintf(hidden_name, sizeof(hidden_name), "__ret%zu", return_slot_index);
+            if (!ir_function_append_local(function, hidden_name, 1, NULL, error)) {
+                return 0;
+            }
+            function->locals[return_slot_index].value_type =
+                external->function_return_type == AST_FUNCTION_RETURN_FLOAT
+                    ? AST_FUNCTION_RETURN_FLOAT
+                    : AST_FUNCTION_RETURN_INT;
+        }
+
+        for (param_index = 0u; param_index < external->parameter_count; ++param_index) {
             const char *parameter_name =
-                (external->parameter_names && external->parameter_names[i] &&
-                    external->parameter_names[i][0] != '\0')
-                ? external->parameter_names[i]
+                (external->parameter_names && external->parameter_names[param_index] &&
+                    external->parameter_names[param_index][0] != '\0')
+                ? external->parameter_names[param_index]
                 : NULL;
+            size_t slot_count = 1u;
+            size_t slot_index;
             char fallback_name[32];
 
             if (!parameter_name) {
-                snprintf(fallback_name, sizeof(fallback_name), "param%zu", i);
+                snprintf(fallback_name, sizeof(fallback_name), "param%zu", param_index);
                 parameter_name = fallback_name;
             }
 
-            if (!ir_function_append_local(function, parameter_name, 1, NULL, error)) {
+            if (!ir_function_source_parameter_slot_count(ast_program, external, param_index, &slot_count)) {
+                ir_set_error(error,
+                    external->line,
+                    external->column,
+                    "IR-LOWER-020: function '%s' parameter lowering shape is unsupported",
+                    external->name);
                 return 0;
             }
-            function->locals[i].value_type = ir_scalar_parameter_value_kind_to_return_type(
+
+            for (slot_index = 0u; slot_index < slot_count; ++slot_index) {
+                if (!ir_function_append_local(function, parameter_name, 1, NULL, error)) {
+                    return 0;
+                }
+                function->locals[return_slot_count + physical_param_index].value_type =
+                    ir_scalar_parameter_value_kind_to_return_type(
                 external->parameter_value_kinds
-                    ? external->parameter_value_kinds[i]
+                    ? external->parameter_value_kinds[param_index]
                     : AST_PARAMETER_VALUE_INT);
+                physical_param_index++;
+            }
         }
     }
 
-    if (!ir_function_parameter_count_matches_external(function, external)) {
+    if (!ir_function_parameter_count_matches_external(ast_program, program, function, external)) {
         ir_set_error(error,
             external->line,
             external->column,
@@ -780,22 +2838,51 @@ static int ir_ensure_function_signature(IrProgram *program,
         return 0;
     }
 
-    for (i = 0; i < external->parameter_count; ++i) {
-        const char *parameter_name =
-            external->parameter_names ? external->parameter_names[i] : NULL;
+    {
+        size_t return_slot_count = 0u;
 
-        if (!ir_function_set_parameter_name(function, i, parameter_name, error)) {
+        if (!ir_function_lowered_return_slot_count(ast_program, program, external, &return_slot_count)) {
+            ir_set_error(error,
+                external->line,
+                external->column,
+                "IR-LOWER-020: function '%s' return lowering shape is unsupported",
+                external->name);
             return 0;
         }
-        if (function->locals && i < function->local_count) {
-            function->locals[i].value_type = ir_scalar_parameter_value_kind_to_return_type(
-                external->parameter_value_kinds
-                    ? external->parameter_value_kinds[i]
-                    : AST_PARAMETER_VALUE_INT);
-        }
-        if (external->parameter_array_ranks &&
-            !ir_apply_array_rank_to_local(function, i, external->parameter_array_ranks[i], error)) {
+        physical_param_index = return_slot_count;
+    }
+    for (param_index = 0u; param_index < external->parameter_count; ++param_index) {
+        const char *parameter_name = external->parameter_names ? external->parameter_names[param_index] : NULL;
+        size_t slot_count = 1u;
+        size_t slot_index;
+
+        if (!ir_function_source_parameter_slot_count(ast_program, external, param_index, &slot_count)) {
+            ir_set_error(error,
+                external->line,
+                external->column,
+                "IR-LOWER-020: function '%s' parameter lowering shape is unsupported",
+                external->name);
             return 0;
+        }
+
+        for (slot_index = 0u; slot_index < slot_count; ++slot_index) {
+            if (!ir_function_set_parameter_name(function, physical_param_index, parameter_name, error)) {
+                return 0;
+            }
+            if (function->locals && physical_param_index < function->local_count) {
+                function->locals[physical_param_index].value_type = ir_scalar_parameter_value_kind_to_return_type(
+                    external->parameter_value_kinds
+                        ? external->parameter_value_kinds[param_index]
+                        : AST_PARAMETER_VALUE_INT);
+            }
+            if (slot_index == 0u && external->parameter_array_ranks &&
+                !ir_apply_array_rank_to_local(function,
+                    physical_param_index,
+                    external->parameter_array_ranks[param_index],
+                    error)) {
+                return 0;
+            }
+            physical_param_index++;
         }
     }
 
@@ -1356,7 +3443,7 @@ static int ir_lower_function(const AstProgram *ast_program,
             external->name);
         return 0;
     }
-    return ir_lower_function_core(ast_program, program, NULL, options, external, NULL, error);
+    return ir_lower_function_core(ast_program, program, NULL, options, external, NULL, NULL, NULL, error);
 }
 
 static int ir_external_body_has_function_parameter_callee_calls(const AstExternal *external,
@@ -1445,6 +3532,24 @@ static int ir_external_body_needs_function_value_specialization(const AstProgram
 
     if (ir_external_body_has_function_parameter_callee_calls(current_external, stmt)) {
         return 1;
+    }
+    if (stmt->kind == AST_STMT_RETURN &&
+        current_external &&
+        current_external->has_function_return_signature &&
+        stmt->expression_count > 0u &&
+        stmt->expressions) {
+        const AstExpression *return_expr =
+            ir_unwrap_function_value_wrapper_expression(stmt->expressions[0]);
+        if (return_expr &&
+            return_expr->kind == AST_EXPR_IDENTIFIER &&
+            return_expr->as.identifier.name &&
+            ir_function_parameter_name_is_compatible_function_value(
+                current_external,
+                return_expr->as.identifier.name,
+                current_external->function_return_function_return_type,
+                current_external->function_return_function_parameter_count)) {
+            return 1;
+        }
     }
 
     for (expr_index = 0u; expr_index < stmt->expression_count; ++expr_index) {
@@ -1895,6 +4000,8 @@ static int ir_lower_function_core(const AstProgram *ast_program,
     const IrLowerOptions *options,
     const AstExternal *external,
     const char *const *bound_function_targets,
+    const size_t *const *bound_function_capture_local_ids,
+    const size_t *bound_function_capture_counts,
     IrError *error) {
     IrFunction *function;
     IrLowerContext ctx;
@@ -1911,7 +4018,7 @@ static int ir_lower_function_core(const AstProgram *ast_program,
 
     function = existing_function;
     if (!function) {
-        if (!ir_ensure_function_signature(program, external, &function, error)) {
+        if (!ir_ensure_function_signature(ast_program, program, external, &function, error)) {
             return 0;
         }
     }
@@ -1949,6 +4056,13 @@ static int ir_lower_function_core(const AstProgram *ast_program,
     ctx.ast_program = ast_program;
     ctx.function = function;
     ctx.function_return_type = external->function_return_type;
+    ctx.hidden_return_aggregate_kind = AST_DECLARATION_VALUE_INT;
+    ctx.hidden_return_type_name = external->function_return_type_name;
+    ctx.hidden_return_first_local_id = 0u;
+    ctx.hidden_return_slot_count = 0u;
+    ctx.has_function_value_return_payload = external->has_function_return_signature ? 1 : 0;
+    ctx.function_value_return_is_closure_family = 0;
+    ctx.function_value_return_target_name = NULL;
     ctx.allow_implicit_fallthrough_return =
         options && options->allow_implicit_fallthrough_return ? 1 : 0;
     ctx.block_id = 0;
@@ -1958,6 +4072,8 @@ static int ir_lower_function_core(const AstProgram *ast_program,
         ? (const char **)external->parameter_names
         : NULL;
     ctx.function_value_parameter_targets = bound_function_targets;
+    ctx.function_value_parameter_capture_local_ids = bound_function_capture_local_ids;
+    ctx.function_value_parameter_capture_counts = bound_function_capture_counts;
     ctx.function_value_parameter_count = external->parameter_count;
 
     if (!ir_lower_scope_stack_push(&ctx.scopes)) {
@@ -1969,61 +4085,205 @@ static int ir_lower_function_core(const AstProgram *ast_program,
     }
     scope_pushed = 1;
 
-    for (i = 0; i < function->parameter_count; ++i) {
-        const char *parameter_name = function->locals[i].source_name;
-        size_t parameter_array_rank = (external->parameter_array_ranks && i < external->parameter_count)
-            ? external->parameter_array_ranks[i]
-            : 0u;
-        int parameter_is_const = (external->parameter_is_const && i < external->parameter_count)
-            ? external->parameter_is_const[i]
-            : 0;
-        size_t *parameter_array_extents = NULL;
-        size_t ignored_element_count = 0u;
+    {
+        size_t physical_cursor = 0u;
 
-        if (!parameter_name || parameter_name[0] == '\0') {
+        if (!ir_function_lowered_return_slot_count(ast_program, program, external, &ctx.hidden_return_slot_count)) {
             ir_set_error(error,
                 external->line,
                 external->column,
-                "IR-INT-066: function '%s' parameter slot %zu has no source name",
-                external->name,
-                i);
+                "IR-LOWER-020: function '%s' return lowering shape is unsupported",
+                external->name);
             goto cleanup;
         }
-
-        if (parameter_array_rank > 0u &&
-            !ir_compute_array_extents(&ctx,
-                external->parameter_array_extent_exprs
-                    ? external->parameter_array_extent_exprs[i]
-                    : NULL,
-                parameter_array_rank,
-                1,
-                &parameter_array_extents,
-                &ignored_element_count)) {
+        if (ctx.has_function_value_return_payload &&
+            !ir_function_value_return_is_closure_family(
+                ast_program,
+                external,
+                &ctx.function_value_return_is_closure_family)) {
             goto cleanup;
         }
+        if (ctx.has_function_value_return_payload &&
+            !ir_resolve_function_value_return_target_name(
+                ast_program,
+                program,
+                external,
+                &ctx.function_value_return_target_name,
+                error)) {
+            goto cleanup;
+        }
+        if (ctx.hidden_return_slot_count > 0u) {
+            ctx.hidden_return_first_local_id = 0u;
+            (void)ir_function_return_type_as_aggregate_kind(external, &ctx.hidden_return_aggregate_kind);
+            physical_cursor = ctx.hidden_return_slot_count;
+        }
 
-        if (!ir_lower_scope_add_binding_with_metadata(&ctx.scopes,
-                parameter_name,
-                i,
-                parameter_array_rank > 0u
-                    ? IR_LOWER_BINDING_ARRAY_PARAMETER
-                    : IR_LOWER_BINDING_SCALAR_LOCAL,
-                parameter_array_rank,
-                parameter_array_extents,
-                0u,
-                NULL,
-                parameter_is_const,
-                0,
-                0)) {
+        for (i = 0u; i < external->parameter_count; ++i) {
+            const char *parameter_name =
+                external->parameter_names && external->parameter_names[i] &&
+                    external->parameter_names[i][0] != '\0'
+                    ? external->parameter_names[i]
+                    : ((function->locals && physical_cursor < function->local_count)
+                        ? function->locals[physical_cursor].source_name
+                        : NULL);
+            size_t parameter_array_rank =
+                external->parameter_array_ranks ? external->parameter_array_ranks[i] : 0u;
+            int parameter_is_const =
+                external->parameter_is_const ? external->parameter_is_const[i] : 0;
+            size_t *parameter_array_extents = NULL;
+            size_t ignored_element_count = 0u;
+            size_t parameter_slot_count = 1u;
+            AstDeclarationValueKind aggregate_kind = AST_DECLARATION_VALUE_INT;
+
+            if (!ir_function_source_parameter_slot_count(ast_program, external, i, &parameter_slot_count)) {
+                ir_set_error(error,
+                    external->line,
+                    external->column,
+                    "IR-LOWER-020: function '%s' parameter lowering shape is unsupported",
+                    external->name);
+                goto cleanup;
+            }
+            if (!parameter_name || parameter_name[0] == '\0') {
+                ir_set_error(error,
+                    external->line,
+                    external->column,
+                    "IR-INT-066: function '%s' parameter slot %zu has no source name",
+                    external->name,
+                    i);
+                goto cleanup;
+            }
+
+            if (parameter_array_rank > 0u &&
+                !ir_compute_array_extents(&ctx,
+                    external->parameter_array_extent_exprs
+                        ? external->parameter_array_extent_exprs[i]
+                        : NULL,
+                    parameter_array_rank,
+                    1,
+                    &parameter_array_extents,
+                    &ignored_element_count)) {
+                goto cleanup;
+            }
+
+            if (ir_parameter_value_kind_as_aggregate_kind(
+                    external->parameter_value_kinds
+                        ? external->parameter_value_kinds[i]
+                        : AST_PARAMETER_VALUE_INT,
+                    &aggregate_kind)) {
+                if (!ir_lower_scope_add_binding_with_metadata(&ctx.scopes,
+                        parameter_name,
+                        physical_cursor,
+                        aggregate_kind == AST_DECLARATION_VALUE_PAIR
+                            ? IR_LOWER_BINDING_PAIR_LOCAL
+                            : IR_LOWER_BINDING_STRUCT_LOCAL,
+                        0u,
+                        NULL,
+                        parameter_slot_count > 1u ? physical_cursor + 1u : physical_cursor,
+                        parameter_slot_count,
+                        aggregate_kind == AST_DECLARATION_VALUE_STRUCT &&
+                                external->parameter_type_names
+                            ? external->parameter_type_names[i]
+                            : NULL,
+                        0u,
+                        NULL,
+                        0u,
+                        parameter_is_const,
+                        0,
+                        0,
+                        0)) {
+                    ir_set_error(error,
+                        external->line,
+                        external->column,
+                        "IR-INT-067: failed to bind parameter '%s' during function lowering",
+                        parameter_name);
+                    goto cleanup;
+                }
+            } else if (external->parameter_value_kinds &&
+                    external->parameter_value_kinds[i] == AST_PARAMETER_VALUE_FUNCTION &&
+                    bound_function_targets &&
+                    bound_function_targets[i] &&
+                    bound_function_targets[i][0] != '\0') {
+                size_t capture_count =
+                    bound_function_capture_counts ? bound_function_capture_counts[i] : 0u;
+                size_t *specialized_capture_local_ids = NULL;
+                size_t capture_index;
+
+                if (capture_count > 0u) {
+                    specialized_capture_local_ids =
+                        (size_t *)malloc(capture_count * sizeof(size_t));
+                    if (!specialized_capture_local_ids) {
+                        free(parameter_array_extents);
+                        ir_set_error(error,
+                            external->line,
+                            external->column,
+                            "IR-INT-067: out of memory while binding closure captures for specialized parameter '%s'",
+                            parameter_name ? parameter_name : "<unnamed>");
+                        goto cleanup;
+                    }
+                    for (capture_index = 0u; capture_index < capture_count; ++capture_index) {
+                        specialized_capture_local_ids[capture_index] = physical_cursor + capture_index;
+                    }
+                }
+                if (!ir_lower_scope_add_binding_with_metadata(&ctx.scopes,
+                        parameter_name,
+                        (size_t)-1,
+                        capture_count > 0u
+                            ? IR_LOWER_BINDING_CLOSURE_LOCAL
+                            : IR_LOWER_BINDING_FUNCTION_LOCAL,
+                        0u,
+                        NULL,
+                        0u,
+                        0u,
+                        bound_function_targets[i],
+                        capture_count,
+                        specialized_capture_local_ids,
+                        (size_t)-1,
+                        parameter_is_const,
+                        0,
+                        0,
+                        0)) {
+                    free(specialized_capture_local_ids);
+                    ir_set_error(error,
+                        external->line,
+                        external->column,
+                        "IR-INT-067: failed to bind specialized function-value parameter '%s' during function lowering",
+                        parameter_name);
+                    goto cleanup;
+                }
+                free(specialized_capture_local_ids);
+                free(parameter_array_extents);
+                physical_cursor += capture_count;
+                continue;
+            } else if (!ir_lower_scope_add_binding_with_metadata(&ctx.scopes,
+                    parameter_name,
+                    physical_cursor,
+                    parameter_array_rank > 0u
+                        ? IR_LOWER_BINDING_ARRAY_PARAMETER
+                        : IR_LOWER_BINDING_SCALAR_LOCAL,
+                    parameter_array_rank,
+                    parameter_array_extents,
+                    0u,
+                    0u,
+                    NULL,
+                    0u,
+                    NULL,
+                    0u,
+                    parameter_is_const,
+                    0,
+                    0,
+                    0)) {
+                free(parameter_array_extents);
+                ir_set_error(error,
+                    external->line,
+                    external->column,
+                    "IR-INT-067: failed to bind parameter '%s' during function lowering",
+                    parameter_name);
+                goto cleanup;
+            }
+
             free(parameter_array_extents);
-            ir_set_error(error,
-                external->line,
-                external->column,
-                "IR-INT-067: failed to bind parameter '%s' during function lowering",
-                parameter_name);
-            goto cleanup;
+            physical_cursor += parameter_slot_count;
         }
-        free(parameter_array_extents);
     }
 
     if (external->function_body) {
@@ -2034,6 +4294,13 @@ static int ir_lower_function_core(const AstProgram *ast_program,
                 &ctx.fndefer_site_count,
                 &fndefer_site_capacity,
                 error)) {
+            if (error && error->message[0] == '\0') {
+                ir_set_error(error,
+                    external->line,
+                    external->column,
+                    "IR-INT-115: function '%s' failed while collecting function-exit defer sites",
+                    external->name);
+            }
             goto cleanup;
         }
         if (ctx.fndefer_site_count > 0u) {
@@ -2056,6 +4323,14 @@ static int ir_lower_function_core(const AstProgram *ast_program,
                         &ctx.function_defer_entries,
                         ctx.fndefer_sites[i]->children[0],
                         counter_local_id)) {
+                    if (error && error->message[0] == '\0') {
+                        ir_set_error(error,
+                            external->line,
+                            external->column,
+                            "IR-INT-116: function '%s' failed while preparing function-exit defer counter %zu",
+                            external->name,
+                            i);
+                    }
                     goto cleanup;
                 }
                 ctx.fndefer_counter_local_ids[i] = counter_local_id;
@@ -2064,6 +4339,13 @@ static int ir_lower_function_core(const AstProgram *ast_program,
     }
 
     if (!ir_lower_statement(&ctx, external->function_body)) {
+        if (error && error->message[0] == '\0') {
+            ir_set_error(error,
+                external->function_body ? external->function_body->line : external->line,
+                external->function_body ? external->function_body->column : external->column,
+                "IR-INT-117: function '%s' failed while lowering function body statement tree",
+                external->name);
+        }
         goto cleanup;
     }
 
@@ -2081,22 +4363,79 @@ static int ir_lower_function_core(const AstProgram *ast_program,
     }
 
     if (ctx.has_block && !ir_lower_current_block(&ctx)) {
+        if (error && error->message[0] == '\0') {
+            ir_set_error(error,
+                external->line,
+                external->column,
+                "IR-INT-123: function '%s' lost its current basic block after body lowering",
+                external->name);
+        }
         goto cleanup;
     }
 
     if (ctx.has_block && !ir_lower_current_block(&ctx)->has_terminator) {
         if (!ir_lower_emit_function_defer_entries(&ctx)) {
+            if (error && error->message[0] == '\0') {
+                ir_set_error(error,
+                    external->line,
+                    external->column,
+                    "IR-INT-118: function '%s' failed while emitting function-exit defer entries",
+                    external->name);
+            }
             goto cleanup;
         }
     }
 
     if (ctx.has_block && !ir_lower_current_block(&ctx)->has_terminator) {
-        if (external->function_return_type == AST_FUNCTION_RETURN_VOID) {
+        if (ctx.hidden_return_slot_count > 0u && ctx.allow_implicit_fallthrough_return) {
+            size_t slot_index;
+
+            for (slot_index = 0u; slot_index < ctx.hidden_return_slot_count; ++slot_index) {
+                if (!ir_emit_store_indirect(
+                        &ctx,
+                        ir_value_local(ctx.hidden_return_first_local_id + slot_index),
+                        ir_value_immediate(0))) {
+                    if (error && error->message[0] == '\0') {
+                        ir_set_error(error,
+                            external->line,
+                            external->column,
+                            "IR-INT-119: function '%s' failed while materializing implicit aggregate zero return slot %zu",
+                            external->name,
+                            slot_index);
+                    }
+                    goto cleanup;
+                }
+            }
             if (!ir_block_set_void_return(ir_lower_current_block(&ctx), error)) {
+                if (error && error->message[0] == '\0') {
+                    ir_set_error(error,
+                        external->line,
+                        external->column,
+                        "IR-INT-120: function '%s' failed while emitting implicit aggregate void return terminator",
+                        external->name);
+                }
+                goto cleanup;
+            }
+        } else if (external->function_return_type == AST_FUNCTION_RETURN_VOID) {
+            if (!ir_block_set_void_return(ir_lower_current_block(&ctx), error)) {
+                if (error && error->message[0] == '\0') {
+                    ir_set_error(error,
+                        external->line,
+                        external->column,
+                        "IR-INT-121: function '%s' failed while emitting implicit void return terminator",
+                        external->name);
+                }
                 goto cleanup;
             }
         } else if (ctx.allow_implicit_fallthrough_return) {
             if (!ir_block_set_return(ir_lower_current_block(&ctx), ir_value_immediate(0), error)) {
+                if (error && error->message[0] == '\0') {
+                    ir_set_error(error,
+                        external->line,
+                        external->column,
+                        "IR-INT-122: function '%s' failed while emitting implicit scalar zero return terminator",
+                        external->name);
+                }
                 goto cleanup;
             }
         } else {
@@ -2113,6 +4452,13 @@ static int ir_lower_function_core(const AstProgram *ast_program,
     ok = 1;
 
 cleanup:
+    if (!ok && error && error->message[0] == '\0') {
+        ir_set_error(error,
+            external->line,
+            external->column,
+            "IR-INT-090: function '%s' lowering failed without a specific diagnostic",
+            external->name ? external->name : "<anon>");
+    }
     if (scope_pushed) {
         ir_lower_scope_stack_pop(&ctx.scopes);
     }
@@ -2123,6 +4469,9 @@ cleanup:
     ir_lower_function_defer_entry_stack_free(&ctx.function_defer_entries);
     free((void *)ctx.fndefer_sites);
     free(ctx.fndefer_counter_local_ids);
+    ir_lower_function_value_target_sets_free(
+        ctx.function_value_target_sets,
+        ctx.function_value_target_set_count);
     return ok;
 }
 
@@ -2178,12 +4527,158 @@ static int ir_build_function_value_specialized_name(const AstExternal *external,
     return 1;
 }
 
+static int ir_build_closure_helper_name(const char *enclosing_function_name,
+    const char *local_name,
+    size_t closure_ordinal,
+    char **out_name,
+    IrError *error) {
+    size_t needed = 0u;
+    char *name = NULL;
+
+    if (out_name) {
+        *out_name = NULL;
+    }
+    if (!enclosing_function_name || enclosing_function_name[0] == '\0' ||
+        !local_name || local_name[0] == '\0' || !out_name) {
+        ir_set_error(error, 0, 0, "IR-INT-084: invalid closure helper naming contract");
+        return 0;
+    }
+
+    needed = strlen(enclosing_function_name) + strlen(local_name) + 32u;
+    name = (char *)malloc(needed);
+    if (!name) {
+        ir_set_error(error, 0, 0, "IR-INT-085: out of memory while naming closure helper");
+        return 0;
+    }
+
+    snprintf(name,
+        needed,
+        "%s__closure_%s_%zu",
+        enclosing_function_name,
+        local_name,
+        closure_ordinal);
+    *out_name = name;
+    return 1;
+}
+
+static int ir_lower_closure_helper_function(IrLowerContext *ctx,
+    const AstStatement *decl_stmt,
+    size_t declaration_index,
+    const char *helper_name,
+    const char *const *capture_names,
+    const size_t *capture_local_ids,
+    size_t capture_count,
+    IrError *error) {
+    const AstExpression *initializer_expr = NULL;
+    const AstExpression *closure_expr = NULL;
+    AstExternal synthetic_external;
+    IrFunction *function = NULL;
+    char **parameter_names = NULL;
+    int *parameter_value_kinds = NULL;
+    int *parameter_name_lines = NULL;
+    int *parameter_name_columns = NULL;
+    size_t parameter_count = 0u;
+    size_t parameter_index = 0u;
+    int ok = 0;
+
+    if (!ctx || !ctx->ast_program || !ctx->program || !ctx->function ||
+        !decl_stmt || !helper_name || helper_name[0] == '\0' ||
+        declaration_index >= decl_stmt->declaration_name_count ||
+        !decl_stmt->expressions || declaration_index >= decl_stmt->expression_count) {
+        ir_set_error(error, 0, 0, "IR-INT-086: invalid closure helper lowering contract");
+        return 0;
+    }
+
+    initializer_expr = decl_stmt->expressions[declaration_index];
+    closure_expr = ir_unwrap_paren_expression(initializer_expr);
+    if (!closure_expr || closure_expr->kind != AST_EXPR_CLOSURE) {
+        ir_set_error(error, decl_stmt->line, decl_stmt->column,
+            "IR-INT-087: closure helper lowering requires a closure initializer expression");
+        return 0;
+    }
+
+    parameter_count = capture_count + closure_expr->as.closure.parameter_count;
+    if (parameter_count > 0u) {
+        parameter_names = (char **)calloc(parameter_count, sizeof(char *));
+        parameter_value_kinds = (int *)calloc(parameter_count, sizeof(int));
+        parameter_name_lines = (int *)calloc(parameter_count, sizeof(int));
+        parameter_name_columns = (int *)calloc(parameter_count, sizeof(int));
+        if (!parameter_names || !parameter_value_kinds || !parameter_name_lines || !parameter_name_columns) {
+            ir_set_error(error, decl_stmt->line, decl_stmt->column,
+                "IR-INT-088: out of memory while building closure helper signature");
+            goto cleanup;
+        }
+    }
+
+    for (parameter_index = 0u; parameter_index < capture_count; ++parameter_index) {
+        parameter_names[parameter_index] = (char *)(capture_names ? capture_names[parameter_index] : NULL);
+        parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_INT;
+        parameter_name_lines[parameter_index] = closure_expr->line;
+        parameter_name_columns[parameter_index] = closure_expr->column;
+    }
+    for (parameter_index = 0u; parameter_index < closure_expr->as.closure.parameter_count; ++parameter_index) {
+        size_t dest_index = capture_count + parameter_index;
+
+        parameter_names[dest_index] =
+            closure_expr->as.closure.parameter_names
+                ? closure_expr->as.closure.parameter_names[parameter_index]
+                : NULL;
+        parameter_value_kinds[dest_index] =
+            closure_expr->as.closure.parameter_value_kinds
+                ? closure_expr->as.closure.parameter_value_kinds[parameter_index]
+                : AST_PARAMETER_VALUE_INT;
+        parameter_name_lines[dest_index] = closure_expr->line;
+        parameter_name_columns[dest_index] = closure_expr->column;
+    }
+
+    memset(&synthetic_external, 0, sizeof(synthetic_external));
+    synthetic_external.kind = AST_EXTERNAL_FUNCTION;
+    synthetic_external.function_return_type = closure_expr->as.closure.return_type;
+    synthetic_external.name = (char *)helper_name;
+    synthetic_external.name_length = strlen(helper_name);
+    synthetic_external.parameter_count = parameter_count;
+    synthetic_external.parameter_names = parameter_names;
+    synthetic_external.parameter_value_kinds = parameter_value_kinds;
+    synthetic_external.parameter_name_lines = parameter_name_lines;
+    synthetic_external.parameter_name_columns = parameter_name_columns;
+    synthetic_external.is_function_definition = 1;
+    synthetic_external.function_body = closure_expr->as.closure.body;
+    synthetic_external.line = closure_expr->line;
+    synthetic_external.column = closure_expr->column;
+
+    function = ir_program_find_function_mut(ctx->program, helper_name);
+    if (function && function->has_body) {
+        ok = 1;
+        goto cleanup;
+    }
+    ok = ir_lower_function_core(
+        ctx->ast_program,
+        ctx->program,
+        NULL,
+        NULL,
+        &synthetic_external,
+        NULL,
+        NULL,
+        NULL,
+        error);
+    (void)capture_local_ids;
+
+cleanup:
+    free(parameter_names);
+    free(parameter_value_kinds);
+    free(parameter_name_lines);
+    free(parameter_name_columns);
+    return ok;
+}
+
 static int ir_lower_specialized_function_for_function_value_call(
     const AstProgram *ast_program,
     IrProgram *program,
     const IrLowerOptions *options,
     const AstExternal *external,
     const char *const *bound_function_targets,
+    const size_t *const *bound_function_capture_local_ids,
+    const size_t *bound_function_capture_counts,
     const char **out_specialized_name,
     IrError *error) {
     char *specialized_name = NULL;
@@ -2215,25 +4710,80 @@ static int ir_lower_specialized_function_for_function_value_call(
         free(specialized_name);
         return 0;
     }
-    function->return_type = external->function_return_type;
+    function->return_type = ir_lowered_function_return_type(external);
 
     {
+        size_t return_slot_count = 0u;
+        size_t return_slot_index;
         size_t param_index;
-        for (param_index = 0u; param_index < external->parameter_count; ++param_index) {
-            if (!ir_function_append_local(function,
-                    external->parameter_names && external->parameter_names[param_index]
-                        ? external->parameter_names[param_index]
-                        : "param",
-                    1,
-                    NULL,
-                    error)) {
+        size_t capture_param_index = 0u;
+
+        if (!ir_function_lowered_return_slot_count(ast_program, program, external, &return_slot_count)) {
+            free(specialized_name);
+            return 0;
+        }
+        for (return_slot_index = 0u; return_slot_index < return_slot_count; ++return_slot_index) {
+            char hidden_name[32];
+
+            snprintf(hidden_name, sizeof(hidden_name), "__ret%zu", return_slot_index);
+            if (!ir_function_append_local(function, hidden_name, 1, NULL, error)) {
                 free(specialized_name);
                 return 0;
+            }
+            function->locals[return_slot_index].value_type =
+                external->function_return_type == AST_FUNCTION_RETURN_FLOAT
+                    ? AST_FUNCTION_RETURN_FLOAT
+                    : AST_FUNCTION_RETURN_INT;
+        }
+        for (param_index = 0u; param_index < external->parameter_count; ++param_index) {
+            size_t hidden_capture_count =
+                ir_function_specialized_hidden_capture_count_for_parameter(
+                    external,
+                    param_index,
+                    bound_function_capture_counts);
+            size_t capture_index;
+
+            for (capture_index = 0u; capture_index < hidden_capture_count; ++capture_index) {
+                char hidden_name[64];
+
+                snprintf(hidden_name,
+                    sizeof(hidden_name),
+                    "__cap_%zu_%zu",
+                    param_index,
+                    capture_param_index + capture_index);
+                if (!ir_function_append_local(function, hidden_name, 1, NULL, error)) {
+                    free(specialized_name);
+                    return 0;
+                }
+            }
+            capture_param_index += hidden_capture_count;
+
+            if (!(external->parameter_value_kinds &&
+                    external->parameter_value_kinds[param_index] == AST_PARAMETER_VALUE_FUNCTION)) {
+                if (!ir_function_append_local(function,
+                        external->parameter_names && external->parameter_names[param_index]
+                            ? external->parameter_names[param_index]
+                            : "param",
+                        1,
+                        NULL,
+                        error)) {
+                    free(specialized_name);
+                    return 0;
+                }
             }
         }
     }
 
-    ok = ir_lower_function_core(ast_program, program, function, options, external, bound_function_targets, error);
+    ok = ir_lower_function_core(
+        ast_program,
+        program,
+        function,
+        options,
+        external,
+        bound_function_targets,
+        bound_function_capture_local_ids,
+        bound_function_capture_counts,
+        error);
     if (!ok) {
         free(specialized_name);
         return 0;
@@ -2304,7 +4854,7 @@ int ir_lower_program(const AstProgram *ast_program,
             return 0;
         }
 
-        if (!ir_ensure_function_signature(out_program, external, NULL, error)) {
+        if (!ir_ensure_function_signature(ast_program, out_program, external, NULL, error)) {
             return 0;
         }
         if (external->is_function_definition &&

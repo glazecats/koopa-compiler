@@ -236,6 +236,17 @@ int value_ssa_dump_program(const ValueSsaProgram *program, char **out_text) {
                         return 0;
                     }
                     break;
+                case VALUE_SSA_INSTR_ADDR_FUNCTION:
+                    if (!value_ssa_append_value_name(&builder, instruction->result) ||
+                        !value_ssa_append_format(&builder,
+                            " = addr_function %s\n",
+                            instruction->as.addr_function_name
+                                ? instruction->as.addr_function_name
+                                : "<anon>")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    break;
                 case VALUE_SSA_INSTR_ADDR_LOCAL:
                 case VALUE_SSA_INSTR_ADDR_GLOBAL:
                     if (!value_ssa_append_value_name(&builder, instruction->result) ||

@@ -400,6 +400,81 @@ static int test_machine_encode_bridge_from_machine_ir(void) {
     return ok;
 }
 
+static int test_machine_encode_lowers_addr_function_from_machine_ir(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *callee = NULL;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineEncodeProgram encode_program;
+    MachineEncodeError encode_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&encode_error, 0, sizeof(encode_error));
+    machine_ir_program_init(&machine_program);
+    machine_encode_program_init(&encode_program);
+
+    machine_program.register_bank.register_count = 1;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_program, "callee", 0, &callee, &machine_error) ||
+        !machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_encode_program_free(&encode_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_FUNCTION;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.addr_function_name = dup_text("callee");
+    if (!instruction.as.addr_function_name) {
+        machine_ir_program_free(&machine_program);
+        machine_encode_program_free(&encode_program);
+        return 0;
+    }
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_register(0), &machine_error) ||
+        !machine_encode_lower_program_from_machine_ir(&machine_program, &encode_program, &encode_error)) {
+        free(instruction.as.addr_function_name);
+        machine_ir_program_free(&machine_program);
+        machine_encode_program_free(&encode_program);
+        return 0;
+    }
+    free(instruction.as.addr_function_name);
+
+    if (!machine_encode_verify_program(&encode_program, &encode_error)) {
+        fprintf(stderr,
+            "[machine-encode] FAIL: callable-object code projection verify failed: %s\n",
+            encode_error.message);
+        ok = 0;
+    }
+    if (encode_program.function_count < 2 ||
+        encode_program.functions[1].block_count != 1 ||
+        encode_program.functions[1].blocks[0].block.op_count != 1 ||
+        encode_program.functions[1].blocks[0].block.ops[0].kind != MACHINE_SELECT_OP_ADDR_FUNCTION ||
+        !encode_program.functions[1].blocks[0].block.ops[0].as.addr_function_name ||
+        strcmp(encode_program.functions[1].blocks[0].block.ops[0].as.addr_function_name, "callee") != 0) {
+        fprintf(stderr,
+            "[machine-encode] FAIL: callable-object code projection encode artifact mismatch\n");
+        ok = 0;
+    }
+
+    machine_ir_program_free(&machine_program);
+    machine_encode_program_free(&encode_program);
+    return ok;
+}
+
 static int test_machine_encode_structured_terminator_targets(void) {
     MachineEmitProgram emit_program;
     MachineEncodeProgram encode_program;
@@ -1580,6 +1655,7 @@ int main(void) {
 
     ok &= test_machine_encode_lowers_offsets_from_machine_emit();
     ok &= test_machine_encode_bridge_from_machine_ir();
+    ok &= test_machine_encode_lowers_addr_function_from_machine_ir();
     ok &= test_machine_encode_structured_terminator_targets();
     ok &= test_machine_encode_report_surface();
     ok &= test_machine_encode_clone_and_report_from_program();
