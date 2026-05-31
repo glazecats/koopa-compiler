@@ -6,6 +6,9 @@
 - `docs/ENGINEERING_MEMORY.md` is working memory for current engineering facts and safety boundaries.
 - `docs/NEXT_STEPS.md` is the current roadmap and stage-status authority.
 - `docs/ir/LOWER_IR_DESIGN.md` is the current design authority for downstream/lower-IR planning.
+- `docs/ir/CALLABLE_OBJECT_IR_DESIGN.md` is the current design authority for
+  the next callable-object / indirect-call IR step on the language-feature
+  line.
 - `docs/ssa/VALUE_SSA_DESIGN.md` is the current design authority for the next likely post-lower-IR step.
 - `docs/backend/MACHINE_RUNTIME_PLAN.md` is the current design/staging authority for the checkpointed post-load backend sibling.
 - `docs/backend/MACHINE_LAUNCH_PLAN.md` is the current design/staging authority for the just-checkpointed post-runtime backend sibling.
@@ -52,6 +55,22 @@
 - The next likely post-`fndefer` feature candidate now also has a first design
   plan:
   [docs/language/NONCAPTURING_FUNCTION_VALUES_PLAN.md](/workspaces/compiler_lab/docs/language/NONCAPTURING_FUNCTION_VALUES_PLAN.md)
+  - forward-looking end-state authority for the real user-stated target now
+    also exists:
+    [docs/language/GENERIC_FIRST_CLASS_FUNCTION_VALUES_PLAN.md](/workspaces/compiler_lab/docs/language/GENERIC_FIRST_CLASS_FUNCTION_VALUES_PLAN.md)
+  - current recommendation:
+    keep landing conservative correctness-closed slices on the live tree, but
+    treat the new generic-function-object / generic-indirect-call design note
+    as the target architecture instead of continuing indefinitely with only
+    source-position-specific tag/specialization bridges
+  - immediate IR-facing follow-up authority now also exists:
+    [docs/language/CALLABLE_OBJECT_IR_PLAN.md](/workspaces/compiler_lab/docs/language/CALLABLE_OBJECT_IR_PLAN.md)
+    for the bridge from today's lowering-side callable views to future
+    explicit IR-level callable-object / `call_indirect` operations
+  - IR-level callable-object authority now also exists:
+    [docs/ir/CALLABLE_OBJECT_IR_DESIGN.md](/workspaces/compiler_lab/docs/ir/CALLABLE_OBJECT_IR_DESIGN.md)
+    for the first explicit canonical-IR contract around `fn_make`,
+    `fn_code`, `fn_env`, `fn_shape`, and `call_indirect`
   - current checkpoint:
     parser now accepts first function-valued-parameter shapes such as
     `int apply(int f(int), int x);`
@@ -76,13 +95,2777 @@
   - current further landed zero-arg/void broadening:
     zero-argument `void`-return function-valued parameters are now supported
     too, for example `apply0(ping)`
+  - current further landed local-alias slice:
+    the same conservative non-capturing story now also covers one first local
+    storage shape without introducing generic function objects: a local
+    function-typed declaration may bind directly to a visible top-level
+    function name or a matching builtin and then be used only as a direct
+    local callee, for example `int f(int)=add1; return f(41);`, and that same
+    local direct-callee slice now also covers the zero-argument
+    `int f()=next; return f();` sibling, the zero-argument
+    `void f()=ping; f();` sibling, plus builtin binding forms such as
+    `void f(int)=putint; f(7);`, with parser / semantic / compiler-driver /
+    extension-runtime regression coverage
+  - current further forwarding follow-up:
+    that same conservative local-alias slice now also supports forwarding a
+    bound local alias into an existing function-valued-parameter call, for
+    example `int g(int)=add1; return apply(g, 41);`, still by resolving the
+    local alias back to its known top-level/builtin target and reusing the
+    existing specialization lowering path instead of introducing a generic
+    runtime function-value object
+  - current first reassignment step:
+    the same non-capturing local function-value line now also supports one
+    first real rebinding shape in straight-line local flow: a function-typed
+    local may be reassigned to another compatible non-capturing top-level or
+    already-bound local function target and then called through the updated
+    binding, for example `int f(int)=add1; f=add2; return f(40);`
+  - current first dynamic dispatch step:
+    the non-capturing local function-value line now also has one first real
+    runtime-selected dispatch witness instead of only static target
+    convergence: after a simple local branch-rebinding shape such as
+    `int f(int)=add1; if(c) f=add2; return f(40);`, the call now dispatches to
+    `add1` or `add2` according to the runtime-selected binding
+  - current first returned-function-value step:
+    the same non-capturing line now also supports one first real
+    function-valued return that is not closure-backed: a function may return a
+    compatible non-capturing top-level function value, and the caller may bind
+    and call it, for example `int pick()(int){ return add1; }` followed by
+    `int f(int)=pick(); return f(41);`. The immediate-call sibling of that
+    same shape is now also landed: `return pick()(41);`
+  - current further returned local-producer step:
+    that same returned non-capturing line now also supports one first local
+    function-value producer inside the returning function, including the
+    straight-line rebinding sibling, for example
+    `int pick()(int){ int f(int)=add1; return f; }` and
+    `int pick()(int){ int f(int)=add1; f=add2; return f; }`
+  - current dynamic returned-function-value follow-up:
+    that same returned non-capturing line now also preserves one first real
+    runtime-selected function-value family across the return boundary instead
+    of collapsing back to one static callee. Both
+    `return pick(1)(40);` and `int g(int)=pick(1); return g(40);` now dispatch
+    to `add1` or `add2` according to the returned runtime tag, with compiler,
+    canonical-IR, lower-IR, and extension-runtime regression coverage
+    - current callable-object regression-lock follow-up:
+      those same returned dynamic noncapturing immediate-call and bind-and-call
+      siblings are now also locked on the explicit callable-object IR path
+      instead of only the older direct-call/tag-branch shape. Canonical IR now
+      expects `shape` + `fn_make` + `call_indirect` + synthesized noncapturing
+      wrappers on this family, lower-IR expects the bridged `call __fnwrap_*`
+      form, and the broad `make test-ir-regression`,
+      `make test-lower-ir-regression`, `make test-compiler-driver`, and
+      `make test-extension-runtime` gates are green with those expectations
+  - current dynamic forwarding-into-parameter follow-up:
+    that same runtime-selected non-capturing function-value story now also
+    reaches one first existing function-valued-parameter call surface instead
+    of stopping at direct local/immediate call. Both a dynamic local binding
+    such as `if((putint(0), c)) g=add2; return apply(g, 40);` and a dynamic
+    returned binding such as `int g(int)=pick(1); return apply(g, 40);` now
+    branch at the caller into `apply__fv_0_add1` / `apply__fv_0_add2`, with
+    compiler, canonical-IR, lower-IR, and extension-runtime regression
+    coverage
+    - current callable-object consumer follow-up:
+      the noncapturing one-argument/non-void dynamic forwarding and
+      actual-argument siblings are now also migrated onto the explicit
+      callable-object IR path instead of only the older specialized-helper
+      call shape. Dynamic local forwarding, dynamic returned forwarding,
+      assignment-result/comma-wrapper forwarding, ternary function-valued
+      actual arguments, and the direct dynamic returned noncapturing actual
+      argument sibling now expect canonical `shape` + `fn_make` +
+      `call_indirect` plus `__fnwrap_*`, with lower-IR / compiler-driver /
+      extension-runtime coverage green on the bridged `call __fnwrap_*(0, …)`
+      form
+    - current zero-arg noncapturing follow-up:
+      that same caller-side callable-object consumer family now also reaches
+      the zero-argument noncapturing `int` and `void` siblings on the front
+      half of the pipeline. Dynamic local and returned `apply0(...)`-style
+      forwarding now expect canonical `shape shape.0() -> ...` plus
+      `fn_make`/`call_indirect` and `__fnwrap_*` on canonical IR and lower-IR,
+      while the compiler/runtime path is now also green on the matching
+      wrapped-call form
+    - current single-capture closure caller-side checkpoint:
+      the first closure-backed caller-side live consumer is now also real on
+      the explicit callable-object line, but still deliberately narrow. The
+      single-capture ternary actual-argument family now lowers through
+      canonical `shape` + `fn_make closure_code, env_capture, shape` +
+      `call_indirect`, and lower-IR plus focused compiler observation locks
+      now record that downstream layers may legally collapse that object path
+      back into direct closure calls once the env/target pair is proven
+    - current returned single-capture closure forwarding checkpoint:
+      the nearby returned/bind-and-forward sibling is now regression-locked
+      too, but it is intentionally recorded as a different boundary. Focused
+      IR, lower-IR, and compiler-driver checkpoints now cover
+      `int f(int)=make(3); return apply(f, 4);` and
+      `int g(int)=f; return apply(g, 4);`, and the zero-arg / void siblings
+      `int f()=make(3); return apply0(f);` and `void f()=make(7); apply0(f);`.
+      Canonical IR now explicitly locks the object path on that family too:
+      the one-arg, zero-arg, and void siblings all expose `shape` +
+      `fn_make make__retclosure_*` + `call_indirect`. The downstream boundary
+      remains deliberately looser: lower-IR and compiler-driver checkpoints
+      still allow that same family to collapse back into direct
+      `call make__retclosure_*` once the env/target pair is proven
+    - current multi-capture closure regression-lock follow-up:
+      the same broader function-value line is now also explicitly locked on a
+      few real multi-capture `int` siblings instead of stopping at the
+      earlier direct-local-call proof point. Focused semantic, canonical-IR,
+      lower-IR, compiler-driver, and extension-runtime coverage now includes
+      multi-capture two-argument closure forwarding into a
+      function-valued parameter, returned local multi-capture closure
+      bind-and-call, and dynamic returned local multi-capture closure
+      forwarding. The current shapes are intentionally mixed: the plain local
+      forwarding sibling still uses specialized helper calls, while the
+      returned bind-and-call sibling now explicitly locks the env-style
+      `fn_make __fnwrap_closure_*` + `call_indirect` path.
+    - current dynamic runtime-selected closure forwarding repair:
+      runtime-selected local closure forwarding through function-valued
+      parameters no longer drops closure capture metadata when specialization
+      helpers are synthesized. The repaired checkpoint currently covers the
+      runtime-selected one-arg `int` sibling
+      `if((putint(0), c)) f=g; return apply(f, 4);` and the zero-arg `void`
+      sibling `if((putint(0), c)) f=g; apply0(f);`, where the specialized
+      helper now lowers the bound closure argument through the same
+      closure-capture-aware helper body instead of misclassifying it as a
+      noncapturing direct call. The next nearby blocker is still the
+      returned multi-capture dynamic forwarding family, which currently needs
+      one more lowering fix before it can be locked into the same regression
+      surface.
+    - current returned multi-capture dynamic forwarding checkpoint:
+      the nearby returned multi-capture closure forwarding family is now also
+      real instead of remaining blocked on `IR-INT-123`. The focused witness
+      `return apply(pick(5, 7, 1), 3, 2);` now lowers through returned
+      payload slots plus branch-selected specialized helpers, and each helper
+      in turn materializes an env-style wrapper object with
+      `fn_make __fnwrap_closure_pick__closure_*` + `call_indirect`. Compiler
+      and extension-runtime coverage are green on this family.
+    - current closure-wrapper hardening follow-up:
+      the old plain `lower_ir_regression_test` non-ASan crash that used to
+      appear after the returned multi-capture dynamic forwarding cases is now
+      fixed at the real source instead of being treated as a mysterious test
+      harness issue. The root cause was stale target-function metadata usage
+      inside `ir_ensure_closure_callable_wrapper_function(...)` after
+      appending a new wrapper function to the program; the closure-wrapper
+      builder now snapshots the target parameter count before any append that
+      can grow `program->functions`. With that fix in place,
+      `make -j1 test-lower-ir-regression`, `make -j1 test-ir-regression`,
+      `make -j1 test-compiler-driver`, and
+      `make -j1 test-extension-runtime` are green again on the live tree.
+    - current wrapped-closure transport regression-lock follow-up:
+      closure-backed function values wrapped by comma and assignment-result
+      expressions are now explicitly locked one stage deeper instead of being
+      observed only through compiler-driver probes. The focused siblings
+      `return apply((f, f), 4);` and `return apply((f = f), 4);`, where
+      `f` is a local closure binding, are now covered on canonical IR and
+      lower-IR too. This is still a conservative slice, but it meaningfully
+      strengthens the “callable object survives expression wrapping before
+      forwarding” boundary on the path toward more ordinary first-class value
+      transport.
+    - current dynamic wrapped-closure forwarding cleanup:
+      the same expression-wrapped closure line now also has one concrete
+      correctness fix instead of only broader regression coverage. Dynamic
+      comma-wrapped and assignment-result closure forwarding into
+      function-valued parameters now avoid replaying wrapper-side effects
+      multiple times during speculative direct-callable probes. In practice,
+      witnesses such as `return apply(((putint(0), c), f), 4);` now keep the
+      expected single `putint(0)` evaluation while still lowering through the
+      existing `apply__fv_*` specialization plus `fn_make`/`call_indirect`
+      helper path. Focused IR/lower-IR/compiler regressions now lock those
+      dynamic wrapped closure siblings too.
+      The regression surface is now also stricter than the first landing:
+      those focused IR and lower-IR checkpoints explicitly count the wrapped
+      `putint(0)` side effect and require it to appear exactly once, so later
+      speculative-callable probes cannot silently reintroduce the old replay
+      bug while still matching the broader helper-name shape.
+      That same wrapped closure family is now also locked through its
+      zero-argument/`void` sibling instead of only the one-argument/value
+      surface. Focused IR/lower-IR checkpoints now cover dynamic comma-wrapped
+      and assignment-result forwarding into `void apply0(void f())`, still
+      expecting the current specialized `apply0__fv_*` bridge together with an
+      inner `fn_make main__closure_*` + `call_indirect` helper body and the
+      same exactly-once wrapped `putint(0)` side-effect contract.
+      That same zero-argument wrapped-closure lock now also includes the
+      `int apply0(int f())` sibling instead of stopping at `void`. Focused IR
+      and lower-IR checkpoints now cover both dynamic comma-wrapped and
+      assignment-result transport for zero-arg value-returning closures, again
+      requiring exactly one wrapped `putint(0)` side effect together with the
+      existing specialized `apply0__fv_*` bridge and inner
+      `fn_make main__closure_*` + `call_indirect` helper contract.
+      The nearby direct-callee callable-object cleanup has also moved a little
+      closer to the intended generic path: once the direct-callee branch has
+      already recovered a callable-object view, the dynamic probe and the
+      later static direct-target callable dispatch now reuse that same resolved
+      view instead of each re-resolving the callee independently.
+      The adjacent returned-binding probe now follows that same pattern too:
+      when the call-lowering path already holds a recovered direct-callee
+      callable-object view, the returned-binding static callable dispatch
+      reuses it instead of resolving the same callee view again inside the
+      binding-side helper.
+      The nearby function-valued-argument target recovery is now also a little
+      less repetitive: `ir_call_argument_resolve_extension_function_value_target(...)`
+      reuses one recovered callable-object view for the same argument instead
+      of re-running `ir_resolve_callable_object_view(...)` along two adjacent
+      branches of the same resolution path.
+      That same cleanup boundary now looks like the next staging guide too:
+      the remaining meaningful duplication is no longer the tiny adjacent
+      argument-target branches, but the broader dynamic-specialization /
+      returned-callable helpers that still recover callable-object or
+      function-object views inside their own local entrypoints.
+      The returned-callable side now also has one first real step past that
+      note: returned function-object recovery is no longer performed
+      separately inside the closure and noncapturing branches of the nearby
+      direct returned-call helper or inside the parallel returned-argument
+      target helper. Those entrypoints now resolve the returned function
+      object once and then let the family-specific branches consume that same
+      recovered descriptor/view.
+      The nearby direct returned-call helper is now also a little cleaner even
+      before that shared descriptor is consumed: it no longer performs one
+      separate “classify returned family first” step ahead of the returned
+      function-object resolution. Instead, the helper now treats the resolved
+      returned function object itself as the source of truth for the later
+      closure-vs-noncapturing branch.
+      The dynamic-specialization neighbor now also starts sharing that same
+      descriptor-first direction: before entering the returned single-capture
+      closure fast path, the specialization entrypoint now opportunistically
+      recovers the function-object descriptor once and lets the fast path reuse
+      it instead of always re-resolving inside the helper.
+      The same specialization line now also has one smaller no-behavior-change
+      cleanup inside the forwarding path itself: the temporary “capture payload
+      + visible call args” materialization for dynamic closure forwarding is no
+      longer open-coded inside the main specialization emitter and now lives
+      behind one small helper boundary instead.
+    - current wrapped dynamic noncapturing follow-up:
+      the same “wrapped value transport should stay single-shot and explicit”
+      boundary is now also locked on the nearby noncapturing family, not only
+      on closures. Dynamic comma-wrapped and assignment-result forwarding into
+      one-argument and zero-argument function-valued parameters now have
+      focused IR/lower-IR checkpoints too, each expecting the direct
+      `fn_make __fnwrap_*` + `call_indirect` bridge (or lower-IR bridged call)
+      together with exactly one wrapped `putint(0)` side effect. This keeps
+      the broader callable-object transport story more uniform across
+      closure-backed and noncapturing values instead of leaving the wrapped
+      noncapturing siblings as compiler-only observations.
+      That same noncapturing wrapped family is now also locked through its
+      zero-argument siblings instead of stopping at the one-argument `int`
+      surface: focused IR/lower-IR regressions now cover both `int apply0(int
+      f())` and `void apply0(void f())` under dynamic comma-wrapped and
+      assignment-result transport, again requiring exactly one wrapped
+      `putint(0)` side effect plus the explicit `fn_make __fnwrap_*` /
+      `call_indirect` shape (or the bridged lower-IR call form).
+  - current zero-arg / void dynamic forwarding follow-up:
+    that same caller-side dynamic forwarding bridge now also covers the
+    zero-argument `int` and `void` siblings instead of only the one-argument
+    value-returning form. Shapes such as
+    `if((putint(0), c)) g=next2; return apply0(g);`,
+    `void g()=ping1; if((putint(0), c)) g=ping2; apply0(g);`, and the
+    returned sibling `int g()=pick(1); return apply0(g);` now branch at the
+    caller into `apply0__fv_0_*` helpers, with semantic, compiler,
+    canonical-IR, lower-IR, and extension-runtime regression coverage
+  - current direct-returned-argument follow-up:
+    the same single-family returned-function-value story now also reaches one
+    first direct function-valued actual-argument position instead of requiring
+    an intermediate local bind first. Shapes such as `return apply(pick(), 4);`,
+    `return apply0(pick());`, and the returned-closure siblings
+    `return apply(make(3), 4);`, `return apply0(make(3));`, and
+    `apply0(make(7));` now lower through the existing specialization path
+    directly from the returned call result under the current conservative
+    single-family boundary. The next dynamic noncapturing siblings such as
+    `return apply(pick(1), 40);`, `return apply0(pick(1));`, and
+    `apply0(pick(1));` are now landed too under the same caller-side dynamic
+    specialization bridge instead of requiring an intermediate local bind
+  - current returned-parameter follow-up:
+    the same conservative noncapturing line now also supports one first
+    function-valued-parameter return that stays inside the current static
+    specialization boundary instead of forcing a new generic runtime function
+    object. A function such as `int id(int f(int))(int){ return f; }` may now
+    feed an immediate caller-side use like `return id(add1)(41);`, the local
+    bind sibling `int g(int)=id(add1); return g(41);`, plus the first dynamic
+    siblings `return id(f)(40);` and `int g(int)=id(f); return g(40);` after
+    a simple runtime-selected `f`, with semantic, compiler, canonical-IR,
+    lower-IR, default-ValueSSA, and extension-runtime regression coverage
+  - current closure-backed returned-parameter follow-up:
+    that same returned-parameter line now also reaches one first
+    closure-backed sibling instead of stopping at noncapturing family
+    transport. Shapes such as
+    `int x=3; int f(int)=closure [x] int (int y){ return x+y; }; return id(f)(4);`
+    and `int g(int)=id(f); return g(4);`, plus the first dynamic siblings
+    `if(c) f=g; return id(f)(4);` and `int h(int)=id(f); return h(4);`, are
+    now landed too, with semantic, compiler, canonical-IR, lower-IR,
+    default-ValueSSA, and extension-runtime regression coverage
+  - current dynamic assignment transport follow-up:
+    runtime-selected non-capturing function values now also survive one first
+    ordinary local assignment instead of only declaration-init/forwarding
+    positions. Shapes such as `h=f; return h(40);`,
+    `h=f; return apply(h, 40);`, and the returned sibling
+    `h=f; return h;` now copy the runtime tag through assignment and preserve
+    the dynamic family across later direct-call / parameter-forward / return
+    use sites, with semantic, compiler, canonical-IR, lower-IR, and
+    extension-runtime regression coverage
+  - current ordinary wrapper follow-up:
+    the same non-capturing function-value story now also survives one first
+    narrow expression-wrapper family instead of only statement-shaped
+    transport. Parenthesized, comma-result, and the current conservative
+    assignment-result wrappers such as `(f)(41)`, `(0, g)(41)`,
+    `apply((0, g), 40)`, `(h=f)(41)`, and
+    the current parameter-forwarding assignment-result sibling
+    `apply((h=f), 40)` now preserve function-value flow under the
+    intentionally narrow wrapper boundary, with semantic, compiler, and
+    extension-runtime regression coverage
+  - current wrapper-init/return follow-up:
+    that same narrow wrapper family now also reaches one first
+    function-typed local-initializer and function-valued return slice instead
+    of stopping at direct call / parameter forwarding positions. Shapes such
+    as `int h(int)=(0, f); return h(41);`, `return (h=f);`, and the dynamic
+    returned sibling `if(c) f=add2; return (h=f);` now preserve the same
+    non-capturing function-value family through local initialization and
+    return payload lowering, with semantic, compiler, canonical-IR,
+    lower-IR, and extension-runtime regression coverage
+  - current ternary-return follow-up:
+    that same returned-function-value line now also reaches one first
+    expression-shaped return sibling instead of requiring a prior wrapper or a
+    statement-shaped local rebinding. A function-valued return site such as
+    `return ((putint(0), c) ? f : g);` now preserves the selected
+    non-capturing family through the existing returned runtime-tag payload
+    path, and the caller may use either the immediate-call sibling
+    `return pick(1)(40);` or the bind-and-call sibling
+    `int h(int)=pick(1); return h(40);`, with semantic, compiler,
+    canonical-IR, and extension-runtime regression coverage
+    - the matching closure-backed sibling is now landed too under the same
+      returned-family boundary: when `f` and `g` are matching local closures,
+      `return ((putint(0), c) ? f : g);` now preserves the selected branch's
+      tag plus copied capture payload through the returned hidden-slot path,
+      and the caller may use either the immediate-call sibling
+      `return pick(1)(4);` or the bind-and-call sibling
+      `int h(int)=pick(1); return h(4);`
+  - current ternary-local-init follow-up:
+    that same local-initializer line now also reaches one first
+    expression-level branch-merge sibling instead of stopping at comma /
+    assignment-result wrappers. A function-typed local may now initialize from
+    one matching identifier ternary such as
+    `int h(int)=c ? f : g; return h(40);`, with the selected branch copied
+    into the existing runtime-tag local binding model, and with semantic,
+    compiler, canonical-IR, and extension-runtime regression coverage
+    - the matching closure-backed sibling is now landed too under the same
+      local-init-only boundary: when `f` and `g` are matching local closures,
+      `int h(int)=c ? f : g; return h(4);` now copies the selected branch's
+      tag plus capture payload into `h`, again without opening generic closure
+      values in arbitrary expression position
+  - current ternary-assignment follow-up:
+    that same local-binding line now also reaches one first ordinary
+    reassignment sibling instead of stopping at initializer-only transport.
+    A function-typed local may now be reassigned from one matching identifier
+    ternary such as
+    `h=((putint(0), c) ? f : g); return h(40);`, and the matching
+    closure-backed sibling is now landed too when `f` and `g` are matching
+    local closures, with semantic, compiler, canonical-IR, and extension-runtime
+    regression coverage
+  - current ternary-actual-arg follow-up:
+    the same non-capturing line now also reaches one first
+    expression-shaped function-valued actual-argument sibling instead of
+    requiring a prior local bind or wrapper-only forwarding shape. A call such
+    as `return apply(((putint(0), c) ? f : g), 40);` now lowers through the
+    existing caller-side dynamic specialization bridge into
+    `apply__fv_0_add1` / `apply__fv_0_add2`, with semantic, compiler,
+    canonical-IR, and extension-runtime regression coverage
+    - the matching closure-backed sibling is now landed too under the same
+      actual-argument boundary: when `f` and `g` are matching local closures,
+      `return apply(((putint(0), c) ? f : g), 4);` now preserves the selected
+      branch's tag plus copied capture payload through the existing caller-side
+      specialization bridge, again without opening generic plain closure
+      values in arbitrary expression position
+  - current ternary-direct-callee follow-up:
+    the same non-capturing line now also reaches one first
+    expression-shaped direct-callee sibling instead of requiring either a
+    prior local bind or a function-valued-parameter wrapper. A call such as
+    `return (((putint(0), c) ? f : g))(40);` now lowers through branch-selected
+    direct target calls under the current runtime-tag family boundary, with
+    semantic, compiler, canonical-IR, and extension-runtime regression
+    coverage
+    - the matching closure-backed sibling is now landed too under the same
+      callee-position boundary: when `f` and `g` are matching local closures,
+      `return (((putint(0), c) ? f : g))(4);` now preserves the selected
+      branch's tag plus copied capture payload through branch-selected direct
+      closure-helper calls, again without opening generic plain closure values
+      in arbitrary expression position
+    - current internal lowering checkpoint:
+      ternary function-value local-init, actual-argument, direct-callee, and
+      returned-payload lowering now share the same first internal
+      branch-materialization helper family instead of maintaining separate
+      ad hoc tag/payload emit blocks, and focused `make test-ir-regression`,
+      `make test-compiler-driver`, and `make test-extension-runtime` are green
+      after that refactor
+    - current dispatch-helper checkpoint:
+      the first shared two-target dynamic dispatch-call helper is now also in
+      place for direct-callee lowering, and the returned dynamic family plus
+      local dynamic family no longer each hand-roll their own
+      `tag == then ? call A : call B` CFG skeleton
+    - current reassignment-helper checkpoint:
+      ternary function-value reassignment now also reuses the shared
+      branch-materialization helper for runtime tag plus copied capture
+      payload emission, instead of keeping a fifth independent branch/join
+      emit block for the same transport shape
+    - current function-object-view checkpoint:
+      lowering now also has a first explicit internal function-value view
+      abstraction for identifier-root callable values, so direct target,
+      capture payload view, and dynamic-tag metadata no longer have to be
+      rediscovered ad hoc at every call site; the first migrated consumer is
+      initializer-binding resolution
+    - current call-resolution checkpoint:
+      direct-callee static identifier-root resolution now also consumes that
+      shared function-value view abstraction instead of reimplementing a
+      separate local/parameter/builtin target lookup path
+    - current dynamic-view checkpoint:
+      direct-callee lowering now also reads one first layer of dynamic callable
+      metadata (closure-vs-noncapturing family, capture payload view, and
+      dynamic tag local id) through the shared function-value view abstraction
+      instead of rediscovering those facts only through separate binding lookups
+    - current family-view checkpoint:
+      the shared function-value view abstraction now also carries the current
+      identifier-root dynamic family target-set view (`target_names` plus
+      `target_count`) for bound local function/closure values, preparing later
+      dispatch lowering to consume one unified callable-object view instead of
+      separately requerying the binding-owned target set
+    - current dispatch-view checkpoint:
+      direct-callee two-target dynamic dispatch now also consumes the shared
+      function-value view's family-set data directly instead of requerying the
+      binding-owned target set on the side, so that path is now materially
+      closer to one unified callable-object lowering model
+    - current forwarding-view checkpoint:
+      the local dynamic noncapturing actual-argument forwarding bridge now also
+      consumes the shared function-value view abstraction instead of
+      separately reloading the source binding plus its owned target set, so
+      both a real callee path and a real forwarding path now use the same
+      callable-view family metadata
+    - current returned-view checkpoint:
+      lowering now also has a first explicit returned-function-value view
+      abstraction, and the dynamic returned actual-argument bridge is its
+      first consumer; that path no longer needs to rediscover the returned
+      function family's payload shape and two-target metadata entirely by hand
+    - current returned-view boundary checkpoint:
+      that returned-function-value view is currently safe for consumers that
+      intentionally own the returned-payload materialization step, such as the
+      dynamic returned actual-argument bridge; a naive swap-in on the existing
+      returned direct-callee closure path double-materialized the producer call
+      and was explicitly backed out, so the next step there needs a separate
+      “consume already-lowered returned payload” abstraction rather than a
+      blind reuse of the same helper
+    - current returned-payload-consumer checkpoint:
+      that companion abstraction now exists too: lowering can build a returned
+      function-value view from already-lowered returned payload locals, and the
+      returned direct-callee dynamic-closure path is the first consumer. This
+      closes the earlier `00` double-materialization regression while still
+      moving the returned-call line onto the same internal callable-object
+      model
+    - current returned-direct-callee checkpoint:
+      the returned direct-callee dynamic noncapturing sibling now also
+      consumes that same already-lowered returned-payload view, so both the
+      closure-backed and noncapturing returned direct-callee dynamic families
+      now share one returned callable-object consumer model instead of
+      maintaining split ad hoc payload reads
+    - current convergence checkpoint:
+      ordinary callable views and returned callable views are now both mature
+      enough in the live tree that the next implementation step should shift
+      from adding more sibling-specific consumers to structurally merging them
+      behind one common `IrLowerCallableObjectView`
+    - current callable-object checkpoint:
+      that common `IrLowerCallableObjectView` now also exists in the live tree
+      and has its first real consumer through initializer-binding resolution,
+      so the Phase I1 structural merge has moved from design-only to code
+    - current callable-object-consumer checkpoint:
+      direct-callee lowering now also consumes `IrLowerCallableObjectView`
+      rather than the older plain function-value view, so the new common
+      callable-object abstraction has moved beyond declaration/init plumbing
+      into a real call-path consumer
+    - current returned-family consumer checkpoint:
+      returned dynamic actual-argument and returned direct-callee dynamic
+      siblings now share the returned callable-object consumer model, so the
+      remaining architectural jump is no longer "invent returned callable
+      objects", but "promote the current internal callable-object views into
+      explicit IR-level callable-object operations"
+    - current callable-object IR checkpoint:
+      canonical IR now has a first explicit callable-object contract too:
+      `fn_make`, `fn_code`, `fn_env`, `fn_shape`, and `call_indirect` are now
+      real instruction kinds with program-level function-shape metadata plus
+      dump/verifier coverage, and focused IR verifier tests now lock the
+      accept/reject boundary for shape existence, `fn_make` target/shape
+      consistency, and `call_indirect` argument-count matching
+    - current callable-object IR boundary checkpoint:
+      this is still an IR-model checkpoint, not the generic-function-value
+      end-state yet: live lowering paths do not produce the new callable-object
+      ops by default, and `call_indirect` is intentionally verifier-narrow for
+      now by requiring a callee temp that comes directly from `fn_make`
+    - current callable-object lower-IR bridge checkpoint:
+      the next downstream stage now also has a first explicit stability lock
+      for that contract: focused lower-IR regression coverage manually
+      constructs `shape + fn_make + call_indirect` canonical IR and verifies
+      that the current bridge lowers it back into the stable `call code(env,
+      args...)` form, so the cross-layer callable-object path is now more than
+      verifier-only even before live canonical lowering consumers switch over
+    - current first live callable-object consumer checkpoint:
+      returned dynamic noncapturing immediate-call lowering now has one first
+      real live canonical-IR consumer path for that object model instead of
+      staying verifier-only: the focused checkpoint
+      `return pick(1)(40);` now lowers through explicit `shape`, `fn_make`,
+      and `call_indirect` plus noncapturing wrapper helpers on canonical IR,
+      while the current lower-IR bridge rewrites that into stable
+      `call __fnwrap_*(0, 40)` form downstream; the next follow-up should stay
+    - current second live callable-object consumer checkpoint:
+      the next noncapturing caller-side consumer family is now landed too:
+      one-argument/non-void dynamic function-valued actual-argument and
+      forwarding shapes now use that same explicit callable-object contract in
+      canonical IR, rather than only caller-side specialized direct calls
+      narrow and target the nearby bind-and-call sibling before reopening the
+      broader local/assignment direct-callee family
+  - current local-alias chaining follow-up:
+    local function-value aliases may now also bind from another already-bound
+    local alias, for example `int f(int)=add1; int g(int)=f; return g(41);`,
+    still by collapsing the chain back to one known top-level/builtin target
+    rather than by introducing a first-class runtime function object
+  - current dynamic local-alias dispatch follow-up:
+    that same local-alias line now also preserves runtime-selected rebinding
+    across one alias hop instead of collapsing back to one static callee, for
+    example `int f(int)=add1; if(c) f=add2; int g(int)=f; return g(40);`
+    now dispatches to `add1` or `add2` according to the copied runtime tag,
+    with compiler-driver and extension-runtime regression coverage
+  - current local-alias boundary lock:
+    the same local direct-callee slice now also has a first explicit reject
+    matrix locked on parser / semantic / compiler surfaces: non-function local
+    `void` declarations such as `void x;`, non-function initializers such as
+    `int f(int)=0;`, signature-mismatched initializers such as
+    `int f(int)=next;`, and plain local function-value reassignment such as
+    `f=add1;` all continue to reject instead of half-opening broader
+    first-class function-value storage
+  - next closure-design authority:
+    [docs/language/CLOSURE_SLICE_PLAN.md](/workspaces/compiler_lab/docs/language/CLOSURE_SLICE_PLAN.md)
+    now captures the recommended first real closure slice after the current
+    non-capturing groundwork, and the phase-1 decision is now explicit:
+    `closure [x] int (int y) { return x + y; }` with copied scalar captures,
+    stack/local-only environment storage, function-top-level local
+    initialization only, and direct local call only
+  - current closure semantic checkpoint:
+    under `-extension`, the first phase-1 closure initializer shape is now
+    accepted semantically for function-typed top-level local initialization,
+    with a conservative matrix locked for copied-`int` captures only,
+    function-top-level-local/parameter/global capture sources only,
+    single-return compound bodies only, signature matching against the target
+    local function type, and explicit reject coverage for non-`int` captures,
+    nested-block local initialization, signature mismatch, unsupported body
+    shape, and uncaptured outer-name references
+  - current closure lowering checkpoint:
+    the first real phase-1 closure lowering slice is now landed for the
+    narrowest direct-use path: a function-top-level local function-typed
+    declaration may now initialize from one closure literal and be called
+    directly through that same local, while copied captures are materialized
+    into hidden snapshot locals and passed to a hidden helper as leading
+    scalar parameters
+    - current directly covered siblings:
+      one-hop and multi-hop non-escaping local closure alias chains used only
+      for later direct local calls;
+      zero-argument closure locals, multi-capture copied-`int` closure
+      locals, `void`-return direct local closure calls with a final
+      `return;` body, and `int`-return closure bodies with pure
+      expression-statement prefixes, pure local-`int` declaration prefixes,
+      pure parameter/local-scalar assignment prefixes, uninitialized local-`int`
+      declarations, multi-declarator local-`int` prefixes, plus simple
+      compound-assignment / prefix-increment / postfix-increment updates on
+      closure parameters and closure-local `int` scalars, plus pure bitwise /
+      shift / logical / bitwise-not expression forms, plus assignment/update
+      and comma-expression combinations inside the final `return expr;`
+  - current closure runtime lock:
+    focused compiler-driver and extension-runtime regressions now cover both
+    direct local closure call and capture-by-value snapshot behavior, for
+    example `int f(int)=closure [x] int (int y) { return x+y; }; return f(4);`
+    and the sibling where outer `x` mutates after closure creation but the
+    call still observes the earlier copied value, plus zero-arg /
+    multi-capture / `void` direct-local-call siblings, plus the next
+    conservative forwarding layer where a non-escaping local closure alias may
+    flow into an existing function-valued parameter call and still lower
+      through specialization, including direct `int` / zero-arg / `void`
+      siblings, one-hop and two-hop alias forwarding, plus zero-arg / `void`
+      alias-forwarding siblings
+  - current direct-closure-argument follow-up:
+    direct closure literals may now also flow into existing
+    function-valued-parameter call surfaces under `-extension`, without first
+    binding to a local, for example
+    `return apply(closure [y] int (int z) { return y + z; }, 4);`,
+    `return apply0(closure [y] int () { return y; });`, and
+    `apply0(closure [y] void () { putint(y); return; });`. This remains a
+    narrow call-argument-only opening rather than a general plain-value
+    position opening for closure literals
+  - current closure assignment transport follow-up:
+    closure-backed local function values now also survive one first ordinary
+    local assignment instead of stopping at declaration-init / alias-init
+    only. Shapes such as `g=f; return g(4);`, `g=f; return apply(g, 4);`,
+    `int f(int)=make(3); int g(int)=make(5); g=f; return g(4);`, and the
+    returned sibling `g=f; return g;` now preserve helper identity plus copied
+    capture payload transport across local assignment, with semantic,
+    compiler, canonical-IR, lower-IR, and extension-runtime regression
+    coverage
+  - current dynamic local-closure transport follow-up:
+    closure-backed local function values now also survive one first real
+    runtime-selected local merge instead of only straight-line assignment.
+    Shapes such as
+    `if(c) f=g; return f(4);` and `if(c) f=g; return apply(f, 4);`, where
+    `f` and `g` are same-signature local closures with matching copied-capture
+    slot shapes, now preserve a runtime-selected closure family through direct
+    local call and existing function-valued-parameter specialization
+    forwarding, with semantic, compiler, and extension-runtime regression
+    coverage
+  - current closure non-goal boundary still kept:
+    broader closure-valued flow still rejects through the existing
+    `SEMA-EXT-019` / `SEMA-EXT-018` boundary,
+    including closure literals used directly as actual arguments, escaping or
+    returned closures, closure-valued parameters in the general sense, and
+    other non-local storage/flow positions beyond the new non-escaping local
+    alias forwarding slice; expression-wrapped forwarding forms such as
+    comma/value-position wrapping still reject too, and closure literals still
+    remain declaration-initializer-only rather than becoming general
+    assignable values after a separate local function declaration,
+    and closure-body control flow such as `if` still remains outside the
+    current phase-1 body-shape slice; capture assignment also remains
+    explicitly rejected while local/parameter `int` assignment and small
+    update forms are now allowed, and closure-body local declarations still
+    remain `int`-only; capture-target assignment/update inside return-side
+    comma/assignment expressions remains rejected on the same conservative
+    closure-body boundary
   - current non-goals that still reject:
     plain function values in ordinary value position, non-function actual
-    arguments, local/global storage of function values, returning function
-    values, and CFG-merged dynamic function-value flow
+    arguments, broader local/global storage of function values beyond the
+    direct local-callee slice, returning function values, and CFG-merged
+    dynamic function-value flow
+  - recommended next closure move:
+    do not jump straight to generic closure-valued parameters or heap-backed
+    environments; use
+    [docs/language/RETURNED_CLOSURE_PLAN.md](/workspaces/compiler_lab/docs/language/RETURNED_CLOSURE_PLAN.md)
+    as the next authority and, if implementation starts, cut the first slice
+    as “return one closure family from a function, bind it into one caller-side
+    local, then direct-call it”
   - current implementation authority for the landed `f(x)` slice and its
     remaining boundary:
     [docs/language/FUNCTION_VALUE_CALLEE_LOWERING_PLAN.md](/workspaces/compiler_lab/docs/language/FUNCTION_VALUE_CALLEE_LOWERING_PLAN.md)
+  - next closure-stage design authority:
+    [docs/language/RETURNED_CLOSURE_PLAN.md](/workspaces/compiler_lab/docs/language/RETURNED_CLOSURE_PLAN.md)
+  - current returned-closure groundwork checkpoint:
+    parser/AST now already record the first function-valued return signature
+    metadata under `-extension`; semantic/type compatibility now also accepts
+    prototype-only declarations and compatible redeclarations of that family,
+    while mismatched redeclarations already fail through the shared
+    `SEMA-TOP-005` path. The first definition-side semantic slice is now also
+    partially open: `return closure [...] ...;` may pass semantic when the
+    returned closure signature matches the function-valued return type, while
+    signature mismatches now reject through `SEMA-EXT-045`. Multi-return
+    closure-family flow now also has a first conservative semantic boundary:
+    different closure return sites inside one function-valued-return definition
+    still reject through `SEMA-EXT-049` instead of silently drifting to a later
+    compiler stage. The first returned-closure transport witness is now also
+    real end-to-end under `-extension`: a direct function-valued-return call
+    may initialize one local function-typed declaration, and a later direct
+    call through that local now reuses the returned payload correctly, for
+    example `int f(int)=make(3); return f(4);`. The next conservative
+    caller-side sibling is now also landed: the same direct
+    function-valued-return call may be immediately called as
+    `return make(3)(4);` under the same copied-`int` / single-family /
+    direct-call boundary, with semantic / compiler-driver / extension-runtime
+    regression coverage. The next local-binding return sibling is now also
+    landed: a function-valued-returning function may return one local closure
+    binding such as `int f(int)=closure [x] int (int y) { return x+y; }; return f;`,
+    and the caller may use either `int h(int)=pick(3); return h(4);` or
+    `return pick(3)(4);` under the same current single-family boundary, with
+    semantic / compiler-driver / extension-runtime regression coverage. The
+    next narrow dynamic sibling is now also landed: when one function returns
+    a local closure binding that may come from up to two same-signature
+    same-capture-shape local closure helpers via runtime-selected local flow
+    such as `if(c) f=g; return f;`, the caller may now use either
+    `int h(int)=pick(3, 1); return h(4);` or `return pick(3, 1)(4);`, with a
+    hidden `tag + captures` returned-closure payload and caller-side helper
+    dispatch, still under a deliberately narrow first dynamic returned-closure
+    boundary. The next function-valued-parameter sibling is now also landed
+    under that same narrow dynamic returned-closure boundary:
+    `return apply(pick(5, 1), 3);` now lowers through the same explicit
+    callable-object canonical-IR contract as the newer returned single-capture
+    closure forwarding slices: the focused IR checkpoint now records returned
+    payload materialization plus branch-selected `fn_make pick__closure_*` and
+    `call_indirect`, while lower-IR and compiler-driver checkpoints still
+    allow that path to collapse back into direct `call pick__closure_*` once
+    the env/target pair is proven. The nearby dynamic closure direct-callee
+    siblings have now moved one step closer too: focused canonical-IR
+    checkpoints for shapes such as `int h(int)=pick(3, 1); return h(4);`,
+    `return pick(3, 1)(4);`, closure-valued ternary return bind/immediate
+    call, and closure-valued ternary/local direct dispatch now also use
+    `shape + fn_make + call_indirect`, while lower-IR / compiler /
+    extension-runtime still legally collapse those same families back into
+    direct `call pick__closure_*` / `call main__closure_*` once the
+    env/target pair is proven. The same ternary-closure callee family now also
+    has zero-arg and `void` canonical-IR siblings locked on that same object
+    path instead of the older direct-call shape. The neighboring dynamic local
+    closure direct-callee family now also reaches the same zero-arg / `void`
+    callable-object checkpoint when the target identity is truly runtime
+    selected rather than locally constant-folded: focused canonical-IR
+    checkpoints now cover runtime-selected `f()` / `void f(); f();` siblings
+    with `shape + fn_make + call_indirect`, while lower-IR / compiler /
+    runtime still legally collapse them back into direct `call
+    main__closure_*`. The nearby static noncapturing returned-consumer line
+    has now also moved one step closer to that same callable-object model:
+    canonical IR for shapes such as `return id(add1)(41);`,
+    `int g(int)=id(add1); return g(41);`, and the static wrapped-return
+    sibling `return pick()(41);` now also materializes
+    `fn_make __fnwrap_* + call_indirect` on the consumer side while the
+    producer/helper contract remains the same hidden-return payload/tag story.
+    Lower-IR / compiler / runtime still keep the narrower honesty boundary on
+    that family and may collapse it back into direct `call __fnwrap_*` /
+    `call add1` output once the target is proven. A first producer-adjacent returned-parameter consumer
+    line now also has one first internal producer-side cleanup checkpoint:
+    noncapturing function-valued `return` lowering no longer open-codes its
+    three main hidden-return payload write shapes separately, but routes them
+    through shared internal helpers for single-slot payload emission and
+    returned-call payload materialization. This does not change the public ABI
+    yet, but it is the first deliberate step toward a more explicit shared
+    returned-callable payload/view model on the producer side instead of
+    leaving every `return`/consumer path to rediscover the same payload rules.
+    That same producer-facing cleanup now also reaches the returned-view side:
+    when lowering needs an explicit `IrLowerReturnedFunctionValueView`, the
+    view's owned payload locals now start coming from the same shared
+    materialization helper instead of open-coding fresh local allocation plus
+    `ir_lower_call_into_returned_closure_slots(...)` at each call site. The
+    same returned-view abstraction now also carries a more honest internal
+    distinction between “payload has a dynamic tag slot” and “payload is just
+    captures”, which is groundwork for eventually sharing one returned-callable
+    payload/view model across static closures, dynamic closures, and
+    noncapturing returns instead of leaving those layouts implicit in ad hoc
+    call-site assumptions. One more returned-call consumer fallback now also
+    uses that same shared returned-view/materialization entrypoint instead of
+    open-coding a dynamic returned payload local allocation path, so the live
+    tree has started moving from “one shared helper plus many old fallbacks”
+    toward “multiple real call sites already consuming the same returned
+    callable payload/view abstraction.” The nearby direct-callee returned-call
+    immediate path now also reuses the same shared payload-local materializer
+    for its `__retclosure_callcap_*` locals instead of hand-allocating and
+    populating them inline, so both returned-argument forwarding and returned
+    direct-callee consumers are beginning to meet on one producer-facing
+    payload/view pipeline rather than only sharing late call logic. The same
+    producer-facing cleanup now also starts reaching local function-value
+    declarations initialized from returned calls: their returned-target-family
+    discovery can now route through the same shared “collect targets with
+    returned-parameter fallback” helper instead of open-coding that fallback
+    set construction in place. The nearby identifier-local alias path now also
+    shares one narrow helper for cloning a source binding's runtime tag local
+    plus registered target set into a new alias binding, so ordinary local
+    function-value alias initialization is starting to converge on one shared
+    metadata-copy story instead of re-spelling `$ftag` cloning separately for
+    function-local and closure-local sources. The neighboring reassignment path
+    now also has matching narrow helpers for “copy runtime tag from another
+    binding” versus “remap one static target into this binding's runtime tag,”
+    so both noncapturing and closure-local reassignment have started sharing a
+    more explicit tag-write contract instead of open-coding those `register
+    target + mov` / `clone set + mov` sequences at each call site. The nearby
+    ternary reassignment path now also has one first shared “prepare ternary
+    target-set plus then/else tag values” helper, which begins separating
+    metadata preparation from the later branch-selected payload write and
+    should make it easier to converge initializer-side and reassignment-side
+    materialized ternary function-value lowering onto one internal contract.
+    That convergence step has now also started for real on the live tree: the
+    local ternary function-value initializer line now reuses that same shared
+    ternary metadata-preparation helper before its existing materialized
+    assignment emitter, so both initializer-side and reassignment-side
+    ternary lowering now agree on one front-loaded target-set/tag preparation
+    story even though their later payload write shapes still stay separate.
+    The same producer-facing cleanup now also reaches one more returned actual-
+    argument consumer path: a dynamic returned noncapturing function-valued
+    actual argument that previously hand-materialized just one tag local now
+    goes through the same shared returned-view/materialization entrypoint as
+    the neighboring closure-backed sibling, so that call site has stopped
+    open-coding its own nonclosure payload bridge and instead consumes the
+    generic returned payload/view contract directly. The nearby returned
+    closure-argument resolver path now also reuses the shared raw returned
+    payload materializer instead of hand-allocating `__retclosure_argcap_*`
+    locals before calling the producer, while deliberately preserving the
+    older “payload slots are forwarded as-is” contract that specialization and
+    forwarding code already expects from that helper. The same shared
+    returned-view story now also reaches one returned noncapturing local-bind
+    line on both canonical IR and lower-IR checkpoints: a local function-value
+    declaration initialized from a returned noncapturing call now sources its
+    runtime tag slot from the shared returned-view materializer instead of
+    preallocating a binding-named `$ftag` local and then separately filling it,
+    so the bind-and-call family has started to align with the newer returned
+    consumer paths on one explicit returned-view-owned tag-slot contract. The
+    neighboring returned single-capture closure local-initializer line now also
+    joins that same producer-facing cleanup boundary: the producer call first
+    materializes through the shared returned-view payload bridge, and only then
+    copies tag/capture values into the existing binding-owned `$ftag` /
+    `$closurecap$*` locals, so closure local-init/bind families have stopped
+    requiring a direct producer-to-binding slot write path even though the
+    public binding shape itself remains unchanged. The direct returned-call
+    immediate-call family now also moves one step closer on the noncapturing
+    path: its dynamic returned fallback now uses the shared returned-view
+    materializer instead of hand-initializing a callable view from raw payload
+    locals, and the nearby immediate-call checkpoints now intentionally lock
+    the newer “direct wrapper/call-indirect consumer shape” instead of older
+    intermediate helper/tag-slot scaffolding once that scaffolding stops being
+    semantically relevant. The nearby dynamic closure/two-target immediate-call
+    path now also joins that same returned-view cleanup boundary: instead of
+    hand-initializing a closure callable view from pre-materialized raw payload
+    locals, it now materializes the shared returned-view directly and reuses
+    that same payload/view contract for both the fast callable-object branch
+    and the fallback dispatch path. The producer-side return path now also has
+    one more
+    small shared cleanup checkpoint: direct returned-call payload writes inside
+    function-valued `return` lowering now route through one helper that
+    abstracts “materialize returned payload into snapshot slots versus hidden
+    return slots” instead of open-coding those two destination choices at each
+    direct-return call site, which keeps the ABI unchanged while tightening the
+    internal contract around returned payload placement. The nearby immediate-
+    call checkpoints on IR / lower-IR / compiler-driver have now also been
+    relaxed away from brittle helper-name and slot-name scaffolding where that
+    scaffolding is no longer semantically relevant, so later returned-callable
+    cleanups can keep targeting the real callable-object / returned-view shape
+    instead of preserving old intermediate names only to satisfy stale tests. A first
+    producer-adjacent returned-parameter consumer
+    A first producer-adjacent returned-parameter consumer
+    slice now also joins that same canonical object model on the static
+    single-capture closure path: `return id(f)(4);` and its nearby dynamic
+    sibling now keep the existing `id__fv_*` helper producer contract, but the
+    post-`id(...)` consumer side of canonical IR now materializes
+    `shape + fn_make main__closure_* + call_indirect` instead of only the
+    older direct `call main__closure_*` form. The same producer-adjacent line
+    now also reaches the nearby bind-and-call closure-local consumer sibling,
+    so `int g(int)=id(f); return g(4);` and its dynamic sibling now share that
+    same canonical callable-object consumer contract while lower-IR / compiler
+    / runtime still keep the earlier collapsed direct-call shape. The current
+    kept lowering boundary is intentionally narrow: that bind-and-call bridge
+    triggers only for closure locals that originated from returned
+    function-value call initializers, rather than widening all ordinary static
+    closure direct-callee sites at once. One more already-supported
+    caller position is now also open under the same conservative boundary: a local function
+    value that was initialized from a returned closure may now forward into an
+    existing function-valued parameter specialization call, for example
+    `int f(int)=make(3); return apply(f, 4);`. The first zero-arg and `void`
+    siblings of that same forwarding shape are now also regression-locked, for
+    example `int f()=make(3); return apply0(f);` and
+    `void f()=make(7); apply0(f);`. The first one-hop alias sibling of that
+    same returned-closure forwarding path is now also locked, for example
+    `int f(int)=make(3); int g(int)=f; return apply(g, 4);`.
+    The next remaining blockers on this line are no longer the first direct
+    local-bind-and-call witness, but wider returned-closure value positions and
+    broader transport families beyond those conservative paths. Further
+    returned-closure object-model work should still follow
+    [docs/language/RETURNED_CLOSURE_PLAN.md](/workspaces/compiler_lab/docs/language/RETURNED_CLOSURE_PLAN.md)
+    instead of jumping straight to generic escaping closure flow.
+    The nearby exact returned-parameter passthrough line is now also a real
+    regression-locked checkpoint instead of only a direct probe. When a
+    function-valued return is provably the exact body-level `return f;`
+    passthrough of a compatible parameter, local bind-and-call consumers such
+    as `int g(int)=id(f); return g(4);` may now collapse away from the older
+    `id__fv_*` producer helper materialization on the consumer side. Canonical
+    IR now explicitly locks the newer direct-bind closure/noncapturing shapes,
+    lower-IR and compiler-driver checkpoints now expect the corresponding
+    collapsed direct-call forms, default `ValueSSA` checkpoints now also lock
+    the further-folded post-optimization shapes, and extension runtime stays
+    green on the same families. The producer-side ABI is intentionally still
+    unchanged outside that exact-passthrough proof; this checkpoint is about
+    removing stale consumer-side helper dependence where the compiler already
+    has a stronger local identity proof.
+    The same cleanup round also moved one more live consumer onto the common
+    callable-object model internally: the tail `call`-lowering path for
+    returned-function-value local bindings no longer needs to read raw
+    binding-local target/capture fields directly for its static returned
+    closure/noncapturing indirect-call bridge. Those two already-supported
+    consumer siblings now first resolve the common `IrLowerCallableObjectView`
+    and only then apply the existing conservative wrapper/direct-call bridge,
+    which narrows one more gap between today's lowering internals and the
+    future explicit generic callable-object model.
+    The neighboring specialization/forwarding line now also has one more
+    internal consumer on that same common model: the identifier-root branch of
+    function-value actual-argument target resolution now prefers the shared
+    `IrLowerCallableObjectView` when recovering target/capture metadata for
+    local function/closure bindings, instead of first re-deriving those facts
+    from ad hoc binding and runtime-binding field checks. The public behavior
+    stays the same on the current conservative feature surface, but the live
+    lowering code now has less duplicated “what callable is this value?” logic
+    on the parameter-specialization path that will eventually need to become
+    generic first-class function-value transport.
+    The same interface-cleanup pass also tightened one nearby boundary that had
+    been generating warning noise on this line: direct wrapper-identifier
+    discovery for function-value expressions is now const-correct on its
+    lowering-context input, which removes the old qualifier-discard warning at
+    the actual-argument resolution call site and makes that helper match the
+    fact that it only performs wrapper-shape discovery plus delegated side-
+    effect replay, rather than mutating lowering state through its own
+    signature.
+    The nearby returned-call actual-argument line now also has one first
+    explicit internal helper boundary instead of keeping its closure/nonclosure
+    recovery logic open-coded inside the general function-value argument
+    resolver. Returned function-value actual arguments still keep the same
+    conservative behavior and evaluation timing as before, but the repeated
+    “recover target/capture metadata from a returned callable expression”
+    branch now lives behind one helper that the main argument-resolution path
+    delegates to. That gives the next cleanup turns a stable place to continue
+    shrinking returned-call-specific path splits without having to re-edit the
+    broader identifier/closure/ternary argument logic every time.
+    The nearby returned-parameter family now also has one first shared helper
+    boundary across both expression and statement lowering: extracting the
+    concrete argument expression behind a `return f;`-style function-valued
+    parameter passthrough, plus recovering its target/capture metadata, no
+    longer has to be open-coded at each immediate-call or local-init consumer.
+    Current IR/lower-IR/compiler/runtime behavior stays the same, but the
+    returned-parameter immediate-call and local-binding paths now reuse that
+    shared helper skeleton instead of each manually repeating
+    `function_value_return_parameter_index(...)` + arg-index bounds checks +
+    target/capture recovery. This is still a conservative internal cleanup,
+    not a new generic callable ABI step, but it meaningfully reduces another
+    source-position-specific returned-call split on the road to real generic
+    first-class function values.
+    The next small closure on that same line is now also landed: the
+    noncapturing returned-parameter local-init path and the nearby
+    returned-parameter immediate-call fallback no longer open-code their
+    “single target with closure-backed captures preserved from the returned
+    argument” bridge either. They now reuse the same shared returned-parameter
+    helper skeleton before deciding whether to keep copied captures. This still
+    does not widen the public feature boundary, but it removes one more
+    hand-rolled returned-parameter special case from both stmt and expr
+    lowering.
+    The nearby returned noncapturing expression fallback has now also been
+    tightened one step further: when collected returned-target metadata drops
+    out and the compiler falls back to the returned-parameter passthrough
+    proof, that expr-side recovery path no longer re-derives the passthrough
+    argument index/target by hand. It now delegates to the same shared
+    returned-parameter helper boundary as the earlier stmt/local-init cleanup,
+    so both expr and stmt lowering are progressively converging on one common
+    “recover returned-parameter callable target/captures” contract instead of
+    preserving parallel handwritten fallbacks.
+    The next immediate follow-up on that same expr line is now also landed:
+    the returned noncapturing direct-callee fallback no longer open-codes the
+    “collect returned target names, and if that fails fall back to the
+    returned-parameter passthrough target” two-step either. That recovery now
+    sits behind one shared helper boundary, so the expr-side returned-family
+    consumers are starting to share not only the returned-parameter target
+    recovery itself, but also the more specific “target-name-set with
+    passthrough fallback” policy that had previously been reimplemented inline.
+    The matching stmt-side noncapturing local-init fallback now also joins
+    that same helper boundary. When a returned noncapturing function-value
+    initializer cannot recover its target-name set through the ordinary
+    returned-family collector, it now uses the same shared
+    “target-name-set with returned-parameter passthrough fallback” helper as
+    the expr-side direct-callee path, instead of re-implementing the fallback
+    policy inline. This keeps public behavior unchanged, but further narrows
+    the gap between stmt and expr lowering on returned-family recovery.
+    The next small unification step on top of those helpers is now also real:
+    expr-side returned-parameter immediate-call lowering no longer has to
+    derive “target + captures + is this a static single-capture closure local?”
+    through separate local probes. That trio now comes back through one shared
+    helper boundary, which is a more honest precursor to the eventual generic
+    callable-object recovery contract than continuing to let each returned-call
+    consumer recompute slightly different slices of the same information.
+    The matching stmt-side noncapturing returned-parameter local-init path now
+    also starts consuming that richer shared recovery contract instead of only
+    the older target/capture helper. That means stmt and expr lowering are now
+    both trending toward one common returned-parameter callable-info boundary,
+    rather than one side asking “just give me captures” and the other side
+    asking “give me target + captures + static-closure-ness” through separate
+    ad hoc code paths.
+    The neighboring expr-side returned-parameter immediate-call path is now
+    also one branch smaller: the leftover noncapturing fallback that used to
+    recompute a narrower target-only slice after the richer callable-info
+    helper had already become available is gone. That path now relies on the
+    richer shared helper directly instead of keeping a second, weaker recovery
+    branch alive beside it.
+    The stmt-side returned-parameter capture-preservation logic now also has
+    its first explicit helper boundary instead of being open-coded at the
+    local-init consumer. The existing “if the returned parameter actually
+    carries closure captures, append local capture slots and copy them across”
+    step now sits behind one shared helper, which keeps behavior unchanged but
+    starts turning capture preservation itself into reusable callable-recovery
+    infrastructure rather than another one-off returned-family block.
+    The next small cleanup on that same preserve-captures helper is now also
+    landed: stmt-side returned-parameter capture preservation no longer drags
+    the unrelated “static single-capture closure local” predicate through its
+    own success path. For that helper, preservation is now simply “did we
+    actually recover nonzero captures and copy them?”, which makes the helper
+    a more focused piece of reusable returned-family infrastructure.
+    The next tiny cleanup on top of that richer contract is now also landed:
+    expr-side returned-parameter immediate-call lowering no longer asks the
+    richer helper for target/captures and then separately re-derives the
+    “static single-capture returned-parameter closure” predicate inline. That
+    predicate now has its own thin shared query helper, so even that last
+    special-case branch begins to look like reusable callable-recovery
+    infrastructure instead of ad hoc consumer-local glue.
+    The same expr-side immediate returned-parameter branch is now also one
+    redundant probe shorter: once that richer callable-info helper exists, it
+    no longer first does a weaker “is there a returned-parameter argument
+    here?” test before immediately asking the richer helper for the full
+    answer. The richer helper result is now the single source of truth for
+    that recovery branch.
+    The next small cleanup on that same path is now also landed: the expr-side
+    immediate returned-family branch no longer uses that weaker existence probe
+    as the outer control-flow guard either. It now tries the richer
+    returned-parameter callable-info helper directly, and only falls through to
+    the older returned-closure / returned-family fallback logic if that richer
+    recovery truly fails.
+    The neighboring returned-closure direct-callee path is now also slightly
+    cleaner internally: it no longer repeats the same “pick primary returned
+    target if present, otherwise fall back to the closure helper target”
+    selection inline at the materialization call site. That choice is now
+    first normalized into one local value before the returned-view materializer
+    consumes it, which is a small but real step toward a more shared
+    returned-family recovery policy.
+    The next step on that same sub-line is now also landed: expr-side returned
+    closure direct-callee recovery no longer open-codes the paired
+    “resolve closure helper target + collect returned target set + derive the
+    primary returned target” policy directly at the consumer site. That policy
+    now has its own shared helper boundary, and the direct-callee expr path is
+    its first consumer.
+    The matching stmt-side returned-closure local-init path now also consumes
+    that same shared helper boundary for helper-target / target-set / primary-
+    target recovery, so the first shared returned-closure recovery policy is
+    now live on both expr and stmt consumers rather than only on the expr
+    direct-callee path.
+    The next consumer on that same policy line is now also landed: returned
+    closure actual-argument recovery no longer open-codes its own helper-target
+    plus returned-target-set selection either. That path now also consumes the
+    shared returned-closure target-policy helper, so the same closure-family
+    recovery rule is now reused across expr direct-callee, stmt local-init,
+    and returned actual-argument consumers.
+    The next more-central consumer is now also beginning to move onto that same
+    policy: returned callable-view resolution for closure families no longer
+    rebuilds helper-target plus target-set recovery entirely on its own before
+    materialization. It now consumes the shared returned-closure target-policy
+    helper too, so the returned-view layer itself has started joining the same
+    common recovery contract instead of only its outer callers doing so.
+    The neighboring returned actual-argument recovery path now also follows
+    suit on the noncapturing side: its noncapturing returned-call target-set
+    recovery now uses the same shared target-set-with-parameter-fallback
+    helper as the returned-view and direct-callee lines, instead of rebuilding
+    that policy on its own.
+    The helper that resolves returned function-value actual-argument targets
+    has now also begun consuming that higher-level shared returned target-
+    policy helper internally, rather than continuing to keep closure-family and
+    noncapturing-family target-set recovery split all the way through its own
+    body.
+    The same actual-argument target helper now also has a cleaner separation
+    between “target policy recovery” and “payload materialization”: target-only
+    queries are now satisfied entirely above the closure payload path instead
+    of being routed through closure-family payload bookkeeping first.
+    The same actual-argument target helper now also treats “target-only query”
+    as a first-class use case above the family-specific payload logic, instead
+    of letting that query ride along inside the closure-specific branch. This
+    is a small cleanup, but it continues the same pressure toward one shared
+    returned-target policy layer with payload materialization only when a
+    consumer actually needs payload.
+    The same returned actual-argument line now also reuses the shared
+    returned-family helpers on the dynamic two-target fallback path, so that
+    branch no longer re-derives the closure/nonclosure target-set recovery
+    policy independently before materializing the returned dynamic callable
+    view.
+    The next inward-facing consumer is now also landing on that same shared
+    policy: returned function-value actual-argument target recovery itself no
+    longer keeps separate closure/noncapturing target-set policy branches all
+    the way through its helper body, and instead begins delegating that choice
+    to the higher-level shared returned target-policy helper too.
+    The next more-central consolidation step is now also landed: returned
+    callable-view resolution itself now has a shared helper that recovers the
+    returned target-set policy across both closure and noncapturing families,
+    instead of keeping those two recovery branches split at the returned-view
+    layer and only sharing helpers farther out at specific callers.
+    The nearby returned-view consumer now also consumes the shared helper's
+    normalized primary target directly, rather than recovering the target-set
+    through the helper and then still reaching back into `target_names[0]` at
+    the consumer site. That is a small but meaningful reduction in residual
+    consumer-local policy knowledge.
+    The matching stmt-side noncapturing returned local-init path now also
+    consumes the shared helper's normalized primary target directly instead of
+    re-reading `returned_target_names[0]` at the consumer site, so the same
+    normalization is now shared on both stmt and expr consumers.
+    The same primary-target normalization now also reaches the expr-side
+    returned noncapturing dynamic fallback path: when that consumer still has
+    to materialize a returned dynamic callable view explicitly, it now feeds
+    the shared helper's chosen primary target into that materialization instead
+    of re-reading `returned_target_names[0]` locally.
+    The same normalization is now also propagating through dynamic returned
+    function-value specialization consumers: the dynamic returned-call
+    specialization fallback now feeds the shared helper's primary target
+    directly into its returned-view materialization instead of still treating
+    `target_names[0]` as a second source of truth.
+    The matching stmt-side returned-closure local-init path is now also a bit
+    cleaner on that same axis: once it receives the shared closure target
+    policy result, it no longer threads the raw helper target back through the
+    same local variable that later materialization and postchecks use. The
+    normalized primary target is now the consumer-facing value there too.
+    The returned function-value actual-argument target helper is now also more
+    clearly layered: closure-family target-only queries are answered above the
+    payload-materialization path rather than being mixed into the payload path
+    itself, which better separates “what callable family is this?” from “do we
+    need to materialize returned captures for it?”.
+    The same primary-target normalization is now also starting to propagate
+    outward from returned-view into dynamic returned-function-value
+    specialization consumers, so that more of the returned-family stack is
+    using the shared helper's chosen primary target directly instead of
+    re-reading `target_names[0]` locally.
+    The dynamic returned-function-value specialization line now also starts
+    consuming that same higher-level shared target-policy helper instead of
+    locally branching on closure/noncapturing target-set recovery before
+    materializing its dynamic returned callable path.
+    The next layer under that is now also starting to form: there is now a
+    first shared helper boundary specifically for the common “resolve a
+    two-target returned family and materialize the returned callable view”
+    pattern, and the dynamic returned-function-value specialization path is its
+    first consumer. That begins separating “recover the returned family policy”
+    from “materialize the dynamic returned callable payload/view” as two
+    reusable steps rather than one long consumer-local block.
+    The next consumer on that helper line is now also landed: expr-side direct
+    returned noncapturing dynamic fallback now uses the same shared
+    two-target-returned-family materialization helper instead of keeping its
+    own local “recover policy + materialize returned view” block.
+    The expr-side direct returned-closure fallback now also has its helper-
+    target/primary-target flow cleaned up to match that newer layering, so its
+    consumer-local state is closer to the same shared contract even before its
+    larger dynamic path is fully migrated.
+    That new two-target returned-family materialization helper is now also
+    checkpointed on the live tree with the correct ownership boundary: its
+    consumer-facing returned view keeps owning the recovered target-name set on
+    success, instead of the helper freeing that metadata out from under later
+    dynamic dispatch consumers. This keeps the new shared boundary usable as it
+    expands to more callers.
+    The next consumer on that helper line is now also landed: expr-side direct
+    returned noncapturing dynamic fallback now uses the same shared
+    two-target-returned-family materialization helper instead of open-coding
+    that whole “recover policy + materialize view” block locally.
+    The nearby stmt-side returned noncapturing local-init consumer now also
+    uses a shared returned-view recovery/materialization helper instead of
+    separately redoing target-set recovery plus explicit view materialization.
+    That shared helper is now prefix-aware too, so stmt-side bindings can keep
+    their existing `__retfn_declslot` regression shape while still converging
+    on the same returned-view contract used elsewhere.
+    The nearby expr-side returned noncapturing direct-callee fallback now also
+    consumes that same prefix-aware shared returned-view helper instead of
+    separately recovering target sets before deciding whether to materialize a
+    dynamic returned family. Its existing `__retfn_callcap` checkpoint shape
+    stays intact, so the consumer convergence did not require another IR text
+    churn.
+    The nearby expr-side returned closure direct-callee fallback now also has
+    its own shared helper boundary for “recover helper target + materialize
+    returned closure view” before the later dynamic-dispatch-specific logic
+    takes over. That keeps the current `__retclosure_callcap` checkpoint shape
+    stable while moving one more returned-closure consumer away from fully
+    open-coded setup.
+    The next layer under that closure fallback is now also starting to share:
+    the returned-closure dynamic direct-callee path and the ordinary dynamic
+    closure direct-callee path now both use the same helper for “build
+    capture+argument call list, then emit the two-target closure dispatch
+    call”, instead of each hand-rolling that suffix separately.
+    The next closure-direct-call decision layer is now shared too: both of
+    those same consumers now go through one helper that first tries the
+    single-capture callable-indirect fast path and then falls back to the
+    shared two-target closure dispatch path, instead of each consumer locally
+    sequencing those two decisions on its own.
+    The direct-callee mainline is now also a bit less fragmented on the static
+    side: the nearby static closure and static noncapturing callable-object
+    shortcut checks, including the returned-binding siblings, now route
+    through one higher-level static callable-object dispatch helper instead of
+    open-coding those callable-indirect fast paths four times.
+    The returned-binding direct-callee suffix is now a little flatter too:
+    its static closure and static noncapturing siblings no longer sit in two
+    separate consumer blocks before calling that shared helper, and instead
+    share one resolved callable-object + dispatch block under the existing
+    returned-binding gate.
+    The same direct-callee mainline has also dropped one more redundant
+    resolve step: after the earlier callable-object classification/dispatch
+    block establishes the direct target, the later static-dispatch phase no
+    longer re-resolves that same direct target through a second local
+    callable-view probe before continuing.
+    The dynamic side of that same classification block is now also more
+    symmetric: noncapturing two-target direct-callee dispatch no longer stays
+    as an open-coded one-off while closure dispatch goes through a helper.
+    Both families now enter helper-shaped dynamic callable-dispatch glue
+    before returning to the shared direct-callee mainline.
+    That front-half direct-callee glue now also has one higher-level shared
+    helper above the family-specific dynamic helpers: once a callable-object
+    view has been resolved, one entrypoint now routes it into the closure or
+    noncapturing dynamic-dispatch helper path instead of leaving that family
+    split open-coded at the consumer site.
+    The nearby direct-callee gate boundary is now also a little more explicit
+    in code: the “supported direct identifier shape” check has its own small
+    predicate, which keeps `IR-LOWER-013` scoped to genuinely unsupported
+    callee shapes while preserving the later `IR-LOWER-025` unknown-target
+    gate for still-direct but unresolved names.
+    The same front-half direct-callee path now also has one best-effort
+    callable-object resolve helper that is intentionally weaker than a full
+    gate: it only centralizes the repeated “if this direct identifier shape
+    really resolves to a callable-object view, reuse that resolved target/view
+    state” step, while still leaving unknown-name rejection to the later
+    `IR-LOWER-025` boundary.
+    The nearby static side is now also a little flatter: the obvious
+    direct-target closure and direct-target noncapturing direct-callee
+    siblings no longer each hand-build a one-off minimal callable-object view
+    before calling the shared static dispatch helper, and instead go through
+    one thinner direct-target static-dispatch bridge first.
+    That same thin direct-target static-dispatch bridge now also reaches the
+    returned-binding direct-callee static sibling, so the nearby returned-
+    binding case no longer bypasses that small bridge and jump straight into
+    the lower static callable-object dispatch helper on its own.
+    The returned-binding static side now also has its own best-effort phase
+    helper above that bridge: the nearby binding gate, callable-object-view
+    recovery, and thin static direct-target dispatch attempt now live behind
+    one shared “try returned-binding static callable dispatch” entrypoint
+    instead of being sequenced inline at the direct-callee consumer.
+    The same pattern now also reaches the plain direct-target static side:
+    the obvious closure-returned-parameter and noncapturing-returned-call
+    static direct-callee siblings are now grouped behind one best-effort
+    “try direct-target static callee dispatch” phase helper instead of each
+    probing the thin static bridge in separate consumer-local blocks.
+    Those two static sub-phases now also have one level of shared composition
+    above them: direct-callee lowering can first attempt one best-effort
+    static callable phase combiner, which in turn sequences the plain
+    direct-target static phase and the returned-binding static phase without
+    inlining both of those attempts at the main consumer site.
+    The next inward-facing convergence step is now also real on the lowering
+    internals: callable-view recovery, returned-view recovery, identifier-root
+    transport recovery, and identifier-root function-valued return-payload
+    recovery now all project through one small shared
+    `IrLowerFunctionObjectDescriptor` layer before being re-expressed as the
+    existing callable-object / local-binding-transport / return-transport
+    structs. This does not open any new user-visible function-value semantics
+    yet, but it is a real checkpoint toward one explicit shared transport
+    contract instead of continuing to let stmt-side transport state and
+    expr-side return/callable views drift independently. Focused
+    `make test-ir-regression`, `make test-lower-ir-regression`,
+    `make test-extension-runtime`, `make test-value-ssa-regression`, and full
+    serial `make test` are green after also updating one default-ValueSSA dump
+    expectation to reflect the now-stable `__fnwrap_add1` helper presence on a
+    returned-function-value-parameter bind-and-call witness.
+    The next returned-family convergence checkpoint is now also landed with a
+    slightly sharper boundary: expr-side returned callable-object recovery now
+    has its own shared “returned call -> function-object descriptor” helper,
+    and stmt-side returned-function-value local transport now reuses that same
+    descriptor path for the noncapturing family instead of re-deriving
+    direct-target / dynamic-target / tag state by hand. The nearby closure
+    family deliberately stays on its older specialized stmt-side recovery path
+    for now, because collapsing both families into one generic builder in a
+    single step was too aggressive and briefly regressed ternary/returned
+    closure witnesses. So the live tree has moved one real step closer to one
+    shared returned-function-object recovery contract, but it is doing so with
+    an explicit conservative split between noncapturing and closure-family
+    transport until the closure-specific payload invariants are absorbed more
+    honestly. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on that narrowed checkpoint.
+    That same descriptor pressure now also reaches one first reassignment-side
+    metadata sink instead of stopping at initializer/return transport. When a
+    function-typed local is reassigned from another already-bound
+    function-local or closure-local binding, the nearby binding-update path no
+    longer always threads target/tag/const/returned metadata by hand; it now
+    has a small helper that can project the rhs binding through
+    `IrLowerFunctionObjectDescriptor` and reuse that descriptor while updating
+    the lhs binding transport metadata. This is still intentionally narrow and
+    does not try to genericize closure-payload copying or static-top-level
+    rebinding all at once, but it is a real additional checkpoint that starts
+    pulling assignment-side metadata flow toward the same shared function-
+    object contract already used by the newer callable-view and returned-
+    transport slices. Focused serial `make test-ir-regression` and
+    `make test-extension-runtime` are green on this reassignment-side
+    convergence step.
+    The nearby last static reassignment sink is now also a little less
+    one-off: the noncapturing `lhs = top_level_or_builtin_target` path no
+    longer has to hand-thread its final target/const-tag metadata straight
+    into the binding-update helper after rewriting the runtime tag local.
+    Instead it now first forms a tiny static-target
+    `IrLowerFunctionObjectDescriptor` and then reuses the same descriptor-side
+    binding-update helper already used by the newer local-binding rhs
+    reassignment path. This is a small change, but it continues the same
+    pressure toward one shared assignment-side function-object metadata
+    contract rather than leaving the static-target sibling permanently outside
+    the newer descriptor convergence line. Focused serial
+    `make test-ir-regression` and `make test-extension-runtime` are green on
+    this further narrowing step too.
+    The nearby declaration/initializer entrypoint is now also a little less
+    bespoke on that same axis. Function-value local declaration lowering no
+    longer open-codes every default field assignment on its transport-state
+    scratch struct at the consumer site, and the plain top-level/builtin
+    identifier initializer sibling now also routes through the shared
+    static-target descriptor before being re-expressed as transport state.
+    This is still implementation-facing cleanup rather than a new language
+    capability, but it means the stmt-side noncapturing/static-target line is
+    relying less on consumer-local field choreography and more on the same
+    helper/descriptor contract that newer returned/reassignment slices already
+    use. Focused serial `make test-ir-regression` and
+    `make test-extension-runtime` are green on this declaration-side
+    convergence step too.
+    The nearby declaration-finalize tail is now also a little more honest
+    about the same shared contract. After a function-value declaration path
+    materializes any needed runtime tag local, stmt-side finalize no longer
+    jumps straight from mutable transport-state fields into local binding
+    metadata; it now first reprojects the finalized transport state through a
+    small function-object descriptor and then reuses a descriptor-side
+    add-binding helper to record the binding metadata. This is still internal
+    cleanup rather than a user-visible feature, but it removes one more
+    statement-side metadata sink that used to sit outside the newer
+    descriptor/helper convergence line. Focused serial
+    `make test-ir-regression` and `make test-extension-runtime` are green on
+    this finalize-side convergence step too.
+    The nearby returned noncapturing stmt-side tail is now also less ad hoc.
+    After the existing target-family discovery and any optional
+    returned-parameter capture preservation, that builder no longer hand-writes
+    its final `target/tag/const/returned` transport fields back into the
+    mutable transport-state struct. Instead it now adjusts the recovered
+    function-object descriptor and then reuses the same descriptor-to-transport
+    initializer used elsewhere on the noncapturing line. This is still a small
+    internal cleanup, but it removes one more stmt-side metadata sink from the
+    older field-by-field style and keeps pressure moving toward one shared
+    lowering contract for noncapturing function-object transport. Focused
+    serial `make test-ir-regression` and `make test-extension-runtime` are
+    green on this returned-noncapturing convergence step too.
+    The nearby ternary local-initializer transport tail is now also a little
+    less bespoke on the same noncapturing/shared-contract axis. After
+    materializing the ternary-selected runtime tag local and any copied capture
+    slots, stmt-side ternary transport no longer has to hand-set the final
+    `tag_initialized / const=unknown` transport fields directly on the mutable
+    state struct. It now forms a small static-target descriptor, attaches the
+    already-materialized tag/capture payload to that descriptor, and then
+    reuses the same descriptor-to-transport initializer used by the other
+    newer noncapturing transport slices. This is still an internal cleanup,
+    not a new surface feature, but it removes one more field-by-field metadata
+    tail from stmt-side lowering and continues flattening the noncapturing
+    transport model toward one shared helper/descriptor contract. Focused
+    serial `make test-ir-regression` and `make test-extension-runtime` are
+    green on this ternary-transport convergence step too.
+    The nearby closure-literal builder is now also slightly less ad hoc on its
+    final target side even though its capture-materialization path remains
+    deliberately specialized. Once the helper function has been lowered and the
+    capture locals already exist, stmt-side closure-literal transport no longer
+    finishes by hand-writing the helper target back into the transport-state
+    struct; it now forms a small closure-family static-target descriptor,
+    attaches the already-materialized capture locals, and reuses the same
+    descriptor-to-transport initializer as the other newer transport slices.
+    This keeps the closure-family payload logic honest and local while still
+    shrinking one more field-by-field metadata tail at the builder boundary.
+    Focused serial `make test-ir-regression` and `make test-extension-runtime`
+    are green on this closure-literal target-tail convergence step too.
+    The nearby identifier-alias transport tail is now also flatter on the same
+    metadata axis. When a function-local or closure-local identifier source
+    needs its runtime tag local cloned for a new binding, stmt-side lowering no
+    longer stops after the tag-clone helper and then hand-flips the final
+    transport-state “tag initialized / const tag” fields itself. Instead it now
+    updates the recovered function-object descriptor with the cloned tag/const
+    metadata and reuses the descriptor-to-transport initializer again. This is
+    still internal cleanup, but it removes one more small alias-side
+    field-by-field tail and keeps the noncapturing/alias transport path aligned
+    with the broader descriptor convergence line. Focused serial
+    `make test-ir-regression` and `make test-extension-runtime` are green on
+    this alias-tail convergence step too.
+    The next tiny builder-shape cleanup is now also landed just above those
+    same stmt-side tails. A small helper can now form one static-target
+    function-object descriptor *with already-materialized payload attached*,
+    instead of forcing each consumer to first build a bare static descriptor
+    and then manually bolt on capture/tag payload fields. Current stmt-side
+    closure-literal and ternary-function-value builders now both consume that
+    helper, so the remaining descriptor plumbing on this line is flatter and
+    more obviously shared even before any new user-facing semantics are added.
+    Focused serial `make test-ir-regression` and
+    `make test-extension-runtime` are green on this helper-level convergence
+    step too.
+    The mainline has now also taken its first direct step from “stmt-side
+    transport convergence” into “explicit callable-object IR consumer
+    convergence”. Expr-side lowering now has a small helper for emitting an
+    indirect callable-object invocation once `code/env/shape/args` are already
+    known, and the first batch of existing `fn_make + call_indirect` consumers
+    now route through that helper instead of open-coding the pair locally.
+    This is intentionally still a small consumer-side step, not a full new IR
+    abstraction layer, but it is the first implementation move that treats the
+    canonical callable-object instructions as a reusable lowering contract
+    rather than only as instructions the surrounding code happens to know how
+    to spell. Focused serial `make test-ir-regression` and
+    `make test-extension-runtime` are green after a small follow-up fix that
+    restored the older temp-order/result-temp contract at branch-joined
+    indirect-call sites.
+    That explicit callable-object consumer line now also reaches one layer
+    earlier than raw emission. Expr-side lowering has a first helper for
+    constructing a callable `shape_id` directly from an already-lowered target
+    function signature, and the first batch of static closure/noncapturing
+    callable-object consumers now reuse that helper instead of each open-coding
+    their own “collect parameter types, append shape, then emit indirect call”
+    boilerplate. This is still only the first slice, but it means the
+    canonical callable-object path is now beginning to share not only its final
+    `fn_make + call_indirect` emission, but also part of the immediate shape
+    contract that sits just above it. Focused serial `make test-ir-regression`
+    and `make test-extension-runtime` are green on this shape-construction
+    convergence step too.
+    The nearby dynamic/branch-joined callable-object line now also shares one
+    layer more of that same contract. Expr-side lowering has a first helper for
+    constructing a **two-target** callable-shape bridge (including target-pair
+    signature compatibility and shared shape creation), and the kept
+    noncapturing two-target wrapper bridge plus the kept single-capture closure
+    two-target bridge now both consume it instead of each open-coding their own
+    “check both targets, gather parameter types, append shape, then branch into
+    indirect-call CFG” setup. This is still only the first step above those two
+    concrete bridges, but it means the explicit canonical callable-object path
+    now shares not only emit shape and single-target shape creation, but also
+    the first reusable two-target bridge-shape contract. Focused serial
+    `make test-ir-regression` and `make test-extension-runtime` are green on
+    this two-target shape-bridge convergence step too.
+    One next-step attempt then tried to push the consumer protocol itself one
+    layer higher, by sharing a more generic “callable-object dispatch” entry
+    above the existing static/dynamic bridges. That attempt was intentionally
+    backed back out at the call sites after it disturbed zero-arg and
+    representative-name-sensitive dynamic families: runtime-selected views were
+    no longer preserving the older dispatch-order assumptions that the
+    zero-arg/returned/forwarding slices still rely on. The live tree is back at
+    the stable checkpoint where explicit callable-object helperization covers
+    emit, single-target shape creation, and two-target shape bridges, but the
+    higher-level “one helper chooses static vs dynamic vs closure dispatch”
+    protocol is *not* yet treated as stable authority. Current recommendation
+    is to keep moving the explicit callable-object line upward only where the
+    bridge shape is obviously identical, and to postpone broader protocol
+    unification until zero-arg and returned-family routing can be modeled more
+    explicitly.
+    That narrower strategy has already produced one more kept checkpoint:
+    expr-side lowering now has a first helper for building a **single-target**
+    callable bridge shape directly from a lowered target name plus an expected
+    visible-argument count, and the first batch of static single-capture
+    closure consumers now reuses it instead of each hand-checking hidden-env
+    arity and then separately re-deriving the same shape. This is still a
+    modest step, but it means the explicit callable-object path now shares
+    helper shape construction on both the single-target and two-target bridge
+    lines without reopening the more fragile higher-level dispatch-order
+    protocol. Focused serial `make test-ir-regression` and
+    `make test-extension-runtime` are green on this single-target bridge-shape
+    convergence step too.
+    The next tiny follow-up on that same line is now also landed: the
+    single-target helper is already useful enough that the nearby static
+    callable-object consumers can start sharing a little of the remaining
+    single-visible-argument preparation too, rather than each re-checking the
+    same one-argument `call_expr` shape by hand before calling into the
+    explicit callable-object path. This is still intentionally very small, but
+    it keeps the current helperization strategy honest: only move one layer up
+    when the bridge shape is truly identical, and leave the more fragile
+    higher-level dispatch-order protocol alone until zero-arg and returned
+    routing can be modeled explicitly.
+    The same narrowing move now also reaches the nearby returned/static
+    single-capture closure-adjacent consumers rather than stopping at one
+    direct static site. A tiny helper can recover the sole visible scalar
+    argument for the obviously single-arg callable-object bridge cases, and the
+    first returned/static single-target closure consumers now reuse it instead
+    of each open-coding the same `call_expr kind/arg_count/arg[0]` lowering
+    boilerplate. This is still only a small cleanup, but it continues the
+    stable mainline pattern: share bridge-local prep where the shape is truly
+    identical, and keep the more fragile dynamic/static routing protocol out of
+    scope until it can be made explicit.
+    A follow-up experiment immediately confirmed that this boundary still
+    matters: trying to push that same “single visible arg” helper farther into
+    the dynamic specialization stack re-exposed the old returned/zero-arg/
+    runtime-family sensitivity, so that broader use was backed out while the
+    clearly identical static/returned single-target bridge sites stayed on the
+    helper. Current authority is therefore unchanged in spirit but sharper in
+    wording: helperize local prep only when the surrounding bridge shape is
+    obviously identical, and do not let a convenience helper silently change
+    which dispatch family gets first refusal on runtime-selected function
+    values.
+    That same conservative consumer-side convergence now also reaches one more
+    tiny but real shared tail: the nearby returned/static single-capture
+    closure callable-object consumers now reuse one helper for the identical
+    “single-target hidden-env bridge shape + `fn_make` + `call_indirect`”
+    emission suffix instead of each redoing that suffix locally after their own
+    front-half checks. This keeps the dispatch-order policy untouched while
+    still shrinking another obviously identical bridge-local tail. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this checkpoint.
+    The same pattern now also reaches the neighboring static noncapturing
+    single-target callable-object consumer. Its wrapper-backed path now reuses
+    one narrow helper for the identical “wrapper target shape check +
+    `fn_make` + `call_indirect`” suffix instead of open-coding that suffix in
+    the call-site-specific consumer. This is intentionally still below the
+    dynamic/static routing boundary: the consumer keeps its own front-half
+    wrapper synthesis and visible-argument prep, while only the obviously
+    identical single-target callable-object tail is shared. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this checkpoint too.
+    The next tiny cleanup on that same consumer line is now also landed:
+    another pair of one-visible-argument callable-object consumers now reuse
+    the existing single-visible-argument lowering helper instead of each
+    open-coding `call_expr->args[0]` extraction before entering their kept
+    indirect-call bridge path. This still does not widen semantics or alter
+    dispatch-family priority; it only reduces bridge-local prep duplication on
+    obviously identical one-arg call sites. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this cleanup checkpoint as well.
+    That same one-visible-argument prep cleanup now also reaches the nearby
+    returned dynamic noncapturing immediate-call bridge instead of stopping at
+    the earlier local/static callable-object consumers. The first returned
+    dynamic one-arg slice still keeps its existing runtime-family routing and
+    two-target bridge shape, but it no longer re-spells `arg_count == 1` plus
+    raw `args[0]` lowering inline before entering that bridge. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this checkpoint too.
+    The same narrow cleanup line now also reaches one layer thinner than raw
+    arg extraction: expr-side lowering has a tiny helper for “this callable
+    bridge requires exactly one visible argument, and here is the lowered
+    value”, and the nearby dynamic noncapturing + returned dynamic
+    noncapturing one-arg slices now use that helper instead of each keeping a
+    partly duplicated one-arg gate around the same bridge-local lowering. This
+    still does not touch family-routing priority or widen the accepted
+    surface; it only moves another obviously identical one-arg bridge precheck
+    into one place. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this checkpoint too.
+    The same “share only the honest bridge-local prep” strategy now also has a
+    first indexed-argument sibling again, but this time kept deliberately
+    narrow. Expr-side lowering now has one small helper for “lower the single
+    visible non-function argument at this known call-arg index”, and the first
+    batch of returned/forwarding consumers with a movable scalar arg position
+    now reuse it instead of each open-coding `args[index]` bounds checks plus
+    lowering. This helper does not decide routing or specialization policy; it
+    only centralizes one repeated indexed-arg prep shape. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this checkpoint too.
+    That same indexed-arg line now also reaches one layer above raw extraction:
+    the first returned/forwarding consumers that immediately repack the single
+    movable scalar argument into a one-slot call-arg array now share one tiny
+    “indexed visible arg -> optional one-slot args buffer” prep helper instead
+    of each separately spelling both the indexed extraction and the
+    `arg_count = 0/1` bookkeeping. The helper still stays entirely below
+    callable-family routing and below any specialization policy. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this checkpoint too.
+    The same one-slot prep line now also has its first tiny read-only view
+    helper: a few neighboring consumers that already carry `(arg_buffer,
+    arg_count)` no longer each open-code the final `arg_count > 0 ? buf :
+    NULL` selection before calling into the kept callable-object bridge. This
+    is intentionally only a surface cleanup, but it keeps the current pattern
+    consistent: share the obviously identical 0/1-slot bookkeeping while
+    leaving dispatch-order and specialization policy untouched. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this checkpoint too.
+    The same consumer-side cleanup now also reaches the immediate call-site
+    prep just above that view layer. Expr-side lowering has one tiny helper for
+    “this direct call site itself carries at most one visible argument; lower
+    it into a one-slot buffer and record whether the buffer is empty or full”,
+    and the first static/dynamic single-target/two-target callable-object
+    consumers now reuse it instead of each hand-stitching the same
+    `call_expr->arg_count` / lower-arg / `arg_count=0|1` boilerplate. This
+    still stays entirely below callable-family routing and below specialization
+    policy. Serial `make test-ir-regression`, `make test-lower-ir-regression`,
+    and `make test-extension-runtime` are green on this checkpoint too.
+    The next nearby explicit consumer on that same line is now also landed:
+    the two-target callable-object “dispatch directly from a call expr”
+    bridge no longer open-codes its own 0/1 visible-arg prep before falling
+    into the existing `with_args` path. It now reuses the same one-slot
+    call-site prep plus one-slot args-view helpers as the neighboring
+    static/dynamic consumers, so the `call_expr -> one-slot args -> with_args`
+    shape is beginning to read uniformly across several explicit
+    callable-object consumers. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this checkpoint too.
+    The same one-slot prep line now also has one tiny sibling for already-
+    lowered scalar values: when a consumer has already recovered the lone
+    visible argument as an `IrValueRef`, it can now build the optional one-slot
+    args buffer through a helper instead of separately spelling the
+    `if(count==1){buf[0]=value; arg_count=1;}` bookkeeping again. The first
+    dynamic specialization consumer on the callable-object line now uses that
+    helper, which keeps the “0/1 visible args” story structurally aligned
+    whether the source is a raw `call_expr`, an indexed `call_expr` argument,
+    or an already-lowered scalar value. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this checkpoint too.
+    The same “already-lowered scalar -> one-slot args buffer” helper now also
+    reaches the nearby dynamic noncapturing direct-dispatch sibling instead of
+    stopping at dynamic specialization. That path still keeps its existing
+    one-argument-only semantic boundary and the same two-target callable-object
+    dispatch route, but it no longer bypasses the emerging one-slot args prep
+    stack. Serial `make test-ir-regression`, `make test-lower-ir-regression`,
+    and `make test-extension-runtime` are green on this checkpoint too.
+    The same helper now also reaches the first returned noncapturing immediate-
+    call bridge that already had its lone scalar argument lowered before
+    entering the two-target callable-object path. That sibling no longer keeps
+    a one-off local `[1]` args array just to pass one value into the shared
+    bridge; it now uses the same “already-lowered scalar -> optional one-slot
+    args buffer” prep helper as the nearby dynamic consumers. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this checkpoint too.
+    The same one-slot prep family now also has one “required single visible
+    argument -> one-slot args buffer” helper above the earlier scalar-only
+    helper. The nearby dynamic noncapturing direct-dispatch and returned
+    dynamic noncapturing immediate-call slices now use that helper instead of
+    separately spelling “validate exactly one visible arg, lower it, then pack
+    it into a one-slot args buffer.” This still does not touch routing policy;
+    it only removes another repeated bridge-local one-arg protocol layer.
+    Serial `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this checkpoint too.
+    That helper cleanup also sharpened one important boundary: the optional
+    one-slot prep helpers must stay permissive for `>1` visible args and only
+    report back the observed count, rather than turning every “not this small
+    slice” shape into an immediate failure. The live tree is now back on the
+    correct conservative contract where 0/1-arg helperization shares the local
+    prep, but larger-arity call shapes still fall through so older broader
+    paths can decide whether to handle them. Keep this rule explicit when
+    continuing helperization upward.
+    The returned dynamic noncapturing immediate-call sibling now also no longer
+    needs its own tiny two-target immediate-call wrapper once the one-slot args
+    prep path is in place. That path now feeds the already-built returned
+    callable-object view directly into the shared `with_args` consumer instead
+    of repackaging the same data through one more dedicated helper. This keeps
+    the behavior unchanged, but it means the returned one-arg dynamic path is
+    now structurally closer to the other explicit callable-object consumers.
+    The next small cleanup on that same line is now also landed: several
+    explicit callable-object consumers that still lived at
+    `call_expr -> one-slot args buffer -> args_view -> with_args` now share
+    one tiny pre-step for producing both the one-slot buffer and its nullable
+    args-view in one place. This is still only bridge-local prep, but it keeps
+    the one-slot helper stack internally coherent as more consumers migrate
+    onto it.
+    The nearby returned-argument noncapturing bridge is now also slightly more
+    self-contained on the same callable-object convergence line. Its shared
+    returned callable-view path now releases temporary dynamic-target ownership
+    inside the helper instead of leaking the old caller-side cleanup burden
+    outward, and the repeated “returned call -> producer external -> closure
+    family” discovery logic used by the family-aware returned-view helpers now
+    flows through one small shared helper instead of being restated at each
+    entry point. Behavior is intentionally unchanged, including the rule that
+    closure-return argument resolution may still stay on the older more
+    tolerant path. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this returned-helper convergence step too.
+    That same one-slot helper stack now also has a “required single visible
+    arg -> one-slot args view” layer above the earlier required-one-arg buffer
+    helper. The nearby dynamic noncapturing direct-dispatch and returned
+    dynamic noncapturing immediate-call siblings now consume that view directly
+    when entering the shared `with_args` path, instead of separately asking for
+    a one-slot buffer and then deriving the nullable view one line later. This
+    is still only bridge-local prep consolidation, but it keeps the required
+    one-arg path structurally aligned with the optional one-arg path.
+    The indexed-argument side now also reaches that same view level: the first
+    returned/forwarding consumers with a movable lone scalar arg now share
+    “indexed arg -> one-slot args view” directly instead of stopping at an
+    intermediate one-slot buffer and deriving the nullable view one line
+    later. This keeps the indexed-arg helper stack aligned with the plain
+    `call_expr` one-slot helper stack without changing any routing behavior.
+    The next tiny follow-up on that same line is now also landed: the indexed
+    side now has its own “required indexed arg -> one-slot args view” helper,
+    so the first one-arg-only returned/forwarding slices no longer have to
+    combine the required-arg check and the indexed-arg view step manually. The
+    effect is still strictly local to bridge prep, but it keeps the required
+    and optional helper ladders aligned on both the plain-arg and indexed-arg
+    sides.
+    The same returned/dynamic callable-object line now also has one shared
+    gate for the common “is this really a materialized two-target dynamic
+    callable-family view?” predicate. Returned-argument recovery, returned
+    one-arg noncapturing dispatch, and the nearby dynamic specialization /
+    dispatch consumers no longer restate the same tag/target-shape checks
+    separately before continuing. This is still only internal convergence, and
+    the returned noncapturing path deliberately keeps its older error split
+    between “wrong target-set shape” and “missing materialized tag”. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this shared dynamic-view gate
+    cleanup too.
+    The nearby returned noncapturing consumers now also enter through one
+    shared returned-view helper before they decide whether the recovered value
+    is the simple single-target case or the still-supported two-target dynamic
+    case. This keeps the family-aware payload-prefix choice and primary-target
+    validation in one place for both returned-argument recovery and returned
+    callee dispatch, while still leaving closure-return consumers on their
+    older more permissive paths. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this returned-noncapturing consumer cleanup too.
+    The same returned noncapturing line now also has one tiny shared
+    post-recovery outcome helper for the “single-target static success vs
+    two-target dynamic continuation” split. The first returned-argument
+    consumer no longer hand-inlines that branch/cleanup tail after recovering a
+    callable-object view, and the ownership/return-path behavior stays the
+    same, including the discovery-only case that still surfaces the recovered
+    primary target even for dynamic families. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this returned-outcome helper cleanup too.
+    That same returned-outcome helper now also sits on the nearby returned
+    callee dispatch sibling instead of only the returned-argument path. The
+    callee side still keeps its older `068` vs `101` diagnostic split for bad
+    dynamic-family materialization, but it no longer needs a second hand-written
+    static-vs-dynamic branch tail before entering the one-arg dynamic dispatch
+    bridge. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this returned-callee convergence step too.
+    The same indexed helper stack now also has one tiny policy-selecting entry
+    above those two view helpers: the first small-slice returned/forwarding and
+    dynamic-specialization consumers no longer each hand-branch on
+    `visible_arg_count == 1 ? required : optional` before asking for an
+    indexed one-slot args view. They now share that dispatch decision in one
+    bridge-local helper while preserving the same one-arg-vs-zero-arg boundary
+    and the same permissive `>1` fallback contract.
+    The plain-arg side now also has the matching policy-selecting layer above
+    its required/optional one-slot args-view helpers. The first static/dynamic
+    explicit callable-object consumers no longer each locally decide whether a
+    `call_expr` should use the required one-arg view path or the permissive
+    optional view path before entering shared `with_args` lowering. This keeps
+    the plain-arg helper ladder structurally aligned with the indexed-arg
+    ladder without widening semantics.
+    The nearby dynamic-specialization line now also has one shared resolved-view
+    exit for the first ternary and returned-call function-argument families.
+    Once those entrypoints have already materialized a callable-object view,
+    they no longer separately hand-write the same “is this a supported
+    two-target dynamic family, who owns the target-name array, and do later
+    stages need materialized capture forwarding?” bookkeeping. That exit now
+    flows through one small helper instead, which keeps the dynamic
+    specialization bridge closer to the same shared callable-object contract
+    used by the returned and direct-dispatch consumers. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this dynamic-specialization
+    view-resolution cleanup too.
+    The first dynamic-specialization emitter shell now also has one shared
+    pre-dispatch gate for the already-resolved callable-object view. After a
+    caller recovers the two-target dynamic family plus the ownership of the
+    target-name array, the emitter no longer hand-repeats the same
+    “is the family usable here, and may closure forwarding continue?” early
+    exits before entering the specialization bridge proper. That small gate is
+    now shared in one place, again without widening semantics. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this dynamic-specialization
+    dispatch-gate cleanup too.
+    The nearby dynamic-specialization indirect fast-path now also sits behind
+    one small helper instead of hand-writing its own local “try shared
+    two-target callable-object dispatch, free owned target names on success,
+    then finish void-or-value result propagation” shell. This keeps the first
+    dynamic-specialization emitter closer to the same shared callable-object
+    consumer shape as the rest of the noncapturing line. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this dynamic-specialization
+    fast-path cleanup too.
+    The nearby dynamic-specialization fallback bridge now also has one tiny
+    cleanup helper for the paired “free forwarded-arg scratch storage and free
+    owned target names” tail. This is intentionally only resource-management
+    convergence, but it removes another repeated shell from the first explicit
+    specialization bridge without touching dispatch behavior. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this dynamic-specialization
+    cleanup-tail convergence too.
+    The same first dynamic-specialization bridge now also has one small shared
+    cleanup helper for its temporary bound-target / bound-capture arrays. This
+    is still only shell-level resource convergence, but it means the bridge no
+    longer hand-writes the same array teardown at allocation failure, helper
+    build failure, and success exit. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this dynamic-specialization binding-cleanup convergence too.
+    The same first dynamic-specialization fallback bridge now also routes its
+    then/else specialized-call blocks through one shared branch-call helper
+    instead of keeping two mirrored “set block, emit call, jump to join” tails
+    inline. This is still only local shell convergence, but it keeps the first
+    explicit specialization bridge closer to one reusable callable-object
+    control-flow pattern. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this dynamic-specialization branch-call cleanup too.
+    The same first dynamic-specialization fallback bridge now also builds its
+    pair of specialized helper names through one shared helper instead of
+    locally allocating / populating / tearing down the temporary bound-target
+    and bound-capture arrays around two adjacent specialization calls. This is
+    still only shell convergence, but it pushes another large bridge-local
+    chunk under one reusable callable-object helper boundary. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this dynamic-specialization
+    helper-build cleanup too.
+    The nearby non-dynamic specialization sites now also start sharing that
+    same “resolve function-valued call args into bound targets/captures, then
+    build one specialized helper name” shell instead of each carrying their
+    own local array-allocation / resolve / build / teardown block. The first
+    returned-call specialization and the nearby ordinary static
+    function-value-call specialization both now enter through one shared helper
+    while keeping their existing diagnostic strings. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this specialization-helper
+    convergence step too.
+    The nearby specialization consumers now also start sharing the next tiny
+    adoption tail after helper materialization: refreshing the current lowering
+    function, swapping in the specialized callee name, and marking that the
+    later call-argument path should lower through the specialized calling
+    convention. The first returned-call specialization and the nearby ordinary
+    static function-value-call specialization now both reuse that tail while
+    preserving their existing refresh-failure diagnostics. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this specialization-adoption
+    convergence step too.
+    The next specialized-calling-convention layer now also starts sharing one
+    helper: when a call has already committed to a specialization path, the
+    first returned-call specialization and the nearby ordinary static
+    function-value-call specialization no longer each hand-assemble capture
+    locals for function-valued arguments before continuing with ordinary arg
+    lowering. That specialized capture-forwarding append step now sits behind
+    one helper while preserving their distinct diagnostic strings. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this specialized-arg-lowering
+    convergence step too.
+    The next tiny layer above that now also starts converging: the first
+    returned-call specialization and the nearby ordinary static
+    function-value-call specialization no longer each locally decide “does
+    this parameter take the specialized capture-forwarding append path, or the
+    ordinary arg append path?” before resuming their per-arg loops. That
+    branch now sits behind one shared helper while preserving the two sites'
+    current diagnostics. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this specialized-vs-ordinary arg-lowering convergence step too.
+    The nearby ordinary call-lowering probe shells now also start sharing one
+    tiny “if this dispatch probe applied, clean up returned-call capture state
+    and stop here” helper instead of each hand-writing the same applied-path
+    tail after a successful direct-callee or returned-binding dispatch probe.
+    This does not change probe order or selection policy; it only trims one
+    more repeated control-flow shell from the call-lowering mainline. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this probe-shell convergence
+    step too.
+    The same call-lowering probe cluster now also starts sharing one tiny
+    failure tail: when a dispatch probe returns failure without having filled a
+    diagnostic, the first direct-callee callable-object dynamic probe and the
+    nearby static direct-target probe no longer each hand-write the same
+    “synthesize default diagnostic and stop” shell. Probe order and fallback
+    policy are unchanged; only the no-diagnostic failure shell is flatter.
+    Serial `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this probe-failure convergence
+    step too.
+    The next tiny probe layer now also starts converging: the first direct
+    callee callable-object dynamic probe and the nearby returned-binding probe
+    no longer each hand-write the same “if this probe applied, unwind returned
+    capture ownership and stop here” shell. That applied-path probe tail now
+    sits behind one shared helper too, again without changing probe order.
+    Serial `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this applied-probe-tail
+    convergence step too.
+    The nearby static direct-target probe now also joins that same applied-path
+    helper instead of keeping one last local “if applied then unwind returned
+    capture ownership and stop here” tail. This keeps the direct-callee,
+    static direct-target, and returned-binding probe exits aligned on the same
+    tiny post-apply contract without touching probe order. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this static-probe-tail
+    convergence step too.
+    The nearby ordinary call-lowering probe chain now also shares one tiny
+    reset helper for clearing stale probe diagnostics before trying the next
+    strategy. This is intentionally minimal, but it removes another repeated
+    control-flow shell from the probe cluster without changing probe order or
+    fallback policy. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this probe-reset convergence step too.
+    The nearby direct-callee callable-object dynamic probe now also starts
+    collapsing into a higher-level helper instead of keeping its own local
+    “recover direct callee callable-object view, try dynamic probe, then check
+    whether the applied-path cleanup stopped the call” shell inline at the main
+    call site. This still preserves the same probe order and diagnostics, but
+    it removes one more multi-line strategy wrapper from the ordinary
+    call-lowering mainline. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this direct-callee probe-shell convergence step too.
+    The nearby returned-binding probe now also starts collapsing into the same
+    style of higher-level helper instead of keeping its own local
+    “resolve returned binding, try static returned-binding dispatch, then see
+    whether the applied-path cleanup stopped the call” shell inline at the
+    main call site. A follow-up attempt to lift the adjacent static
+    direct-target wrapper more aggressively was intentionally backed out again,
+    because it started collapsing wrapped returned noncapturing families such
+    as `pick()(41)` back to direct calls. The live tree keeps the new
+    returned-binding probe helper, but still preserves the earlier callable-
+    object boundary on those wrapped-return witnesses. Serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on this returned-binding
+    probe-shell convergence step too.
+    One attempted follow-up on the nearby static-direct-target wrapper was too
+    aggressive: it started collapsing wrapped returned noncapturing families
+    such as `pick()(41)` back to direct calls and broke the explicit
+    callable-object `fn_make + call_indirect` contract on that witness. The
+    live tree has been pulled back to the previous safe boundary: keep the new
+    direct-callee probe shell helper, but do not lift the broader static
+    direct-target wrapper until a narrower proof distinguishes the families
+    that may legitimately collapse from the families that must stay on the
+    callable-object path. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green again after restoring that boundary.
+    That boundary is now also a little more explicit in the returned-call
+    consumer itself: for returned noncapturing single-target families on the
+    immediate-callee path, the live tree now prefers the static
+    callable-object dispatch route and no longer falls back to handing the raw
+    target name back to the ordinary direct-call mainline. This keeps wrapped
+    returned witnesses on their required `fn_make + call_indirect` contract
+    while still allowing later narrower collapse proofs to be added
+    deliberately. Serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on this returned-single-target callable-object boundary too.
+    A nearby success-path cleanup is now also landed around that same shared
+    `with_args` entrypoint: a couple of dynamic closure / returned-callee
+    consumers no longer each hand-write the same “mark this dispatch as
+    applied and return” tail after a successful shared call-object dispatch.
+    This is intentionally tiny, but it keeps the shared `with_args` line
+    cleaner and makes later higher-level shell unification easier to reason
+    about.
+    The next success-tail cleanup on that line is now also landed: a few more
+    callable-object consumers that already complete a shared dispatch path now
+    reuse the same tiny "write result, mark applied" helper instead of each
+    hand-writing the exact same post-dispatch success tail. This is still
+    purely control-flow tidying, but it keeps the explicit callable-object
+    consumer line more uniform before any later architectural jump.
+    A nearby function-type boundary has now also been tightened back into an
+    honest checkpoint before any deeper generic-function-value step: parser
+    no longer silently accepts deep nested function-typed parameter signatures
+    such as `int f(int g(int))` inside another function signature and then
+    flattens away the inner callable shape. Those deeper forms are now
+    rejected explicitly at parse time with a dedicated “one level only”
+    diagnostic, and focused parser regressions now lock both the plain
+    function-valued-parameter and function-valued-return siblings. This closes
+    a real correctness hole where deeper nested-signature mismatches had been
+    accidentally accepted even though the live AST/type metadata only tracked
+    one callable-parameter layer.
+    One more nearby function-type hole is now also closed the same honest way
+    instead of being left half-supported: within that single tracked callable
+    layer, parser no longer silently accepts inner parameter lists such as
+    `int f(float)` or `int f(pair)` and then lets later semantic/type checks
+    treat them like plain `int`-parameter shapes. Those non-plain-int inner
+    parameter families are now rejected explicitly at parse time for both the
+    function-valued-parameter and function-valued-return-parameter siblings,
+    with focused parser and semantic regressions. Current authority is still
+    intentionally conservative: the live tree only models one callable layer
+    whose inner parameter list is plain-`int`-only until function-type
+    metadata is made genuinely recursive.
+    The next tiny semantic convergence step on that same path is now also
+    landed internally: several higher-order function-value checks no longer
+    each open-code their own "does this function/builtin match the expected
+    function-valued shape?" comparison by manually checking only parameter
+    count plus return type. They now route through one shared semantic helper
+    that compares against a `SemanticTypeDescriptor` function shape instead.
+    This does not make function-type metadata recursive yet, but it is a real
+    step toward one reusable function-shape contract shared across local
+    initialization, function-valued arguments, returned-function-value checks,
+    and later generic first-class function-value work.
+    The nearby shape-construction side has now also started converging too,
+    not only the compare side. A small shared semantic helper now builds plain
+    internal function-valued `SemanticTypeDescriptor` views from
+    `(return_type, parameter_count, parameter_value_kinds)`, and the first
+    local-function-value assignment plus local-binding-returned-call sites now
+    reuse that helper instead of each hand-constructing the same temporary
+    `{ kind=function, return_type=..., parameter_count=... }` descriptor.
+    This is still a staging step rather than the final recursive function-
+    shape model, but it means the semantic layer is beginning to share both
+    how function shapes are compared and how those temporary function-shape
+    views are constructed.
+    That same semantic convergence line now also covers one nearby local-
+    binding correctness hole: resolving `int g(...)=f;` through an earlier
+    local function-valued declaration no longer accepts the binding by only
+    matching return type plus parameter count. The resolver now builds a
+    local declaration function-shape descriptor and compares the full shape,
+    so same-arity parameter-kind mismatches like `int f(float)=...; int g(int)=f;`
+    reject instead of slipping through as if both were the same callable
+    family.
+    The sibling local reassignment path now follows the same direction too.
+    The `g = f;` extension helper no longer starts from a local-declaration
+    lookup that only reconstructs return type plus parameter count for the
+    left-hand function slot; it now pulls the full local function-valued
+    descriptor first and threads that shape through the rest of the
+    compatibility check. That closes the nearby assignment-side hole where
+    same-arity parameter-kind mismatches such as
+    `int f(float)=...; int g(int)=...; g=f;` could otherwise be reasoned about
+    from a partially reconstructed expected shape instead of the actual local
+    declaration contract.
+    A nearby helper-interface cleanup is now landed too: several local
+    function-value resolution sites already had a full expected
+    `SemanticTypeDescriptor` in hand, but still funneled that information
+    through the older `(return_type, parameter_count)` resolver entry and
+    rebuilt a narrower temporary shape inside the helper. Those sites now have
+    a descriptor-aware resolver path too, so local alias / forwarding checks
+    that already know the full expected function shape no longer drop
+    parameter-kind information before they reach the local-binding walk.
+    The surrounding helper surface is now also a bit more honest. The old
+    narrow wrapper that only accepted `(return_type, parameter_count)` is no
+    longer needed on the live higher-order path, so local function-value
+    resolution now keeps the descriptor-aware entry as the real path instead
+    of maintaining two parallel APIs. The nearby
+    `semantic_extension_local_function_value_argument_is_allowed(...)` probe
+    also no longer fakes an `int/0-arg` expected shape just to ask whether a
+    local function-valued declaration exists; it now checks that existence
+    directly. This does not broaden language support by itself, but it removes
+    one more misleading shape assumption from the front-end extension slice.
+    The local-initializer side now also keeps one less source-position-
+    specific exception. When the current extension slice sees a direct
+    function-valued-return call in local initialization, the first-entry
+    "allowed?" helper no longer treats any visible `has_function_return_signature`
+    callee as good enough and leave the real shape check to a later pass.
+    It now uses the already-available expected function descriptor there too,
+    so direct `pick()`-style local function-value initialization keeps the
+    same parameter-kind contract even at that early whitelist boundary.
+    Direct-call argument checking for function values is now also a bit less
+    uneven. The scalar argument validator used to do real type checks for
+    ordinary externals/builtins and immediate `pick()(...)`-style calls, but
+    local function-valued direct calls still mostly relied on the earlier
+    arity-only gate. The current semantic slice now reuses a small shared
+    function-type argument validator for immediate call results, local
+    function-valued declarations, and direct calls through function-valued
+    parameters, so obvious scalar mismatches such as
+    `int f(float)=...; f(0);` now reject at the same `SEMA-TYPE-003` boundary
+    instead of slipping through on argument count alone. This is still not the
+    final generic callable ABI or full aggregate-aware higher-order checker,
+    but it removes one more direct-call inconsistency from the front half.
+    That same direct-call checker now also reaches the first aggregate-valued
+    function-value siblings instead of stopping at scalar arguments only.
+    Local function-valued direct calls such as `int f(pair)=sum; f(1);` and
+    `int f(struct P)=sum; f(q_of_struct_Q);` now reject through the same
+    aggregate call-argument boundaries (`SEMA-AGG-005` / `SEMA-AGG-006`) that
+    ordinary external calls already used, rather than silently bypassing
+    aggregate argument compatibility just because the callee identity flowed
+    through one first-class local function-value slot.
+    The neighboring callee-wrapper forms now follow that same contract too.
+    Direct-call target checking had already learned to peel supported wrapper
+    shapes such as comma-result and assignment-result callees before deciding
+    whether `(0, f)(...)` or `(h=f)(...)` is callable, but the later argument
+    type validator still mostly looked at the unreduced original callee and
+    could miss the same mismatch on wrapped function-value calls. That pass
+    now mirrors the same wrapper rewrite for the supported callee forms, so
+    wrapper-mediated function-value calls keep the same `SEMA-TYPE-003` /
+    aggregate mismatch boundaries as the unwrapped direct-call siblings.
+    Immediate function-value call sites such as `pick()(...)` are now also
+    explicitly regression-locked on that same front-half contract instead of
+    only being covered by the happy-path passing witnesses. Focused semantic
+    and compiler regressions now prove that a returned `(...)(float)` function
+    shape rejects `pick()(0)` at `SEMA-TYPE-003`, so the current immediate-call
+    slice is no longer relying on incidental shared-helper behavior without a
+    direct negative checkpoint.
+    The same immediate-call line is now also a bit less "legacy indirect-call"
+    in its arity diagnostics. When the front end can already resolve
+    `pick()(...)` to a real function-valued return shape, an argument-count
+    mismatch such as `pick()(1, 2)` no longer falls back to the old broad
+    `SEMA-CALL-005` call-result-not-callable boundary. It now reports the same
+    `SEMA-CALL-004` call argument count mismatch class that ordinary direct
+    calls use, which makes the first immediate function-value call slice look
+    more like one real call contract and less like a one-off special case.
+    Direct calls through function-valued parameters now also have focused
+    negative checkpoints instead of relying only on the shared helper being
+    incidentally reused. The current parser honesty boundary still limits the
+    inner callable parameter list to plain-`int`, so the useful new checks on
+    that path are the ones the surface can really express today:
+    `int apply(int f(int), int x){ return f(1.25); }` now stays locked on
+    `SEMA-TYPE-003`, and `return f(1, 2);` stays locked on `SEMA-CALL-004`.
+    That keeps the parameter-direct-call slice aligned with the newer local
+    function-value and immediate-call checkpoints without pretending the live
+    grammar already models richer nested callable parameter types.
+    The neighboring zero-argument higher-order call surfaces now also have
+    their own focused negative checkpoints instead of only the passing ones.
+    Local zero-arg direct calls such as `int f()=next; f(1);` and immediate
+    returned zero-arg calls such as `pick()()(1)` are now locked on the same
+    `SEMA-CALL-004` argument-count mismatch boundary as the one-argument
+    siblings, which keeps the zero-arg callable line from remaining a hidden
+    special case while the front end converges on one shared call contract.
+    Zero-arg direct calls through function-valued parameters now also have the
+    same focused arity guard in regression coverage. Shapes such as
+    `int apply0(int f()){ return f(1); }` and
+    `void apply0(void f()){ f(1); }` now stay explicitly locked on
+    `SEMA-CALL-004`, which keeps the zero-arg parameter-direct-call sibling
+    aligned with the newer local and immediate zero-arg callable checkpoints
+    instead of leaving that path protected only by the generic shared helper.
+    The returned-closure immediate-call sibling now also has the same first
+    focused negative coverage as the returned-noncapturing one. The current
+    surface now explicitly locks both `make(3)(1.25)` on `SEMA-TYPE-003` and
+    `make(3)(1, 2)` on `SEMA-CALL-004`, so the front-end no longer relies on
+    symmetry-by-accident between closure-backed and noncapturing immediate
+    calls; both families now have direct regression proof that they obey the
+    same early call-argument contract.
+    Supported wrapper-callee siblings are also continuing to converge instead
+    of drifting apart. The comma-wrapped function-value direct call already had
+    a focused scalar-mismatch regression, and the assignment-result sibling now
+    has the same one: `(h=f)(0)` on a `float`-shaped local function value now
+    stays explicitly locked on `SEMA-TYPE-003`. That keeps the two currently
+    supported wrapper-mediated direct-call forms aligned at the same argument
+    type boundary instead of leaving one of them protected only by accidental
+    reuse of the shared wrapper rewrite.
+    Returned-parameter immediate calls such as `id(add1)(...)` now also have
+    one first focused negative checkpoint instead of only the success witness.
+    The current surface now explicitly locks `id(add1)(1.25)` on
+    `SEMA-TYPE-003`, which keeps the returned-parameter immediate-call sibling
+    aligned with the already-tightened local, wrapper, immediate-returned, and
+    closure-backed direct-call paths at the scalar argument type boundary.
+    That same returned-parameter immediate-call sibling now also has the first
+    matching arity checkpoint too: `id(add1)(1, 2)` is explicitly locked on
+    `SEMA-CALL-004` instead of relying on the broader call-result fallback
+    behavior. With both `SEMA-TYPE-003` and `SEMA-CALL-004` now covered,
+    `id(f)(...)` is starting to look like the same front-end call contract as
+    the nearby local / wrapper / immediate-returned families rather than one
+    more position-specific exception.
+    The closure-backed returned-parameter immediate-call sibling now also has
+    the same first pair of focused negative checkpoints. Shapes such as
+    `id(f)(1.25)` and `id(f)(1, 2)` with `f` bound to one closure-backed
+    `int(int)` value now stay explicitly locked on `SEMA-TYPE-003` and
+    `SEMA-CALL-004`, respectively. That keeps the returned-parameter line more
+    symmetric across noncapturing and closure-backed families instead of
+    letting only the noncapturing side carry the precise direct-call coverage.
+    The dynamic returned-parameter immediate-call families now also have the
+    same first paired negative checkpoints on both sides. Both the
+    noncapturing sibling `id(f)(1.25)` / `id(f)(1, 2)` after a runtime-
+    selected `f`, and the closure-backed sibling with the same two call-site
+    mistakes, are now explicitly locked on `SEMA-TYPE-003` and
+    `SEMA-CALL-004`. That means the returned-parameter immediate-call line is
+    no longer only partially symmetric; static vs dynamic and noncapturing vs
+    closure-backed now all have the first shared scalar/arity diagnostic
+    coverage.
+    Zero-arg closure-backed direct local calls now also have the first focused
+    negative checkpoint instead of only the happy-path witness. The current
+    surface now explicitly locks `int f()=closure...; f(1);` on
+    `SEMA-CALL-004`, which keeps the zero-arg closure direct-call sibling from
+    lagging behind the zero-arg noncapturing local/immediate/parameter call
+    families while the front end converges on one shared higher-order call
+    contract.
+    The nearby zero-arg returned-closure forwarding siblings now also have the
+    first matching arity checkpoints instead of only their positive
+    `apply0(make(...))` witnesses. Both
+    `int apply0(int f()){ return f(1); }` with a returned zero-arg `int`
+    closure and the corresponding `void` sibling are now explicitly locked on
+    `SEMA-CALL-004`, so the zero-arg returned-closure path is no longer a
+    quiet exception relative to the newer zero-arg local/direct/immediate call
+    coverage.
+    The neighboring zero-arg closure-forwarding-into-parameter siblings now
+    also have that same explicit arity guard instead of relying only on their
+    passing witnesses. Both `int apply0(int f()){ return f(1); }` with a local
+    zero-arg closure binding and the matching `void` sibling now stay locked on
+    `SEMA-CALL-004` through semantic and compiler-driver coverage, which keeps
+    the closure-forwarding family aligned with the already-tightened local,
+    immediate, parameter-direct-call, and returned-closure zero-arg surfaces.
+    Direct closure-literal actual arguments are now also carrying the same
+    shared higher-order call contract instead of only positive transport
+    coverage. The one-argument sibling
+    `apply(closure [...], ...)` now has an explicit scalar-mismatch checkpoint
+    on `SEMA-TYPE-003`, and the zero-arg `int` / `void` siblings now have
+    matching arity checkpoints on `SEMA-CALL-004`. That keeps direct
+    closure-literal argument flow converged with the nearby local-binding,
+    returned-parameter, wrapper-callee, and closure-forwarding families rather
+    than letting direct literal arguments remain a source-position-specific
+    exception.
+    Wrapper-mediated function-value actual arguments are now also carrying more
+    of that same shared direct-call contract instead of staying mostly
+    positive-only. The dynamic comma-result sibling `apply((0, g), ...)`, the
+    dynamic assignment-result sibling `apply((h=f), ...)`, and the closure
+    comma-wrapped sibling `apply((f, f), ...)` now all have explicit
+    scalar-mismatch checkpoints on `SEMA-TYPE-003`. That keeps wrapper-shaped
+    actual-argument forwarding more symmetric with the already-tightened
+    wrapper-callee, returned-parameter, direct closure-literal, and ordinary
+    forwarding families while the front end converges on one shared
+    higher-order call diagnostic contract.
+    The same convergence line now also reaches the ternary-shaped actual-
+    argument and direct-callee siblings instead of leaving those families
+    mostly positive-only. Both the noncapturing and closure-backed ternary
+    actual-argument shapes
+    `apply(((putint(0), c) ? f : g), ...)` now explicitly lock scalar mismatch
+    on `SEMA-TYPE-003` and arity mismatch on `SEMA-CALL-004`, and the matching
+    ternary direct-callee siblings
+    `(((putint(0), c) ? f : g))(...)` now carry that same pair of negative
+    checkpoints. That keeps ternary-shaped higher-order calls aligned with the
+    already-tightened wrapper, returned-parameter, direct literal, local, and
+    forwarding families instead of preserving one more position-specific
+    exception pocket.
+    The callable-object line now also has one first real "transport through an
+    ordinary IR temp" checkpoint instead of only direct `fn_make`-to-
+    `call_indirect` adjacency. Canonical IR verification and the lower-IR
+    bridge now both accept a `call_indirect` callee that reaches `fn_make`
+    through a temp-to-temp `mov` chain, and focused verifier/lower-IR
+    regressions lock that shape. This is still intentionally narrow, but it is
+    the first structural step where callable-object values behave a little more
+    like ordinary first-class values in IR rather than only one-use immediate
+    call artifacts.
+    The neighboring callable-object projection story has now also moved one
+    small step beyond "opcode exists on paper". Canonical IR verification now
+    requires `fn_env` / `fn_shape` operands to resolve back to a real callable
+    object producer (again allowing the same conservative `mov` transport
+    chain), and the lower-IR bridge now lowers those two projections into real
+    values instead of placeholders: `fn_env` materializes the bridged env value
+    and `fn_shape` materializes the shape id immediate. Focused verifier and
+    lower-IR regressions now lock that slice, so callable objects are no longer
+    only construct-and-call artifacts; they also have one first explicit
+    projection surface with real downstream meaning.
+    That same projection slice is now also checked one layer wider than the
+    first focused gates: serial `make test-ir-regression` stays green after the
+    verifier/lower-IR projection semantics were tightened, so the live
+    canonical callable-object consumer families are still stable under this
+    stricter "projection operands must really resolve to callable objects"
+    contract. The current explicit callable-object checkpoint therefore now
+    covers construction, one conservative temp-transport path, indirect call,
+    and two real projections with downstream meaning.
+    The remaining projection was not left behind either: `fn_code` now lowers
+    to one first explicit lower-IR symbol-address form instead of a temp
+    placeholder. Lower IR now has `addr_function <name>` as a real instruction
+    with dump/verifier support, the `fn_code` bridge now resolves its operand
+    back to the underlying `fn_make` producer and materializes that callee
+    symbol explicitly, and focused lower-IR verifier/regression plus serial
+    `make test-ir-regression` are green after that step. So the current
+    callable-object checkpoint now includes real downstream meaning for all
+    three explicit projections: `fn_code`, `fn_env`, and `fn_shape`.
+    That code-projection slice now also survives one more downstream boundary
+    instead of stopping at lower IR. `ValueSSA` now explicitly recognizes
+    `addr_function` as the address-like sibling of `addr_local` /
+    `addr_global`, including conversion from lower IR plus the corresponding
+    dump / verifier / liveness / rename plumbing. Focused serial
+    `make test-value-ssa-regression` and `make test-value-ssa-verifier` are
+    green after that step, so callable-object code projection now has a real
+    path from canonical IR through lower IR into the first SSA-facing layer
+    instead of becoming another downstream blind spot.
+    That same code-projection path now also reaches the machine-facing IR layer
+    instead of stalling at SSA entry. `machine_ir` now understands
+    `addr_function` as a first-class instruction with dump / verifier support,
+    ValueSSA-to-machine lowering now preserves the code-address projection
+    rather than dropping it, and focused serial `make test-machine-ir` is green
+    on both a manual verifier reject for unknown function targets and a
+    translation-only lowering witness. So callable-object `fn_code` now has a
+    continuous path from canonical IR through lower IR, ValueSSA, and
+    machine-facing IR.
+    The same `fn_code` projection now also survives one more backend boundary:
+    `machine_select` understands `addr_function` as a first-class selected op,
+    machine-IR-to-selected lowering preserves the code-address projection
+    instead of dropping it, and focused serial `make test-machine-select` is
+    green after adding a minimal machine-IR witness plus the selected-side dump
+    / verifier / runtime-tag plumbing. That means callable-object code
+    projection now has a continuous path from canonical IR through lower IR,
+    ValueSSA, machine-facing IR, and selected op form.
+    The next backend text/report chain is now also checkpointed on that same
+    code-projection line. `machine_layout`, `machine_emit`, and
+    `machine_encode` now all accept and preserve `addr_function` instead of
+    only the older local/global address ops, with focused serial
+    `make test-machine-layout`, `make test-machine-emit`, and
+    `make test-machine-encode` green after adding minimal bridging witnesses.
+    The encode-layer witness intentionally checks the encoded program artifact
+    rather than insisting the textual dump print every non-terminator op, which
+    keeps the test aligned with that layer's real contract. At this point the
+    callable-object `fn_code` projection has a continuous path from canonical
+    IR through lower IR, ValueSSA, machine-facing IR, selected op form, and
+    the later layout/emit/encode textual pipeline.
+    The stmt-side transport-convergence line has also taken one more explicit
+    descriptor-first step while that backend closure continued. Ternary
+    function-value reassignment no longer finishes by directly hand-calling the
+    older binding-metadata update sink once tag/capture materialization is
+    done; it now forms a small function-object descriptor for the already-
+    materialized payload and reuses the same descriptor-side binding-update
+    helper as the newer reassignment/initializer siblings. This does not widen
+    user-visible semantics yet, but it removes one more statement-side
+    field-by-field metadata tail and keeps pressure moving toward callable
+    objects behaving like ordinary transported values instead of one-off
+    transport-state bundles. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` are
+    green on that convergence step too.
+    That same stmt-side transport-convergence line is now also a little
+    broader on the nearby local-initializer builders. Direct identifier-root
+    function-value initialization, closure-literal initialization, and the
+    returned-closure initializer sibling now all build their intermediate
+    state more descriptor-first before reusing the common
+    `ir_init_function_value_transport_state_from_function_object_descriptor(...)`
+    sink, instead of eagerly mutating `IrLowerFunctionValueTransportState`
+    field-by-field and only partially converging later. This is still not a
+    new user-visible language slice, but it reduces one more cluster of
+    stmt-side special casing and makes the next cleanup target clearer: keep
+    shrinking the remaining returned/noncapturing transport builders that
+    still mix direct transport-state mutation with later descriptor recovery.
+    Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green after that follow-up convergence pass too.
+    The nearby returned/noncapturing stmt-side builder now also matches that
+    direction a bit better. It no longer seeds
+    `IrLowerFunctionValueTransportState` from the returned-call descriptor
+    before target registration / preserved-capture recovery and then re-seeds
+    it again at the end; instead, it keeps the intermediate work on the
+    descriptor side, applies the optional preserved closure-backed parameter
+    capture payload there, and only initializes the transport state once at
+    the final sink. This is still a small internal cleanup, not a new
+    first-class function-value feature slice, but it removes another stmt-side
+    double-initialization pattern and keeps the callable-object convergence
+    line moving toward one ordinary descriptor-to-transport handoff. Focused
+    serial `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on that step too.
+    That same returned/noncapturing builder has now also been structurally
+    cleaned up into one clearer descriptor-first block after that earlier
+    double-initialization removal. The preserved-capture side path, dynamic
+    target registration, and final single transport-state initialization are
+    now grouped together under one local descriptor-oriented flow instead of a
+    partially reindented, half-transitioned middle state. This is still
+    internal convergence work rather than a new language slice, but it makes
+    the next likely cleanup target more obvious: the older stmt-side finalize
+    sink that still starts from `IrLowerFunctionValueTransportState` and only
+    then rebuilds a descriptor on the way into binding metadata. Focused
+    serial `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` stay green after that structural cleanup too.
+    That older stmt-side finalize sink has now also moved one step onto the
+    same descriptor-first line. There is now an explicit
+    `ir_finalize_function_value_local_binding_transport_from_descriptor(...)`
+    helper that owns the "ensure tag local if needed, stamp const-tag facts,
+    then write binding metadata" tail, and the older
+    `IrLowerFunctionValueTransportState`-based finalize entry has been reduced
+    to a thin adapter that first builds a descriptor and then reuses that
+    descriptor-side sink. This still does not widen user-visible language
+    semantics, but it removes another place where stmt-side function-value
+    lowering treated transport-state as the primary truth and descriptor
+    recovery as an afterthought. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that convergence step too.
+    The declaration-local mainline has now also been switched over to that new
+    descriptor-side finalize sink. Function-typed local declarations still use
+    the existing builders for now, but their final handoff no longer calls the
+    old transport-state finalize wrapper; instead the declaration path now
+    explicitly converts the built transport state into a descriptor and
+    finalizes through the descriptor-side sink directly. The old
+    transport-state finalize wrapper then became unused and has been removed,
+    which is a meaningful little checkpoint: stmt-side local function-value
+    declarations no longer need a transport-state-only finalize endpoint on
+    the live tree. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green after that follow-up too.
+    That same declaration-local mainline now also uses a more
+    descriptor-driven cleanup rule for owned capture payload. The final local
+    declaration path no longer frees capture-local arrays only by checking a
+    couple of source-expression kinds; instead it tracks whether the builder
+    produced owned function-value payload for the descriptor handoff and frees
+    that payload on both success and failure from the same declaration-side
+    transport path. This is still cleanup rather than a new first-class
+    function-value feature slice, but it is a better fit for the eventual
+    callable-object/value-transport model because ownership is now attached a
+    bit more to the transported function-value payload shape than to the
+    parser form that happened to create it. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green on that step too.
+    The expression-side function-valued return line has now also moved a
+    little closer to the same descriptor/callable-object truth model. The
+    return-transport builder no longer reserves descriptor-backed treatment
+    only for closure-local identifier returns: noncapturing function-local
+    identifier returns now also first recover a descriptor, and the
+    noncapturing return-payload emitter now prefers the already-built
+    return-transport tag facts before falling back to a fresh scope lookup.
+    This still does not redesign the hidden return-payload contract itself,
+    but it does reduce one more place where the return path re-derived facts
+    that had already been recovered in descriptor form. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green on that convergence step too.
+    The same return-transport builder now also pre-seeds one more tiny
+    noncapturing identifier fact instead of leaving it solely to the payload
+    emitter fallback: when an identifier return resolves to a static
+    noncapturing target under the current hidden-return contract, the builder
+    now records the existing constant tag fact (`1`) directly in the return
+    transport so the emitter can consume that transport state first. This is
+    still a very small convergence step, not a redesign of the return payload
+    ABI, but it means one more return-side fact is now carried forward by the
+    transport object itself instead of being re-derived later from syntax plus
+    scope. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that follow-up too.
+    The return-side builder has now also been split one layer further for the
+    identifier case. The old all-in-one
+    `ir_try_build_function_value_return_transport_state(...)` no longer keeps
+    its identifier-return recovery logic inline; that part now lives in a
+    dedicated helper so later convergence work can keep tightening the
+    descriptor-backed identifier path without repeatedly editing the whole
+    return-state builder. This is a structural cleanup rather than a new
+    feature slice, but it is the sort of split that usually makes the next
+    descriptor-first step cheaper and safer. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green after that helper extraction
+    too.
+    The same return-side main builder has now also been split one layer
+    further by return shape, not just by the earlier identifier case.
+    Direct-call and ternary return-family / payload-slot-count recovery now
+    live in their own small helpers too, so
+    `ir_try_build_function_value_return_transport_state(...)` is starting to
+    read more like a dispatch layer than a monolithic special-case block. This
+    still does not change the hidden return-payload ABI, but it is a useful
+    structural checkpoint because later descriptor-first convergence can now
+    target identifier/call/ternary return families independently instead of
+    reopening one big all-in-one function every time. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green on that split too.
+    The same shape-split return builder now also has a clearer internal
+    layering checkpoint: direct-call / ternary family classification and
+    payload-slot-count recovery each live in focused helpers, while the parent
+    builder mostly orchestrates those results plus the small final fallback
+    rule. That is still far short of a full descriptor-to-return-transport
+    bridge redesign, but it means further convergence work can now target a
+    specific return shape without reopening the whole return-state builder,
+    which should keep the next steps safer as we continue moving toward a
+    genuine generic first-class function-value model. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green after that follow-up too.
+    The return-side line now also has one first explicitly named
+    descriptor-to-return-transport bridge helper, even if it is still narrow:
+    static noncapturing identifier returns can now seed their
+    `IrLowerFunctionValueReturnTransportState` through a descriptor-backed
+    bridge and then override only the hidden-return payload slot count that
+    differs from the more generic callable-object payload shape. This is not
+    yet a full return-ABI redesign, but it is the first concrete checkpoint
+    on that path where return transport is initialized from descriptor truth
+    first and only then adjusted for the older hidden payload contract.
+    Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that bridge step too.
+    That neighboring stricter emitter-side experiment is now also kept on the
+    live tree: for identifier-root noncapturing function-value returns, the
+    payload emitter now really does trust only
+    `IrLowerFunctionValueReturnTransportState` instead of falling back to
+    scope/binding re-queries or a second static-target resolution pass. The
+    missing top-level static returned-function coverage that originally forced
+    a backout has now been filled in builder/bridge code first, and the
+    result is locked by the new top-level witness
+    `int pick()(int) { return add1; }`. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green on that stricter authority
+    boundary too.
+    The direct-call returned-function line has now also moved one small step
+    closer to the same bridge model. For the noncapturing single-target case,
+    the direct-call return helper now resolves the returned target family and,
+    when it statically collapses to one target, seeds return transport through
+    the same descriptor-backed bridge path used by the static identifier
+    family before restoring the producer external needed by the current hidden
+    return-payload ABI. This still does not redesign the return ABI, but it
+    means direct-call returns are no longer only a hand-filled
+    `direct_return_call_external + payload_slot_count` shape on that narrow
+    path. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that follow-up too.
+    The first explicit `returned_view -> return_transport` bridge is now also
+    live on one caller-side returned-closure path instead of existing only as
+    an unused helper. The returned-closure immediate/dynamic callee recovery
+    path that already materializes `IrLowerReturnedFunctionValueView` now also
+    converts that same view through the shared return-transport bridge before
+    reusing its payload/capture facts for the old hidden-return ABI plumbing.
+    This is still a narrow slice, but it is an important architectural
+    checkpoint: one real returned-view-bearing path now shares the same bridge
+    family as the newer static/direct return lines instead of open-coding its
+    own field picks forever. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that step too.
+    The nearby returned noncapturing static-consumer path is now also slightly
+    less ad hoc on the same convergence line. Once returned noncapturing
+    recovery has already produced an `IrLowerCallableObjectView`, the
+    single-target/static branch now keeps using that same unified callable
+    view for dispatch and target reporting instead of extracting
+    `direct_target_name` and then hand-building a second minimal static view
+    just to re-enter the shared callable-object helper. This is a small
+    cleanup, but it is the right kind of small cleanup: one fewer returned
+    consumer still treating callable objects as temporary syntax facts instead
+    of as the local truth model we want before a genuinely generic first-class
+    function-value implementation. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that follow-up too.
+    The neighboring static callable-object projection story is now also a bit
+    less repetitive. A small helper now owns the narrow
+    `IrLowerCallableObjectView -> target/capture` projection for already-static
+    callable values, and the first local initializer/binding path, ordinary
+    function-valued argument recovery, plus the nearby returned-argument
+    noncapturing static branch now all reuse that same projection boundary
+    instead of each open-coding their own `direct_target_name` /
+    `capture_local_ids` / `capture_count` picks. This is still only an
+    internal cleanup, but it moves one more cluster of consumers toward a
+    shared callable-object truth model before the larger generic function
+    object work. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that helperization step too.
+    The nearby returned-function-value-parameter recovery line is now also a
+    little less duplicated. The `_argument_target` and richer `_argument_info`
+    helpers used to each re-run the same "find returned parameter argument
+    expr, then recover target/captures from it" sequence independently; that
+    common work now lives in one small core helper, and the two public entry
+    points just project the pieces they need. This is still a narrow internal
+    refactor, but it matters because returned-parameter transport is one of
+    the places where the code was still drifting toward parallel recovery
+    ladders instead of one reusable function-value/object recovery surface.
+    Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that cleanup too.
+    The nearby returned-closure recovery line has now also moved one cautious
+    step closer to the same descriptor-first model, but only after fixing a
+    real regression it exposed. `ir_resolve_returned_closure_view_with_prefix`
+    now seeds its returned view from the shared returned function-object
+    descriptor recovery path before separately recovering the closure helper
+    name, instead of open-coding its own target-info + materialization chain.
+    That first unification pass initially broke the live
+    `returned_closure_immediate_call` witness because the new shared helper
+    accidentally treated "closure has a valid primary helper name but no
+    explicit target-name array" as an error. The kept fix is to preserve the
+    closure-side contract honestly: noncapturing returned families still
+    require a non-empty explicit target set, while closure families may
+    legally materialize from the primary helper name alone. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` are green again after that
+    descriptor-boundary correction, including the returned-closure
+    immediate-call/runtime witness.
+    The nearby returned-parameter fallback path is now also one notch less
+    ad hoc. When returned noncapturing target-set recovery has to fall back to
+    "the returned function value really came from a returned function-valued
+    parameter argument", the old code open-coded a one-element target-name
+    array locally. That tiny array materialization now lives in one helper
+    instead, so the returned-parameter fallback no longer keeps its own
+    mini-allocation pattern separate from the rest of the target-recovery
+    surface. This is a small cleanup, but it keeps the target-set side of the
+    returned-view line moving toward one reusable recovery vocabulary rather
+    than many one-off local array shims. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green on that follow-up too.
+    That same returned-parameter fallback now also has one explicit
+    single-target recovery helper above it, instead of only the newer
+    one-element target-set array helper below it. The direct-target and
+    target-set fallback entrypoints no longer each reach independently into
+    `ir_try_resolve_returned_function_value_parameter_argument_target(...)`
+    when all they really need is "recover the one fallback target name, if
+    any"; they now share one small helper for that truth too. This is still a
+    tiny refactor, but it is the right kind of tiny refactor for this stage:
+    one more returned-consumer cluster now has a shared vocabulary for
+    fallback target recovery before we ask the codebase to carry a truly
+    generic function-object transport model. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green on that follow-up as well.
+    The nearby returned-function-value argument closure path has now also
+    started consuming that same returned-view truth surface instead of
+    hand-splicing its own `primary_target + materialized payload locals`
+    result. The closure-family branch inside
+    `ir_try_resolve_returned_function_value_argument_target(...)` now first
+    resolves a returned closure view through
+    `ir_resolve_returned_closure_view_with_prefix(...)`, then projects the
+    helper target and capture facts from that view, rather than re-running the
+    older local target-info + payload-materialization sequence itself. This is
+    still a narrow internal refactor, but it is one of the more meaningful
+    ones on this line because it moves returned-argument closure recovery onto
+    the same returned-view vocabulary that the returned-callee closure path had
+    already started using. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that follow-up too.
+    The old returned-closure argument payload helper that supported the
+    pre-unification path is now also gone instead of being left behind as a
+    dead alternate route. After the argument-side closure recovery moved onto
+    `ir_resolve_returned_closure_view_with_prefix(...)`, the earlier local
+    `primary_target + payload locals` helper became unreachable, so it has
+    been removed rather than preserved as misleading fallback clutter. This is
+    exactly the kind of cleanup we want on the road to generic first-class
+    function values: once a returned consumer is truly migrated onto the newer
+    returned-view / descriptor-first model, delete the older parallel path so
+    later work has fewer "maybe still relevant" branches to reason about.
+    Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green after that cleanup too.
+    The same descriptor-first cleanup now also reaches the two-target returned
+    function-value view itself, not only the callable-object sibling beside
+    it. `ir_try_materialize_two_target_returned_function_value_view(...)` no
+    longer open-codes `target_info -> primary_target -> materialize_view`;
+    it now resolves the shared returned function-object descriptor with the
+    required two-target count and then projects that descriptor back into a
+    returned-function-value view. This matters because the two-target returned
+    families are exactly where the old code was most tempted to keep parallel
+    "view logic" and "descriptor logic" alive forever. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green on that convergence step too.
+    The same return-side convergence now also reaches the direct-call
+    noncapturing return-transport builder. Its old
+    `target_info -> returned_primary_target_name -> static descriptor`
+    sequence has been pulled behind one small helper for the
+    "single-target returned noncapturing descriptor" fact, so that narrow
+    return-transport path no longer keeps its own one-off target-set plumbing
+    in the middle of the builder. This does not redesign the hidden return
+    ABI, but it does mean one more direct-call return slice now asks the
+    shared returned-target machinery for a descriptor-shaped answer instead of
+    rebuilding the same fact locally. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green on that follow-up too.
+    The same "returned call family decides payload-prefix lane" story is now
+    also one step less duplicated. The older pattern of "recover returned-call
+    producer info, classify closure/nonclosure family, then choose the
+    matching payload-local prefix" used to be re-spelled in multiple returned
+    callable-object entrypoints; that dispatch now has its own small helper,
+    and both the ordinary returned callable-object recovery path and the
+    two-target returned callable-object/materialization path reuse it. This is
+    still a narrow internal cleanup, but it matters because that
+    producer-family-prefix triad is exactly the sort of truth we do not want
+    split across many near-identical preambles if the end-state is one honest
+    generic function-object model. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that follow-up too.
+    That same returned-call family/prefix helper has now also been raised one
+    level further, into a direct `returned call -> function-object
+    descriptor` entrypoint for the family-prefixed lanes. The ordinary
+    returned callable-object recovery path and the two-target returned
+    callable-object/materialization path no longer each do
+    "family/prefix helper first, then descriptor helper second" by hand; they
+    now both ask one shared helper for the family-prefixed returned function
+    object descriptor and project from there. This is still an internal
+    cleanup, but it is exactly the kind of consolidation we need before a
+    truly generic first-class function-value model can sit on one honest
+    returned function-object truth surface. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green on that convergence step too.
+    The neighboring returned-closure view helper is now also thinner for the
+    same reason. The descriptor-first path there has been pulled into its own
+    small helper, so the public `ir_resolve_returned_closure_view_with_prefix`
+    wrapper no longer open-codes "descriptor -> returned view -> helper name"
+    itself. That is a modest cleanup, but it keeps one more returned consumer
+    honest about the layering we are trying to reach: recover the returned
+    function-object truth once, then project closure/callable/return-transport
+    surfaces from it instead of letting each public helper keep a bespoke
+    mini-pipeline. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that follow-up too.
+    That same higher-level consolidation has now also let one older returned
+    callable-object entrypoint disappear completely: the direct
+    `ir_resolve_returned_callable_object_view_with_prefix(...)` helper is now
+    gone after its family-prefixed callers were raised onto the newer
+    family-to-descriptor helper. This is a useful milestone because it means
+    the returned callable-object surface is not only gaining new shared
+    helpers; it is also successfully shedding older intermediate entrypoints
+    once they stop carrying unique truth. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green after that dead-entry cleanup
+    too.
+    The same consolidation now also shows up as a first small aggregate result
+    on the returned-closure line itself: the descriptor-first helper that used
+    to hand back `helper_name` and `returned_view` through two parallel output
+    channels has now been tightened into one little returned-closure
+    resolution aggregate. The public closure-view wrapper still exists, but it
+    now projects from that aggregate rather than reconstructing two separate
+    results. This is a modest internal cleanup, but it pushes the returned
+    closure family one step closer to a world where "recover one internal
+    function-object fact, then project the views you need" is the normal
+    shape instead of the exception. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that follow-up too.
+    That same aggregate is now also consumed directly by the first real
+    returned-closure callers instead of being trapped behind only the wrapper
+    layer. The returned-closure callee path and the returned-closure argument
+    target path now both read `IrLowerReturnedClosureResolution` directly,
+    which means the old public `helper_name + returned_view` wrapper has
+    become structurally redundant rather than just looking redundant. This is
+    another small but meaningful shift: the returned-closure line is starting
+    to have real consumers of the more object-like internal result, not only
+    helper-to-helper forwarding. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that step too.
+    The same returned-function-object convergence has now also crossed one
+    cleaner boundary: returned payload materialization no longer has to build
+    a private `returned_view` struct just to immediately project it back into
+    `IrLowerFunctionObjectDescriptor`. The materialization helper now produces
+    the descriptor directly, the matching returned-call transport path in
+    `ir_lower_stmt.inc` consumes that descriptor directly too, and the older
+    returned-view-only helper wrappers that had already lost all real
+    callsites are now gone. This is still internal cleanup, not the final
+    generic first-class function-value end state, but it matters because one
+    more returned path now truly follows the target architecture: recover one
+    returned function-object truth, then project callable/transport behavior
+    from it. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green after that descriptor-first follow-up too.
+    The same descriptor-first cleanup now also reaches the older
+    identifier-like function-value recovery path. Local/top-level/builtin/
+    parameter function-value recovery no longer rebuilds a temporary
+    `IrLowerFunctionValueView` only to project it back into
+    `IrLowerFunctionObjectDescriptor`; it now recovers the descriptor
+    directly, and the nearby callable-object projection plus the returned
+    single-capture closure fast path consume that descriptor directly too.
+    This is another internal convergence step rather than a user-visible new
+    feature, but it matters for the end goal because one more “function value
+    in expression position” family now enters the pipeline through the same
+    object-like truth model instead of through a parallel historical view
+    struct. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green after that follow-up as well.
+    The same convergence now also has one smaller but useful shared recovery
+    checkpoint around identifier-like function values. The expr-side
+    descriptor recovery path and the stmt-side local function-value
+    declaration initializer path no longer each keep their own copy of
+    “identifier/local/parameter/top-level/builtin function-value to internal
+    object descriptor” logic; they now share one helper and only diverge when
+    the stmt-side path really needs extra runtime-tag cloning for a new local
+    binding. This is still internal cleanup rather than a new language slice,
+    but it keeps the live tree moving toward the real target architecture:
+    recover one function-object fact, then add only the site-specific transport
+    rules on top. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that shared-recovery follow-up too.
+    The same descriptor-first cleanup now also reaches the stmt-side local
+    function-value declaration mainline itself. Ternary initializer,
+    closure-literal initializer, returned-function-value initializer, and
+    identifier initializer helpers no longer build an intermediate
+    `IrLowerFunctionValueTransportState` only to project it back into
+    `IrLowerFunctionObjectDescriptor` before recording the local binding; they
+    now produce descriptors directly, and the declaration path finalizes the
+    new local binding from that descriptor immediately. This is a meaningful
+    convergence checkpoint because one whole producer-facing function-value
+    path has now gone descriptor-first end to end instead of merely sharing
+    some recovery helpers along the way. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green on that follow-up too.
+    The same convergence now also reaches the function-valued `return`
+    mainline in a first controlled step. The live return statement path no
+    longer talks only in terms of the older return-transport struct; it now
+    builds and consumes a small return-resolution aggregate whose center of
+    gravity is again the function-object descriptor, while still bridging
+    through the old payload emitter underneath for safety. This is not yet the
+    final deletion of the legacy return-transport layer, but it is an
+    important checkpoint because the main return lowering path has started
+    speaking the same descriptor-first vocabulary as the nearby declaration and
+    returned-call convergence lines. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that follow-up too.
+    That same function-valued `return` line has now also pushed one layer
+    deeper: the payload-emission mainline no longer reprojects the new
+    return-resolution aggregate back into the older return-transport helper
+    surface just to finish the actual payload writes. The live return path now
+    emits noncapturing and closure payloads directly from the resolution /
+    descriptor vocabulary, and the old generic return-transport payload helper
+    plus its noncapturing/closure payload siblings have started disappearing as
+    dead layers instead of merely being bypassed. This is still an internal
+    convergence step, but it is exactly the kind of “delete the old bridge once
+    the new truth surface is real” progress we need before true generic
+    first-class function values can sit on one honest callable-object model.
+    Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that deeper return-path follow-up too.
+    The same return line now also has its builder mainline speaking the newer
+    vocabulary directly instead of merely translating late. The function-valued
+    return builder path now constructs `IrLowerFunctionValueReturnResolution`
+    itself across identifier/direct-call/ternary cases, instead of first
+    constructing the older return-transport struct and then projecting it into
+    the resolution aggregate. The nearby returned-closure callee path has also
+    dropped one last transport-state dependency and now reads the returned
+    descriptor directly for payload-slot/capture facts. This is another
+    structural checkpoint rather than a new user-facing feature, but it means
+    the old return-transport layer is now much closer to being a removable
+    leftover instead of an active participant in the main function-value
+    return story. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that follow-up too.
+    That same cleanup is now also effectively finished for the live
+    function-valued return mainline: the remaining
+    `IrLowerFunctionValueReturnTransportState` builder/init layer has been
+    removed from the real path, the return builder and payload emitter both
+    speak directly in terms of `IrLowerFunctionValueReturnResolution` plus the
+    embedded function-object descriptor, and the last transport-state-shaped
+    dependency in the returned-closure callee path is gone too. This is a real
+    milestone because one whole end-to-end function-value transport family has
+    now completed the transition from historical helper structs to one shared
+    object-like truth model. Focused serial `make test-ir-regression`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that completion step too.
+    The next step is now also a first real capability expansion rather than
+    only internal convergence: the callable-object / indirect-call bridge has
+    started moving beyond the old “zero or one visible argument only” boundary.
+    The direct local dispatch, ternary callee, and dynamic returned
+    noncapturing actual-argument lines now accept multi-argument function
+    shapes through dynamic callable-argument builders instead of reusing the
+    old one-arg scratch helpers, and new two-argument runtime witnesses are
+    green for dynamic local dispatch, ternary callee, and direct dynamic
+    returned noncapturing forwarding. This is a meaningful checkpoint toward
+    true generic first-class function values because it expands the generic
+    callable-object path itself, not merely the number of special cases around
+    it. Focused serial `make test-ir-regression`,
+    `make test-compiler-driver`, `make test-lower-ir-regression`, and
+    `make test-extension-runtime` remain green on that follow-up too.
+    That same capability-expansion line now also has one first explicit
+    “parameter transport model cleanup” checkpoint: dynamic returned
+    noncapturing function-valued actual arguments with multiple non-function
+    source arguments no longer fall back to the old single-forwarded-arg
+    specialization assumptions. The dynamic specialization probe now gathers
+    “all non-function source arguments” as the callable argument vector, so
+    the two-argument returned-noncapturing witness is green through compiler
+    and runtime instead of dying at `IR-LOWER-028`. This is important because
+    it shows the generic callable-object path is starting to define the
+    argument transport model, rather than being constrained by the historical
+    one-argument specialization scaffolding. Focused serial
+    `make test-ir-regression`, `make test-compiler-driver`,
+    `make test-lower-ir-regression`, and `make test-extension-runtime` remain
+    green on that follow-up too.
+    The next closure-side capability step is now also real: static
+    multi-capture closure direct-call lowering is no longer confined to the
+    historical “single capture only” callable-object path. A new
+    env-style closure wrapper bridge now snapshots the capture tuple into
+    stable local slots, passes one environment address through `fn_make`, and
+    forwards that environment back into the older capture-parameter helper
+    entry so multi-capture closures can begin using the same callable-object /
+    indirect-call vocabulary as the noncapturing line. The first concrete
+    witness is green for a two-argument multi-capture closure direct local
+    call through compiler and runtime. This is still not the final generic
+    heap-lifted environment model, but it is a meaningful capability
+    expansion because a genuinely richer closure value now enters the generic
+    callable-object path instead of stopping at the older direct-call-only
+    boundary. Focused serial `make test-ir-regression`,
+    `make test-compiler-driver`, and `make test-extension-runtime` remain
+    green on that follow-up too.
 - New composite-type feature candidate now also has a first concrete plan:
   [docs/language/PAIR_FEATURE_PLAN.md](/workspaces/compiler_lab/docs/language/PAIR_FEATURE_PLAN.md)
   - current checkpoint:
@@ -117,10 +2900,10 @@
     parser and semantic now share the aggregate-kind/type-name metadata path
     for `pair` / `struct` declarations, member access, initializer bounds, and
     assignment compatibility checks
-  - current boundary tightening:
-    aggregate parameters/returns still stay out of scope, but parser/driver
-    diagnostics now reject them honestly as unsupported parameter/return forms
-    rather than as fake top-level object declarations
+  - current earlier boundary-tightening checkpoint:
+    aggregate parameters/returns originally stayed out of scope, and
+    parser/driver diagnostics rejected them honestly as unsupported
+    parameter/return forms rather than as fake top-level object declarations
   - current cleanup follow-up:
     the shared semantic helper surface is now also being renamed away from
     pair-specific wording toward aggregate-oriented wording
@@ -169,6 +2952,140 @@
     local `pair` / `struct` member lookup and whole-value assignment checks
     now also share one scope-side aggregate type-descriptor path, rather than
     re-deriving pair/struct compatibility through separate ad hoc branches
+  - latest nested-aggregate follow-up:
+    local nested aggregates now also have a first conservative checkpoint:
+    `struct` fields may use `pair` or another known `struct`, and nested local
+    member chains such as `o.p.first` and `o.inner.x` now survive through
+    semantic, canonical IR, lower IR, ValueSSA, machine-ir, machine-select,
+    compiler-driver, and extension-runtime regression surfaces by recursively
+    flattening those local aggregates into hidden scalar slots
+  - latest nested-aggregate value-flow follow-up:
+    nested aggregate members may now also participate in the same conservative
+    whole-value copy flow as top-level local aggregates, so forms such as
+    `pair q = o.p`, `struct Point q = o.p`, and `q = o.p` now pass through the
+    semantic / compiler / ValueSSA / machine-ir / machine-select /
+    extension-runtime regression surfaces instead of being limited to only
+    scalar field reads like `o.p.first`
+  - latest deep-nesting follow-up:
+    the same conservative story now also extends one level deeper through
+    nested aggregate chains such as `o.m.p.x`, `struct Mid m = o.m`, and
+    `m = o.m`, with focused semantic / compiler / ValueSSA / machine-ir /
+    machine-select / extension-runtime coverage plus explicit mismatched
+    deep-copy rejects locked on `SEMA-AGG-006`
+  - latest deep-nesting assignment follow-up:
+    the deep nested whole-value assignment sibling is now locked too on the
+    same downstream surfaces, so shapes like `struct Mid m={{...}}; m=o.m;`
+    for both named-struct and `pair`-containing `Mid` payloads now have
+    ValueSSA / machine-ir / machine-select / extension-runtime coverage
+  - latest nested-initializer boundary repair:
+    recursive aggregate initializer bounds are now checked through nested
+    `pair` / `struct` subobjects too, so malformed deep shapes such as
+    `{{{1,2,3},4},5}` no longer silently truncate extra inner items and now
+    reject consistently through `SEMA-AGG-002`
+  - latest downstream aggregate-reject follow-up:
+    the deep nested aggregate reject matrix is now also locked below the
+    front-end on the `ValueSSA` / machine-ir / machine-select surfaces for
+    mismatched deep copy/init and recursive initializer-overflow cases, so
+    these boundaries no longer rely only on semantic/compiler/runtime tests
+  - latest aggregate-parameter follow-up:
+    phase 1 aggregate parameters are now landed conservatively under
+    `-extension`: `pair` and known `struct Name` parameters survive through
+    parser, semantic, canonical IR, lower IR, ValueSSA, machine-ir,
+    machine-select, compiler-driver, and extension-runtime regression
+    surfaces by reusing the same recursive hidden-scalar-slot layout already
+    used for local aggregates
+  - latest aggregate-parameter downstream lock:
+    focused downstream regression witnesses now also pin the first scalarized
+    call-boundary shapes below the front half: `ValueSSA` default dumps,
+    translation-only `machine-ir` reports, and translation-only
+    `machine-select` reports all now check that representative aggregate
+    parameter functions lower to the expected `params=2` / `params=3` scalar
+    signatures instead of relying only on semantic/compiler/runtime passes
+  - latest aggregate-return groundwork:
+    the first hidden-result-slot return convention is now real end-to-end for
+    the first conservative user-visible slice: `pair` / known `struct`
+    functions may now `return p;` / `return s;`, and callers may consume those
+    results through local copy-init or assignment such as `pair q = mk();` and
+    `q = mk();`, all while keeping the lowered contract slot-based instead of
+    introducing a general aggregate object ABI
+  - latest aggregate-return downstream lock:
+    that same first source-visible aggregate-return slice is now locked across
+    semantic, compiler-driver, extension-runtime, canonical IR, lower IR,
+    translation-only `ValueSSA`, translation-only `machine-ir`, and
+    translation-only `machine-select` witnesses, so the current checkpoint no
+    longer relies only on front-end acceptance or ad hoc direct probes
+  - latest aggregate-return family follow-up:
+    the first “deeper than local return” families are now also regression
+    locked on the live tree: parameter-to-return forwarding such as
+    `pair id(pair p){ return p; }`, known-struct forwarding, and one nested
+    aggregate return witness all now compile/run under `-extension`, while the
+    still-kept direct call-result member-access boundary such as `mk().second`
+    remains explicitly rejected instead of being accidentally half-opened; that
+    kept reject boundary is now also locked on parenthesized and nested-member
+    call-result chains such as `(mk()).second` and `mk().p.second`
+  - latest aggregate call-chain follow-up:
+    the first direct aggregate-returning call-chain into aggregate parameters
+    is now also landed and locked: forms such as `sum(mk())` for `pair`,
+    known `struct`, and one nested-struct witness now survive through
+    semantic, compiler-driver, extension-runtime, canonical IR, lower IR,
+    default `ValueSSA`, translation-only `machine-ir`, and translation-only
+    `machine-select`, while the opposite scalar-mismatch form `sink(mk())`
+    now rejects honestly at semantic time through `SEMA-TYPE-003` instead of
+    leaking to a later IR-lowering failure
+  - latest aggregate multi-hop follow-up:
+    the first two-hop aggregate return/forwarding chain is now also locked on
+    the live tree: forms such as `wrap(){ return id(mk()); }` for `pair` plus
+    one nested-struct sibling now compile/run under `-extension`, with focused
+    semantic/compiler/runtime coverage and pair-focused canonical IR / lower IR
+    / default `ValueSSA` / translation-only `machine-ir` /
+    translation-only `machine-select` witnesses, while the nested-struct
+    sibling now also has matching canonical IR / lower IR / default `ValueSSA`
+    / translation-only machine-report locks; the opposite scalar misuse
+    `sink(wrap())` is now pinned to the same front-end `SEMA-TYPE-003`
+    boundary as the earlier direct `sink(mk())` family, and that reject now
+    also reaches the deeper machine-report surfaces
+  - latest scalar-context aggregate-boundary repair:
+    plain aggregate values from direct and multi-hop aggregate-return chains no
+    longer leak into later IR failure when used in scalar initializer or scalar
+    assignment contexts. Forms such as `int x = mk();`, `x = mk();`,
+    `int x = wrap();`, and one nested-struct multi-hop scalar-initializer
+    sibling now reject honestly at semantic time through `SEMA-TYPE-004` /
+    `SEMA-TYPE-006`, and those boundaries are now locked through semantic,
+    compiler, `ValueSSA`, `machine-ir`, and `machine-select` surfaces
+  - latest plain-aggregate position follow-up:
+    the same honest-boundary story now also explicitly covers multi-hop
+    aggregate results in control-flow truthiness positions. Forms such as
+    `if(wrap())` for both pair and nested-struct chains now stay pinned to
+    `SEMA-AGG-004`, with semantic / compiler / `ValueSSA` /
+    `machine-ir` / `machine-select` regression coverage so these plain
+    aggregate value positions no longer rely on ad hoc probes
+  - latest function-boundary aggregate value-flow follow-up:
+    aggregate parameters now support field reads, nested field reads, and
+    direct call-boundary whole-value transport from supported local/nested
+    aggregate roots such as `sum(p)` and `sum(m)` without introducing a new
+    opaque aggregate ABI below the current scalar-slot lowering contract
+  - current near-term aggregate focus:
+    the remaining aggregate work has shifted again from “first return landing”
+    to boundary cleanup around that new function-return slice: broader reject
+    matrices for unsupported aggregate value positions, deeper nested return
+    families, more multi-hop aggregate call chains beyond the first direct
+    `sum(mk())` and first two-hop `wrap(){ return id(mk()); }` slices, and any
+    remaining downstream slot-order witnesses that are still only spot-checked
+  - current implementation judgment:
+    local / nested aggregate support plus phase 1 aggregate parameters and the
+    first conservative aggregate-return landing now form the current aggregate
+    checkpoint; the next meaningful implementation move is no longer another
+    local aggregate micro-feature, but either stricter boundary cleanup or a
+    deliberately scoped phase-2 follow-up from
+    [docs/language/AGGREGATE_PARAM_RETURN_PLAN.md](/workspaces/compiler_lab/docs/language/AGGREGATE_PARAM_RETURN_PLAN.md)
+  - current kept boundary after that follow-up:
+    this still does not open aggregate globals, aggregate arrays, arbitrary
+    plain aggregate value positions, direct aggregate call-result member access
+    without first landing in a local, or a general aggregate ABI/object model
+  - next likely aggregate-stage design authority:
+    [docs/language/AGGREGATE_PARAM_RETURN_PLAN.md](/workspaces/compiler_lab/docs/language/AGGREGATE_PARAM_RETURN_PLAN.md)
+    now defines the recommended first path for aggregate parameters and returns
+    once the current local/nested aggregate checkpoint is treated as stable
   - latest local-declaration follow-up:
     local declaration validation now also routes through the shared type
     descriptor path for `float`, `pair`, and `struct` declarations, including
@@ -417,6 +3334,28 @@
     but those two older aggregate runners still carry unrelated noise and
     should not be used as the only evidence until their baseline cleanliness
     improves.
+  - latest helper-call condition-position follow-up:
+    helper-wrapped ternary call roots now also have focused condition-position
+    rejects locked at the semantic / compiler / `ValueSSA` surfaces:
+    `if(pick() + 1)` and the unary-call-root sibling `if(pick(x) + 1)` both
+    continue to resolve to `SEMA-TYPE-008`, so this mixed-root split is now
+    covered not only in return/assignment/call-argument-style value contexts
+    but also when the same value first flows through a condition.
+  - latest downstream helper-call reject follow-up:
+    that same helper-wrapped ternary-call boundary now also has focused
+    downstream reject probes on `machine_ir` / `machine_select` for both
+    condition-position `+ 1` and compare-against-`int` shapes. The current
+    kept contract is therefore no longer only a front-half promise: those
+    deeper source-driven runners now also explicitly expect
+    `SEMA-TYPE-008` / `SEMA-TYPE-007` on the helper-call siblings instead of
+    silently relying on earlier layers to have caught them.
+  - latest helper-call matrix execution follow-up:
+    several older helper-wrapped ternary-call reject witnesses were already
+    implemented but were only reachable through focused filter hooks instead
+    of the ordinary compiler / `ValueSSA` main regression lists. The current
+    tree now executes those compare/return/init/assign/callarg int-mismatch
+    cases on the default regression path too, so this boundary is less likely
+    to silently drift while other float work continues.
   - latest assignment-context repair:
     assignment now also rejects unsupported float-derived rhs families instead
     of accidentally letting same-type assignment slip through. In particular,
