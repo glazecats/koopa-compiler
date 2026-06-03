@@ -12977,6 +12977,33 @@ static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local
     return ok;
 }
 
+static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_if_return_helper_eval_under_extension(void) {
+    static const char *source =
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int pickh(int base, int c)(int f(int), int x){ int h(int f(int), int x)=closure [base] int (int g(int), int y){ if(g(y)) return g(y) + base; return base; }; int k(int f(int), int x)=closure [base] int (int g(int), int y){ if(g(g(y))) return g(g(y)) + base; return base; }; if(c) h=k; return h; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(pickh(5, getint()))(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "pickh__closure_h_") != NULL ||
+        strstr(output, "pickh__closure_k_") != NULL ||
+        strstr(output, "__fv_1_add1") != NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 6u) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned passthrough dynamic local function-value if-return helper-eval should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_accepts_second_order_returned_closure_function_value_parameter_forwarding_under_extension(void) {
     static const char *source =
         "int apply(int f(int), int x){ return f(x); }\n"
@@ -17734,6 +17761,9 @@ int main(void) {
         }
         if (strstr("COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-STMT-CALL-PREFIX", filter) != NULL) {
             return test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_statement_call_prefix_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-IF-RETURN-EVAL", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_if_return_helper_eval_under_extension() ? 0 : 1;
         }
         if (strstr("COMPILER-SECOND-ORDER-RETURNED-CLOSURE-FNVAL-FORWARD", filter) != NULL) {
             return test_compiler_accepts_second_order_returned_closure_function_value_parameter_forwarding_under_extension() ? 0 : 1;

@@ -6499,6 +6499,37 @@ static int test_ir_accepts_second_order_returned_passthrough_dynamic_local_funct
     return ok;
 }
 
+static int test_ir_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_if_return_helper_eval_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+            "int pickh(int base, int c)(int f(int), int x){ int h(int f(int), int x)=closure [base] int (int g(int), int y){ if(g(y)) return g(y) + base; return base; }; int k(int f(int), int x)=closure [base] int (int g(int), int y){ if(g(g(y))) return g(g(y)) + base; return base; }; if(c) h=k; return h; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ return idh(pickh(5, getint()))(add1, 41); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "pickh__closure_h_") == NULL &&
+        strstr(actual_text, "pickh__closure_k_") == NULL &&
+        strstr(actual_text, "__fv_1_add1") == NULL &&
+        ir_test_count_fragment_occurrences(actual_text, "fn_make __fnwrap_add1, 0, shape.") == 6u &&
+        ir_test_count_fragment_occurrences(actual_text, "call_indirect tmp.") == 6u &&
+        ir_test_count_fragment_occurrences(actual_text, "br tmp.") >= 3u;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: second-order returned passthrough dynamic local function-value if-return helper-eval mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_ir_accepts_second_order_dynamic_local_function_value_parameter_forwarding_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -14878,6 +14909,9 @@ int main(void) {
         }
         if (strstr("IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-STMT-CALL-PREFIX", filter) != NULL) {
             return test_ir_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_statement_call_prefix_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-IF-RETURN-EVAL", filter) != NULL) {
+            return test_ir_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_if_return_helper_eval_under_extension() ? 0 : 1;
         }
         if (strstr("IR-SECOND-ORDER-RETURNED-CLOSURE-FNVAL-FORWARD", filter) != NULL) {
             return test_ir_accepts_second_order_returned_closure_function_value_parameter_forwarding_under_extension() ? 0 : 1;

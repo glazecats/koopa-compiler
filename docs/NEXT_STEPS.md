@@ -17643,3 +17643,33 @@ The execution log is intentionally retained below them as historical record, not
     `./build/ir/ir_regression_test` PASS,
     `./build/lower_ir/lower_ir_regression_test` PASS,
     `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 if-return helper-body follow-up:
+  - the helper-body evaluator now also accepts one first genuinely tiny
+    statement-level CFG family instead of stopping at straight-line statement
+    prefixes only
+  - landed evaluator broadening:
+    both the general simple helper-body evaluator and the narrower static
+    helper evaluator now recognize helper bodies of the shape
+    `if (cond) return then_expr; return else_expr;`
+    when the condition and both return expressions are already evaluable under
+    the current binding model
+  - current visible checkpoint:
+    returned-dynamic closure helpers such as
+    `if(g(y)) return g(y) + base; return base;`
+    and the repeated-call sibling
+    `if(g(g(y))) return g(g(y)) + base; return base;`
+    no longer fail with `IR-INT-148`. Canonical IR / lower-IR / compiler text
+    now keep the branch in caller-side code and still avoid falling back to
+    `pickh__closure_*` / `__fv_*` shell names
+  - practical meaning:
+    the mainline has moved beyond “richer straight-line expressions and
+    statements” into one first small control-flow body slice. The next
+    remaining gap is therefore more honestly about broader statement transport
+    and not whether every helper body must be linear
+  - focused and broad rechecks after this step:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-IF-RETURN-EVAL` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-IF-RETURN-EVAL` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-IF-RETURN-EVAL` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS

@@ -13530,6 +13530,127 @@ static int ir_try_emit_simple_function_body_eval_dispatch(IrLowerContext *ctx,
         visible_arg_index += 1u;
     }
 
+    if (body->child_count == 2u &&
+        body->children &&
+        body->children[0] &&
+        body->children[0]->kind == AST_STMT_IF &&
+        body->children[1] == return_stmt &&
+        body->children[0]->child_count >= 1u &&
+        body->children[0]->children &&
+        body->children[0]->children[0] &&
+        body->children[0]->children[0]->kind == AST_STMT_RETURN &&
+        body->children[0]->children[0]->expression_count == 1u &&
+        body->children[0]->children[0]->expressions &&
+        body->children[0]->children[0]->expressions[0] &&
+        body->children[0]->child_count == 1u) {
+        const AstExpression *cond_expr =
+            statement_get_condition_expression(body->children[0]);
+        const AstExpression *then_expr =
+            body->children[0]->children[0]->expressions[0];
+        const AstExpression *else_expr = return_stmt->expressions[0];
+        IrValueRef condition_value = ir_value_immediate(0);
+        int condition_applied = 0;
+        IrValueRef compare_value;
+        IrValueRef branch_result;
+        IrValueRef then_value = ir_value_immediate(0);
+        IrValueRef else_value = ir_value_immediate(0);
+        int then_applied = 0;
+        int else_applied = 0;
+        size_t then_block_id;
+        size_t else_block_id;
+        size_t join_block_id;
+
+        if (ir_simple_helper_body_expression_is_evaluable(
+                cond_expr,
+                bindings,
+                binding_count) &&
+            ir_simple_helper_body_expression_is_evaluable(
+                then_expr,
+                bindings,
+                binding_count) &&
+            ir_simple_helper_body_expression_is_evaluable(
+                else_expr,
+                bindings,
+                binding_count)) {
+            if (!ir_try_eval_simple_function_body_expression(
+                    ctx,
+                    cond_expr,
+                    bindings,
+                    binding_count,
+                    &condition_value,
+                    &condition_applied)) {
+                ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+                free(bindings);
+                return 0;
+            }
+            if (condition_applied) {
+                compare_value = ir_value_temp(ir_allocate_temp(ctx->function));
+                branch_result = ir_value_temp(ir_allocate_temp(ctx->function));
+                if (!ir_emit_binary(
+                        ctx,
+                        compare_value,
+                        IR_BINARY_NE,
+                        condition_value,
+                        ir_value_immediate(0)) ||
+                    !ir_function_append_block(ctx->function, &then_block_id, NULL, ctx->error) ||
+                    !ir_function_append_block(ctx->function, &else_block_id, NULL, ctx->error) ||
+                    !ir_block_set_branch(
+                        ir_lower_current_block(ctx),
+                        compare_value,
+                        then_block_id,
+                        else_block_id,
+                        ctx->error) ||
+                    !ir_function_append_block(ctx->function, &join_block_id, NULL, ctx->error)) {
+                    ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+                    free(bindings);
+                    return 0;
+                }
+
+                ctx->block_id = then_block_id;
+                ctx->has_block = 1;
+                if (!ir_try_eval_simple_function_body_expression(
+                        ctx,
+                        then_expr,
+                        bindings,
+                        binding_count,
+                        &then_value,
+                        &then_applied) ||
+                    !then_applied ||
+                    !ir_emit_mov(ctx, branch_result, then_value) ||
+                    !ir_block_set_jump(ir_lower_current_block(ctx), join_block_id, ctx->error)) {
+                    ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+                    free(bindings);
+                    return then_applied ? 0 : 1;
+                }
+
+                ctx->block_id = else_block_id;
+                ctx->has_block = 1;
+                if (!ir_try_eval_simple_function_body_expression(
+                        ctx,
+                        else_expr,
+                        bindings,
+                        binding_count,
+                        &else_value,
+                        &else_applied) ||
+                    !else_applied ||
+                    !ir_emit_mov(ctx, branch_result, else_value) ||
+                    !ir_block_set_jump(ir_lower_current_block(ctx), join_block_id, ctx->error)) {
+                    ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+                    free(bindings);
+                    return else_applied ? 0 : 1;
+                }
+
+                ctx->block_id = join_block_id;
+                ctx->has_block = 1;
+                *out_value = branch_result;
+                *out_applied = 1;
+                ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+                free(bindings);
+                return 1;
+            }
+        }
+    }
+
     for (child_index = 0u; child_index + 1u < body->child_count; ++child_index) {
         const AstStatement *child = body->children[child_index];
         IrFunctionBodyEvalBinding *dest_binding = NULL;
@@ -13635,6 +13756,130 @@ static int ir_try_emit_simple_function_body_eval_dispatch(IrLowerContext *ctx,
             goto cleanup;
         }
         binding_count += 1u;
+    }
+
+    if (body->child_count == 2u &&
+        body->children &&
+        body->children[0] &&
+        body->children[0]->kind == AST_STMT_IF &&
+        body->children[1] == return_stmt &&
+        body->children[0]->child_count >= 1u &&
+        body->children[0]->children &&
+        body->children[0]->children[0] &&
+        body->children[0]->children[0]->kind == AST_STMT_RETURN &&
+        body->children[0]->children[0]->expression_count == 1u &&
+        body->children[0]->children[0]->expressions &&
+        body->children[0]->children[0]->expressions[0] &&
+        body->children[0]->child_count == 1u) {
+        const AstExpression *cond_expr =
+            statement_get_condition_expression(body->children[0]);
+        const AstExpression *then_expr =
+            body->children[0]->children[0]->expressions[0];
+        const AstExpression *else_expr = return_stmt->expressions[0];
+        IrValueRef condition_value = ir_value_immediate(0);
+        int condition_applied = 0;
+        IrValueRef compare_value;
+        IrValueRef branch_result;
+        IrValueRef then_value = ir_value_immediate(0);
+        IrValueRef else_value = ir_value_immediate(0);
+        int then_applied = 0;
+        int else_applied = 0;
+        size_t then_block_id;
+        size_t else_block_id;
+        size_t join_block_id;
+
+        if (!ir_simple_helper_body_expression_is_evaluable(
+                cond_expr,
+                bindings,
+                binding_count) ||
+            !ir_simple_helper_body_expression_is_evaluable(
+                then_expr,
+                bindings,
+                binding_count) ||
+            !ir_simple_helper_body_expression_is_evaluable(
+                else_expr,
+                bindings,
+                binding_count)) {
+            goto cleanup;
+        }
+        if (!ir_try_eval_simple_function_body_expression(
+                ctx,
+                cond_expr,
+                bindings,
+                binding_count,
+                &condition_value,
+                &condition_applied)) {
+            ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+            free(bindings);
+            return 0;
+        }
+        if (!condition_applied) {
+            goto cleanup;
+        }
+
+        compare_value = ir_value_temp(ir_allocate_temp(ctx->function));
+        branch_result = ir_value_temp(ir_allocate_temp(ctx->function));
+        if (!ir_emit_binary(
+                ctx,
+                compare_value,
+                IR_BINARY_NE,
+                condition_value,
+                ir_value_immediate(0)) ||
+            !ir_function_append_block(ctx->function, &then_block_id, NULL, ctx->error) ||
+            !ir_function_append_block(ctx->function, &else_block_id, NULL, ctx->error) ||
+            !ir_block_set_branch(
+                ir_lower_current_block(ctx),
+                compare_value,
+                then_block_id,
+                else_block_id,
+                ctx->error) ||
+            !ir_function_append_block(ctx->function, &join_block_id, NULL, ctx->error)) {
+            ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+            free(bindings);
+            return 0;
+        }
+
+        ctx->block_id = then_block_id;
+        ctx->has_block = 1;
+        if (!ir_try_eval_simple_function_body_expression(
+                ctx,
+                then_expr,
+                bindings,
+                binding_count,
+                &then_value,
+                &then_applied) ||
+            !then_applied ||
+            !ir_emit_mov(ctx, branch_result, then_value) ||
+            !ir_block_set_jump(ir_lower_current_block(ctx), join_block_id, ctx->error)) {
+            ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+            free(bindings);
+            return then_applied ? 0 : 1;
+        }
+
+        ctx->block_id = else_block_id;
+        ctx->has_block = 1;
+        if (!ir_try_eval_simple_function_body_expression(
+                ctx,
+                else_expr,
+                bindings,
+                binding_count,
+                &else_value,
+                &else_applied) ||
+            !else_applied ||
+            !ir_emit_mov(ctx, branch_result, else_value) ||
+            !ir_block_set_jump(ir_lower_current_block(ctx), join_block_id, ctx->error)) {
+            ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+            free(bindings);
+            return else_applied ? 0 : 1;
+        }
+
+        ctx->block_id = join_block_id;
+        ctx->has_block = 1;
+        *out_value = branch_result;
+        *out_applied = 1;
+        ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+        free(bindings);
+        return 1;
     }
 
     if (!ir_try_eval_simple_function_body_expression(
@@ -13954,6 +14199,133 @@ static int ir_try_emit_narrow_static_noncapturing_helper_eval_from_bindings(
         }
     }
 
+    if (body->child_count == 2u &&
+        body->children &&
+        body->children[0] &&
+        body->children[0]->kind == AST_STMT_IF &&
+        body->children[1] == return_stmt &&
+        body->children[0]->child_count >= 1u &&
+        body->children[0]->children &&
+        body->children[0]->children[0] &&
+        body->children[0]->children[0]->kind == AST_STMT_RETURN &&
+        body->children[0]->children[0]->expression_count == 1u &&
+        body->children[0]->children[0]->expressions &&
+        body->children[0]->children[0]->expressions[0] &&
+        body->children[0]->child_count == 1u) {
+        const AstExpression *cond_expr =
+            statement_get_condition_expression(body->children[0]);
+        const AstExpression *then_expr =
+            body->children[0]->children[0]->expressions[0];
+        const AstExpression *else_expr = return_stmt->expressions[0];
+        IrValueRef condition_value = ir_value_immediate(0);
+        int condition_applied = 0;
+        IrValueRef compare_value;
+        IrValueRef branch_result;
+        IrValueRef then_value = ir_value_immediate(0);
+        IrValueRef else_value = ir_value_immediate(0);
+        int then_applied = 0;
+        int else_applied = 0;
+        size_t then_block_id;
+        size_t else_block_id;
+        size_t join_block_id;
+
+        if (ir_narrow_helper_body_expression_is_evaluable(
+                cond_expr,
+                bindings,
+                binding_count,
+                recursion_depth) &&
+            ir_narrow_helper_body_expression_is_evaluable(
+                then_expr,
+                bindings,
+                binding_count,
+                recursion_depth) &&
+            ir_narrow_helper_body_expression_is_evaluable(
+                else_expr,
+                bindings,
+                binding_count,
+                recursion_depth)) {
+            if (!ir_try_eval_narrow_static_helper_expression(
+                    ctx,
+                    cond_expr,
+                    bindings,
+                    binding_count,
+                    recursion_depth,
+                    &condition_value,
+                    &condition_applied)) {
+                ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+                free(bindings);
+                return 0;
+            }
+            if (condition_applied) {
+                compare_value = ir_value_temp(ir_allocate_temp(ctx->function));
+                branch_result = ir_value_temp(ir_allocate_temp(ctx->function));
+                if (!ir_emit_binary(
+                        ctx,
+                        compare_value,
+                        IR_BINARY_NE,
+                        condition_value,
+                        ir_value_immediate(0)) ||
+                    !ir_function_append_block(ctx->function, &then_block_id, NULL, ctx->error) ||
+                    !ir_function_append_block(ctx->function, &else_block_id, NULL, ctx->error) ||
+                    !ir_block_set_branch(
+                        ir_lower_current_block(ctx),
+                        compare_value,
+                        then_block_id,
+                        else_block_id,
+                        ctx->error) ||
+                    !ir_function_append_block(ctx->function, &join_block_id, NULL, ctx->error)) {
+                    ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+                    free(bindings);
+                    return 0;
+                }
+
+                ctx->block_id = then_block_id;
+                ctx->has_block = 1;
+                if (!ir_try_eval_narrow_static_helper_expression(
+                        ctx,
+                        then_expr,
+                        bindings,
+                        binding_count,
+                        recursion_depth,
+                        &then_value,
+                        &then_applied) ||
+                    !then_applied ||
+                    !ir_emit_mov(ctx, branch_result, then_value) ||
+                    !ir_block_set_jump(ir_lower_current_block(ctx), join_block_id, ctx->error)) {
+                    ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+                    free(bindings);
+                    return then_applied ? 0 : 1;
+                }
+
+                ctx->block_id = else_block_id;
+                ctx->has_block = 1;
+                if (!ir_try_eval_narrow_static_helper_expression(
+                        ctx,
+                        else_expr,
+                        bindings,
+                        binding_count,
+                        recursion_depth,
+                        &else_value,
+                        &else_applied) ||
+                    !else_applied ||
+                    !ir_emit_mov(ctx, branch_result, else_value) ||
+                    !ir_block_set_jump(ir_lower_current_block(ctx), join_block_id, ctx->error)) {
+                    ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+                    free(bindings);
+                    return else_applied ? 0 : 1;
+                }
+
+                ctx->block_id = join_block_id;
+                ctx->has_block = 1;
+                *out_value = branch_result;
+                *out_applied = 1;
+                ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+                free(bindings);
+                return 1;
+            }
+        }
+    }
+
     for (child_index = 0u; child_index + 1u < body->child_count; ++child_index) {
         const AstStatement *child = body->children[child_index];
         IrFunctionBodyEvalBinding *dest_binding = NULL;
@@ -14058,6 +14430,136 @@ static int ir_try_emit_narrow_static_noncapturing_helper_eval_from_bindings(
             goto cleanup;
         }
         binding_count += 1u;
+    }
+
+    if (body->child_count == 2u &&
+        body->children &&
+        body->children[0] &&
+        body->children[0]->kind == AST_STMT_IF &&
+        body->children[1] == return_stmt &&
+        body->children[0]->child_count >= 1u &&
+        body->children[0]->children &&
+        body->children[0]->children[0] &&
+        body->children[0]->children[0]->kind == AST_STMT_RETURN &&
+        body->children[0]->children[0]->expression_count == 1u &&
+        body->children[0]->children[0]->expressions &&
+        body->children[0]->children[0]->expressions[0] &&
+        body->children[0]->child_count == 1u) {
+        const AstExpression *cond_expr =
+            statement_get_condition_expression(body->children[0]);
+        const AstExpression *then_expr =
+            body->children[0]->children[0]->expressions[0];
+        const AstExpression *else_expr = return_stmt->expressions[0];
+        IrValueRef condition_value = ir_value_immediate(0);
+        int condition_applied = 0;
+        IrValueRef compare_value;
+        IrValueRef branch_result;
+        IrValueRef then_value = ir_value_immediate(0);
+        IrValueRef else_value = ir_value_immediate(0);
+        int then_applied = 0;
+        int else_applied = 0;
+        size_t then_block_id;
+        size_t else_block_id;
+        size_t join_block_id;
+
+        if (!ir_narrow_helper_body_expression_is_evaluable(
+                cond_expr,
+                bindings,
+                binding_count,
+                recursion_depth) ||
+            !ir_narrow_helper_body_expression_is_evaluable(
+                then_expr,
+                bindings,
+                binding_count,
+                recursion_depth) ||
+            !ir_narrow_helper_body_expression_is_evaluable(
+                else_expr,
+                bindings,
+                binding_count,
+                recursion_depth)) {
+            goto cleanup;
+        }
+        if (!ir_try_eval_narrow_static_helper_expression(
+                ctx,
+                cond_expr,
+                bindings,
+                binding_count,
+                recursion_depth,
+                &condition_value,
+                &condition_applied)) {
+            ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+            free(bindings);
+            return 0;
+        }
+        if (!condition_applied) {
+            goto cleanup;
+        }
+
+        compare_value = ir_value_temp(ir_allocate_temp(ctx->function));
+        branch_result = ir_value_temp(ir_allocate_temp(ctx->function));
+        if (!ir_emit_binary(
+                ctx,
+                compare_value,
+                IR_BINARY_NE,
+                condition_value,
+                ir_value_immediate(0)) ||
+            !ir_function_append_block(ctx->function, &then_block_id, NULL, ctx->error) ||
+            !ir_function_append_block(ctx->function, &else_block_id, NULL, ctx->error) ||
+            !ir_block_set_branch(
+                ir_lower_current_block(ctx),
+                compare_value,
+                then_block_id,
+                else_block_id,
+                ctx->error) ||
+            !ir_function_append_block(ctx->function, &join_block_id, NULL, ctx->error)) {
+            ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+            free(bindings);
+            return 0;
+        }
+
+        ctx->block_id = then_block_id;
+        ctx->has_block = 1;
+        if (!ir_try_eval_narrow_static_helper_expression(
+                ctx,
+                then_expr,
+                bindings,
+                binding_count,
+                recursion_depth,
+                &then_value,
+                &then_applied) ||
+            !then_applied ||
+            !ir_emit_mov(ctx, branch_result, then_value) ||
+            !ir_block_set_jump(ir_lower_current_block(ctx), join_block_id, ctx->error)) {
+            ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+            free(bindings);
+            return then_applied ? 0 : 1;
+        }
+
+        ctx->block_id = else_block_id;
+        ctx->has_block = 1;
+        if (!ir_try_eval_narrow_static_helper_expression(
+                ctx,
+                else_expr,
+                bindings,
+                binding_count,
+                recursion_depth,
+                &else_value,
+                &else_applied) ||
+            !else_applied ||
+            !ir_emit_mov(ctx, branch_result, else_value) ||
+            !ir_block_set_jump(ir_lower_current_block(ctx), join_block_id, ctx->error)) {
+            ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+            free(bindings);
+            return else_applied ? 0 : 1;
+        }
+
+        ctx->block_id = join_block_id;
+        ctx->has_block = 1;
+        *out_value = branch_result;
+        *out_applied = 1;
+        ir_function_body_eval_binding_array_clear(bindings, binding_capacity);
+        free(bindings);
+        return 1;
     }
 
     if (!ir_try_eval_narrow_static_helper_expression(

@@ -745,6 +745,7 @@ static size_t ir_allocate_temp(IrFunction *function);
 
 static int ir_lower_return_statement(IrLowerContext *ctx, const AstStatement *stmt);
 static IrBinaryOp ir_binary_op_from_token(TokenType token_type, int *out_supported);
+static const AstExpression *statement_get_condition_expression(const AstStatement *stmt);
 static const AstExpression *ir_unwrap_paren_expression(const AstExpression *expr);
 static const AstExpression *ir_unwrap_function_value_wrapper_expression(const AstExpression *expr);
 static int ir_lower_emit_function_value_wrapper_side_effects(IrLowerContext *ctx,
