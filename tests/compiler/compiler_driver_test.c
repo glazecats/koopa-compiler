@@ -12812,6 +12812,30 @@ static int test_compiler_accepts_dynamic_closure_local_forward_into_parameter_un
     return ok;
 }
 
+static int test_compiler_accepts_static_function_value_capture_inside_closure_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int f(int)=add1; int g(int)=closure [f] int (int y){ return f(y); }; return g(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call main__closure_g_") == NULL ||
+        strstr(output, "__fv_0_add1") == NULL ||
+        strstr(output, "call __fnwrap_add1") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: static function-value capture inside closure should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_under_extension(void) {
     static const char *source =
         "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
@@ -17813,6 +17837,9 @@ int main(void) {
         if (strstr("COMPILER-DYNAMIC-CLOSURE-LOCAL-FORWARD", filter) != NULL) {
             return test_compiler_accepts_dynamic_closure_local_forward_into_parameter_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-CLOSURE-CAPTURE-STATIC-FNVAL", filter) != NULL) {
+            return test_compiler_accepts_static_function_value_capture_inside_closure_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-RETURNED-CLOSURE-FORWARD", filter) != NULL) {
             return test_compiler_accepts_returned_closure_forwarding_into_function_parameter_under_extension() ? 0 : 1;
         }
@@ -18964,6 +18991,7 @@ int main(void) {
     ok &= test_compiler_accepts_dynamic_closure_local_dispatch_under_extension();
     ok &= test_compiler_accepts_ternary_closure_local_initializer_under_extension();
     ok &= test_compiler_accepts_dynamic_closure_local_forward_into_parameter_under_extension();
+    ok &= test_compiler_accepts_static_function_value_capture_inside_closure_under_extension();
     ok &= test_compiler_accepts_dynamic_runtime_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_dynamic_runtime_zero_arg_void_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_multi_capture_closure_forward_into_parameter_under_extension();

@@ -9005,6 +9005,34 @@ static int test_lower_ir_accepts_dynamic_returned_closure_statement_passthrough_
     return ok;
 }
 
+static int test_lower_ir_accepts_static_function_value_capture_inside_closure_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ int f(int)=add1; int g(int)=closure [f] int (int y){ return f(y); }; return g(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "store_local g$closurecap$0.") != NULL &&
+        strstr(actual_text, "call main__closure_g_") != NULL &&
+        strstr(actual_text, "__fv_0_add1(4)\n") != NULL &&
+        strstr(actual_text, "call __fnwrap_add1(0, tmp.") != NULL &&
+        strstr(actual_text, "call_indirect") == NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR static function-value capture inside closure mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -15252,6 +15280,11 @@ int main(void) {
                 ? 0
                 : 1;
         }
+        if (strstr("LOWER-IR-CLOSURE-CAPTURE-STATIC-FNVAL", filter) != NULL) {
+            return test_lower_ir_accepts_static_function_value_capture_inside_closure_under_extension()
+                ? 0
+                : 1;
+        }
         if (strstr("LOWER-IR-PASSTHROUGH-TERNARY-CLOSURE-LOCAL-INIT", filter) != NULL) {
             return test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension() ? 0 : 1;
         }
@@ -15777,6 +15810,7 @@ int main(void) {
     ok &= test_lower_ir_accepts_dynamic_returned_zero_arg_closure_statement_passthrough_call_under_extension();
     ok &= test_lower_ir_accepts_dynamic_returned_zero_arg_void_closure_statement_passthrough_call_under_extension();
     ok &= test_lower_ir_accepts_dynamic_returned_closure_statement_passthrough_call_under_extension();
+    ok &= test_lower_ir_accepts_static_function_value_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value_return_immediate_call_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value_actual_argument_under_extension();

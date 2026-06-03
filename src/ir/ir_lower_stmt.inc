@@ -2457,6 +2457,7 @@ static int ir_try_build_closure_literal_function_value_descriptor(
                 : NULL;
         AstExpression capture_expr;
         IrValueRef capture_value;
+        int applied_function_capture = 0;
 
         if (!capture_name || capture_name[0] == '\0') {
             free(capture_local_ids);
@@ -2476,7 +2477,16 @@ static int ir_try_build_closure_literal_function_value_descriptor(
             free(capture_local_ids);
             return 0;
         }
-        if (!ir_emit_mov(ctx,
+        if (!ir_try_materialize_identifier_function_value_capture_slot(
+                ctx,
+                capture_name,
+                capture_local_ids[closure_capture_index],
+                &applied_function_capture)) {
+            free(capture_local_ids);
+            return 0;
+        }
+        if (!applied_function_capture &&
+            !ir_emit_mov(ctx,
                 ir_value_local(capture_local_ids[closure_capture_index]),
                 capture_value)) {
             free(capture_local_ids);

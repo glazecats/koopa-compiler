@@ -961,6 +961,63 @@ static int ir_resolve_function_value_descriptor(IrLowerContext *ctx,
         out_descriptor);
 }
 
+static int ir_try_materialize_identifier_function_value_capture_slot(
+    IrLowerContext *ctx,
+    const char *capture_name,
+    size_t dest_local_id,
+    int *out_applied) {
+    IrLowerFunctionObjectDescriptor descriptor;
+    long long tag_value = 0;
+    IrValueRef source_value;
+
+    if (out_applied) {
+        *out_applied = 0;
+    }
+    if (!ctx || !capture_name || capture_name[0] == '\0' ||
+        dest_local_id == (size_t)-1) {
+        return 0;
+    }
+
+    ir_init_function_object_descriptor(&descriptor);
+    if (!ir_resolve_identifier_function_value_descriptor(
+            ctx,
+            capture_name,
+            &descriptor) ||
+        !descriptor.direct_target_name ||
+        descriptor.direct_target_name[0] == '\0') {
+        return 1;
+    }
+
+    if (descriptor.capture_count > 0u || descriptor.has_dynamic_family) {
+        return 1;
+    }
+
+    if (descriptor.dynamic_tag_local_id != (size_t)-1) {
+        source_value = ir_value_local(descriptor.dynamic_tag_local_id);
+    } else if (descriptor.has_const_tag_value) {
+        source_value = ir_value_immediate(descriptor.const_tag_value);
+    } else if (ir_lower_register_function_value_target(
+            ctx,
+            capture_name,
+            descriptor.direct_target_name,
+            &tag_value)) {
+        source_value = ir_value_immediate(tag_value);
+    } else {
+        return 0;
+    }
+
+    if (!ir_emit_mov(
+            ctx,
+            ir_value_local(dest_local_id),
+            source_value)) {
+        return 0;
+    }
+    if (out_applied) {
+        *out_applied = 1;
+    }
+    return 1;
+}
+
 static int ir_resolve_callable_object_view(IrLowerContext *ctx,
     const AstExpression *expr,
     IrLowerCallableObjectView *out_view) {
@@ -1127,6 +1184,7 @@ static int ir_try_resolve_static_actual_argument_callable_object_view(IrLowerCon
             AstExpression capture_expr;
             IrValueRef capture_value;
             char capture_local_name[256];
+            int applied_function_capture = 0;
 
             if (!capture_name || capture_name[0] == '\0') {
                 free(closure_capture_local_ids);
@@ -1151,7 +1209,19 @@ static int ir_try_resolve_static_actual_argument_callable_object_view(IrLowerCon
                     capture_local_name,
                     0,
                     &closure_capture_local_ids[closure_capture_index],
-                    ctx->error) ||
+                    ctx->error)) {
+                free(closure_capture_local_ids);
+                return 0;
+            }
+            if (!ir_try_materialize_identifier_function_value_capture_slot(
+                    ctx,
+                    capture_name,
+                    closure_capture_local_ids[closure_capture_index],
+                    &applied_function_capture)) {
+                free(closure_capture_local_ids);
+                return 0;
+            }
+            if (!applied_function_capture &&
                 !ir_emit_mov(ctx,
                     ir_value_local(closure_capture_local_ids[closure_capture_index]),
                     capture_value)) {
@@ -3225,6 +3295,58 @@ static int ir_finish_dynamic_function_value_specialization_name_cleanup(
     return 1;
 }
 
+static int ir_resolve_hidden_function_value_specialization_binding(
+    IrLowerContext *ctx,
+    const AstExternal *callee_external,
+    size_t parameter_index,
+    const size_t **out_capture_local_ids,
+    size_t *out_capture_count,
+    const char **out_target_name) {
+    const char *parameter_name = NULL;
+    IrLowerFunctionObjectDescriptor descriptor;
+
+    if (out_capture_local_ids) {
+        *out_capture_local_ids = NULL;
+    }
+    if (out_capture_count) {
+        *out_capture_count = 0u;
+    }
+    if (out_target_name) {
+        *out_target_name = NULL;
+    }
+    if (!ctx || !callee_external ||
+        parameter_index >= callee_external->parameter_count ||
+        !callee_external->parameter_names) {
+        return 0;
+    }
+
+    parameter_name = callee_external->parameter_names[parameter_index];
+    if (!parameter_name || parameter_name[0] == '\0') {
+        return 0;
+    }
+
+    ir_init_function_object_descriptor(&descriptor);
+    if (!ir_resolve_identifier_function_value_descriptor(
+            ctx,
+            parameter_name,
+            &descriptor) ||
+        !descriptor.direct_target_name ||
+        descriptor.direct_target_name[0] == '\0') {
+        return 0;
+    }
+
+    if (out_capture_local_ids) {
+        *out_capture_local_ids = descriptor.capture_local_ids;
+    }
+    if (out_capture_count) {
+        *out_capture_count = descriptor.capture_count;
+    }
+    if (out_target_name) {
+        *out_target_name = descriptor.direct_target_name;
+    }
+    return 1;
+}
+
 static int ir_build_dynamic_function_value_specialization_forward_args(
     IrLowerContext *ctx,
     const AstExternal *callee_external,
@@ -3415,15 +3537,24 @@ static int ir_build_dynamic_function_value_specialization_names(
             callee_external->parameter_value_kinds[i] != AST_PARAMETER_VALUE_FUNCTION) {
             continue;
         }
-        if (!ir_call_argument_resolve_extension_function_value_target(
-                ctx->ast_program,
-                ctx,
-                callee_external,
-                i,
-                call_args[i],
-                &bound_capture_local_ids[i],
-                &bound_capture_counts[i],
-                &bound_targets_a[i]) ||
+        if ((!call_args[i] &&
+                !ir_resolve_hidden_function_value_specialization_binding(
+                    ctx,
+                    callee_external,
+                    i,
+                    &bound_capture_local_ids[i],
+                    &bound_capture_counts[i],
+                    &bound_targets_a[i])) ||
+            (call_args[i] &&
+                !ir_call_argument_resolve_extension_function_value_target(
+                    ctx->ast_program,
+                    ctx,
+                    callee_external,
+                    i,
+                    call_args[i],
+                    &bound_capture_local_ids[i],
+                    &bound_capture_counts[i],
+                    &bound_targets_a[i])) ||
             !bound_targets_a[i]) {
             ir_finish_dynamic_function_value_specialization_name_cleanup(
                 bound_targets_a,
@@ -3535,15 +3666,24 @@ static int ir_build_function_value_specialization_name_from_call_args(
     for (i = 0u; i < call_arg_count; ++i) {
         if (callee_external->parameter_value_kinds &&
             callee_external->parameter_value_kinds[i] == AST_PARAMETER_VALUE_FUNCTION) {
-            if (!ir_call_argument_resolve_extension_function_value_target(
-                    ctx->ast_program,
-                    ctx,
-                    callee_external,
-                    i,
-                    call_args[i],
-                    &bound_capture_local_ids[i],
-                    &bound_capture_counts[i],
-                    &bound_targets[i])) {
+            if ((!call_args[i] &&
+                    !ir_resolve_hidden_function_value_specialization_binding(
+                        ctx,
+                        callee_external,
+                        i,
+                        &bound_capture_local_ids[i],
+                        &bound_capture_counts[i],
+                        &bound_targets[i])) ||
+                (call_args[i] &&
+                    !ir_call_argument_resolve_extension_function_value_target(
+                        ctx->ast_program,
+                        ctx,
+                        callee_external,
+                        i,
+                        call_args[i],
+                        &bound_capture_local_ids[i],
+                        &bound_capture_counts[i],
+                        &bound_targets[i]))) {
                 ir_finish_function_value_specialization_binding_cleanup(
                     bound_targets,
                     bound_capture_local_ids,
@@ -6242,18 +6382,56 @@ static int ir_try_emit_static_direct_target_specialized_call(IrLowerContext *ctx
     }
 
     for (i = 0u; i < hidden_prefix_param_count; ++i) {
-        IrValueRef *new_args =
-            (IrValueRef *)realloc(call_args, (arg_count + 1u) * sizeof(IrValueRef));
-        if (!new_args) {
-            free(call_args);
-            ir_set_error(ctx->error,
-                call_expr->line,
-                call_expr->column,
-                "IR-INT-027: out of memory while lowering higher-order closure capture prefix arguments");
-            return 0;
+        if (callee_external->parameter_value_kinds &&
+            callee_external->parameter_value_kinds[i] == AST_PARAMETER_VALUE_FUNCTION) {
+            const size_t *bound_capture_local_ids = NULL;
+            size_t bound_capture_count = 0u;
+
+            if (!ir_resolve_hidden_function_value_specialization_binding(
+                    ctx,
+                    callee_external,
+                    i,
+                    &bound_capture_local_ids,
+                    &bound_capture_count,
+                    NULL)) {
+                free(call_args);
+                ir_set_error(ctx->error,
+                    call_expr->line,
+                    call_expr->column,
+                    "IR-LOWER-028: failed to resolve higher-order function-value specialization target");
+                return 0;
+            }
+            for (size_t capture_index = 0u; capture_index < bound_capture_count; ++capture_index) {
+                IrValueRef *new_args =
+                    (IrValueRef *)realloc(call_args, (arg_count + 1u) * sizeof(IrValueRef));
+                if (!new_args) {
+                    free(call_args);
+                    ir_set_error(ctx->error,
+                        call_expr->line,
+                        call_expr->column,
+                        "IR-INT-027: out of memory while lowering higher-order closure capture prefix arguments");
+                    return 0;
+                }
+                call_args = new_args;
+                call_args[arg_count++] = ir_value_local(bound_capture_local_ids[capture_index]);
+            }
+            continue;
         }
-        call_args = new_args;
-        call_args[arg_count++] = ir_value_local(capture_local_ids[i]);
+
+        {
+            IrValueRef *new_args =
+                (IrValueRef *)realloc(call_args, (arg_count + 1u) * sizeof(IrValueRef));
+            if (!new_args) {
+                free(call_args);
+                ir_set_error(ctx->error,
+                    call_expr->line,
+                    call_expr->column,
+                    "IR-INT-027: out of memory while lowering higher-order closure capture prefix arguments");
+                return 0;
+            }
+            call_args = new_args;
+            call_args[arg_count++] = ir_value_local(capture_local_ids[i]);
+        }
     }
 
     for (i = 0u; i < source_arg_count; ++i) {

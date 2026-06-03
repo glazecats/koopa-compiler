@@ -1501,6 +1501,9 @@ static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
     size_t **parameter_function_parameter_parameter_counts = NULL;
     int *parameter_name_lines = NULL;
     int *parameter_name_columns = NULL;
+    const char **bound_function_targets = NULL;
+    const size_t **bound_function_capture_local_ids = NULL;
+    size_t *bound_function_capture_counts = NULL;
     size_t parameter_count = 0u;
     size_t parameter_index = 0u;
     int ok = 0;
@@ -1527,13 +1530,20 @@ static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
             (size_t **)calloc(parameter_count, sizeof(size_t *));
         parameter_name_lines = (int *)calloc(parameter_count, sizeof(int));
         parameter_name_columns = (int *)calloc(parameter_count, sizeof(int));
+        bound_function_targets = (const char **)calloc(parameter_count, sizeof(const char *));
+        bound_function_capture_local_ids =
+            (const size_t **)calloc(parameter_count, sizeof(const size_t *));
+        bound_function_capture_counts = (size_t *)calloc(parameter_count, sizeof(size_t));
         if (!parameter_names || !parameter_value_kinds ||
             !parameter_function_return_types ||
             !parameter_function_parameter_counts ||
             !parameter_function_parameter_value_kinds ||
             !parameter_function_parameter_return_types ||
             !parameter_function_parameter_parameter_counts ||
-            !parameter_name_lines || !parameter_name_columns) {
+            !parameter_name_lines || !parameter_name_columns ||
+            !bound_function_targets ||
+            !bound_function_capture_local_ids ||
+            !bound_function_capture_counts) {
             ir_set_error(error, closure_expr->line, closure_expr->column,
                 "IR-INT-095: out of memory while building direct closure helper signature");
             goto cleanup;
@@ -1545,6 +1555,32 @@ static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
         parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_INT;
         parameter_name_lines[parameter_index] = closure_expr->line;
         parameter_name_columns[parameter_index] = closure_expr->column;
+        if (capture_names && capture_names[parameter_index]) {
+            IrLowerFunctionObjectDescriptor capture_descriptor;
+            long long capture_tag_value = 0;
+
+            ir_init_function_object_descriptor(&capture_descriptor);
+            if (ir_resolve_identifier_function_value_descriptor(
+                    ctx,
+                    capture_names[parameter_index],
+                    &capture_descriptor) &&
+                capture_descriptor.direct_target_name &&
+                capture_descriptor.direct_target_name[0] != '\0' &&
+                !capture_descriptor.is_closure_family &&
+                !capture_descriptor.has_dynamic_family &&
+                ir_lower_register_function_value_target(
+                    ctx,
+                    capture_names[parameter_index],
+                    capture_descriptor.direct_target_name,
+                    &capture_tag_value)) {
+                parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_FUNCTION;
+                parameter_function_return_types[parameter_index] = AST_FUNCTION_RETURN_INT;
+                parameter_function_parameter_counts[parameter_index] = 1u;
+                bound_function_targets[parameter_index] = capture_descriptor.direct_target_name;
+                bound_function_capture_local_ids[parameter_index] = NULL;
+                bound_function_capture_counts[parameter_index] = 0u;
+            }
+        }
     }
     for (parameter_index = 0u; parameter_index < closure_expr->as.closure.parameter_count; ++parameter_index) {
         size_t dest_index = capture_count + parameter_index;
@@ -1667,9 +1703,9 @@ static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
         function,
         NULL,
         &synthetic_external,
-        NULL,
-        NULL,
-        NULL,
+        bound_function_targets,
+        (const size_t *const *)bound_function_capture_local_ids,
+        bound_function_capture_counts,
         error);
     (void)capture_local_ids;
 
@@ -1683,6 +1719,9 @@ cleanup:
     free(parameter_function_parameter_parameter_counts);
     free(parameter_name_lines);
     free(parameter_name_columns);
+    free(bound_function_targets);
+    free(bound_function_capture_local_ids);
+    free(bound_function_capture_counts);
     return ok;
 }
 
@@ -6373,6 +6412,9 @@ static int ir_lower_closure_helper_function(IrLowerContext *ctx,
     size_t **parameter_function_parameter_parameter_counts = NULL;
     int *parameter_name_lines = NULL;
     int *parameter_name_columns = NULL;
+    const char **bound_function_targets = NULL;
+    const size_t **bound_function_capture_local_ids = NULL;
+    size_t *bound_function_capture_counts = NULL;
     size_t parameter_count = 0u;
     size_t parameter_index = 0u;
     int ok = 0;
@@ -6409,13 +6451,20 @@ static int ir_lower_closure_helper_function(IrLowerContext *ctx,
             (size_t **)calloc(parameter_count, sizeof(size_t *));
         parameter_name_lines = (int *)calloc(parameter_count, sizeof(int));
         parameter_name_columns = (int *)calloc(parameter_count, sizeof(int));
+        bound_function_targets = (const char **)calloc(parameter_count, sizeof(const char *));
+        bound_function_capture_local_ids =
+            (const size_t **)calloc(parameter_count, sizeof(const size_t *));
+        bound_function_capture_counts = (size_t *)calloc(parameter_count, sizeof(size_t));
         if (!parameter_names || !parameter_value_kinds ||
             !parameter_function_return_types ||
             !parameter_function_parameter_counts ||
             !parameter_function_parameter_value_kinds ||
             !parameter_function_parameter_return_types ||
             !parameter_function_parameter_parameter_counts ||
-            !parameter_name_lines || !parameter_name_columns) {
+            !parameter_name_lines || !parameter_name_columns ||
+            !bound_function_targets ||
+            !bound_function_capture_local_ids ||
+            !bound_function_capture_counts) {
             ir_set_error(error, decl_stmt->line, decl_stmt->column,
                 "IR-INT-088: out of memory while building closure helper signature");
             goto cleanup;
@@ -6427,6 +6476,32 @@ static int ir_lower_closure_helper_function(IrLowerContext *ctx,
         parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_INT;
         parameter_name_lines[parameter_index] = closure_expr->line;
         parameter_name_columns[parameter_index] = closure_expr->column;
+        if (capture_names && capture_names[parameter_index]) {
+            IrLowerFunctionObjectDescriptor capture_descriptor;
+            long long capture_tag_value = 0;
+
+            ir_init_function_object_descriptor(&capture_descriptor);
+            if (ir_resolve_identifier_function_value_descriptor(
+                    ctx,
+                    capture_names[parameter_index],
+                    &capture_descriptor) &&
+                capture_descriptor.direct_target_name &&
+                capture_descriptor.direct_target_name[0] != '\0' &&
+                !capture_descriptor.is_closure_family &&
+                !capture_descriptor.has_dynamic_family &&
+                ir_lower_register_function_value_target(
+                    ctx,
+                    capture_names[parameter_index],
+                    capture_descriptor.direct_target_name,
+                    &capture_tag_value)) {
+                parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_FUNCTION;
+                parameter_function_return_types[parameter_index] = AST_FUNCTION_RETURN_INT;
+                parameter_function_parameter_counts[parameter_index] = 1u;
+                bound_function_targets[parameter_index] = capture_descriptor.direct_target_name;
+                bound_function_capture_local_ids[parameter_index] = NULL;
+                bound_function_capture_counts[parameter_index] = 0u;
+            }
+        }
     }
     for (parameter_index = 0u; parameter_index < closure_expr->as.closure.parameter_count; ++parameter_index) {
         size_t dest_index = capture_count + parameter_index;
@@ -6549,9 +6624,9 @@ static int ir_lower_closure_helper_function(IrLowerContext *ctx,
         function,
         NULL,
         &synthetic_external,
-        NULL,
-        NULL,
-        NULL,
+        bound_function_targets,
+        (const size_t *const *)bound_function_capture_local_ids,
+        bound_function_capture_counts,
         error);
     (void)capture_local_ids;
 
@@ -6565,6 +6640,9 @@ cleanup:
     free(parameter_function_parameter_parameter_counts);
     free(parameter_name_lines);
     free(parameter_name_columns);
+    free(bound_function_targets);
+    free(bound_function_capture_local_ids);
+    free(bound_function_capture_counts);
     return ok;
 }
 

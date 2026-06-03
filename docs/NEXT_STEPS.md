@@ -263,6 +263,17 @@
       returned multi-capture dynamic forwarding family, which currently needs
       one more lowering fix before it can be locked into the same regression
       surface.
+    - current static function-value closure-capture checkpoint:
+      the first honest closure-captures-function-value slice is now also
+      landed for static noncapturing locals. A witness such as
+      `int f(int)=add1; int g(int)=closure [f] int (int y){ return f(y); };`
+      now compiles end-to-end: the closure capture stores the source
+      function-value tag, higher-order closure-helper specialization resolves
+      the hidden captured function parameter by name, and the resulting
+      specialized helper body lowers to `fn_make __fnwrap_add1` +
+      `call_indirect` on canonical IR before collapsing to direct wrapped
+      calls on lower-IR / compiler surfaces. Focused IR, lower-IR, and
+      compiler-driver regression coverage is now in place for this slice.
     - current returned multi-capture dynamic forwarding checkpoint:
       the nearby returned multi-capture closure forwarding family is now also
       real instead of remaining blocked on `IR-INT-123`. The focused witness
