@@ -373,10 +373,12 @@
       specialized leaf call instead of falling back to one unresolved static
       specialization attempt. Focused IR, lower-IR, and compiler-driver
       regression coverage is now in place for both the direct and one-hop
-      passthrough siblings. The next nearby blocker is the broader family where
-      this same multi-dynamic combination story must coexist with deeper
-      higher-order wrappers, larger target sets, or mixed producer kinds in the
-      same expression tree instead of only two-target returned closure families.
+      passthrough siblings.
+    - next multi-dynamic callable-object blocker:
+      the next nearby blocker is now the broader family where this same
+      multi-dynamic combination story must coexist with deeper higher-order
+      wrappers, larger target sets, or mixed producer kinds in the same
+      expression tree instead of only two-target returned closure families.
     - current returned multi-capture dynamic forwarding checkpoint:
       the nearby returned multi-capture closure forwarding family is now also
       real instead of remaining blocked on `IR-INT-123`. The focused witness
