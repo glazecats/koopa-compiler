@@ -12963,6 +12963,32 @@ static int test_compiler_accepts_alias_of_dynamic_returned_function_parameter_ca
     return ok;
 }
 
+static int test_compiler_accepts_ternary_actual_argument_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c, int f(int))(int){ int g(int)=closure [f] int (int y){ return f(y); }; int h(int)=closure [f] int (int y){ return f(f(y)); }; if(c) g=h; return g; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int c=1; return apply(c ? pick(1, add1) : pick(0, add1), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        strstr(output, "call __fnwrap_closure_pick__closure_g_131107_1") == NULL ||
+        strstr(output, "call __fnwrap_closure_pick__closure_h_131159_1") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary actual argument of dynamic returned function-parameter capture inside closure should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_under_extension(void) {
     static const char *source =
         "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
@@ -17982,6 +18008,9 @@ int main(void) {
         if (strstr("COMPILER-ALIAS-DYNAMIC-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
             return test_compiler_accepts_alias_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-TERNARY-ACTUAL-DYNAMIC-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_compiler_accepts_ternary_actual_argument_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-RETURNED-CLOSURE-FORWARD", filter) != NULL) {
             return test_compiler_accepts_returned_closure_forwarding_into_function_parameter_under_extension() ? 0 : 1;
         }
@@ -19139,6 +19168,7 @@ int main(void) {
     ok &= test_compiler_accepts_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_compiler_accepts_three_hop_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_compiler_accepts_alias_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
+    ok &= test_compiler_accepts_ternary_actual_argument_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_compiler_accepts_dynamic_runtime_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_dynamic_runtime_zero_arg_void_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_multi_capture_closure_forward_into_parameter_under_extension();

@@ -330,11 +330,23 @@
       specialization can also follow local alias declarations plus passthrough
       call chains when reconstructing the concrete bound target. Focused IR,
       lower-IR, and compiler-driver regression coverage is now in place for
-      these deeper bind-and-call consumers too. The next nearby blocker is the
-      still broader family where the same recursive returned-callee tracking
-      needs to survive through more arbitrary dynamic returned actual-argument
-      transport and deeper mixed call/alias chains rather than the currently
-      locked direct-bind and simple alias/passthrough shapes.
+      these deeper bind-and-call consumers too.
+    - current ternary returned-call actual-argument checkpoint:
+      the same recursive returned-callee line now also reaches one first
+      genuinely mixed actual-argument consumer instead of stopping at direct
+      bind sites. A witness such as
+      `return apply(c ? pick(1, add1) : pick(0, add1), 4);` is now green for
+      the dynamic returned closure-capture family. The kept closure on this
+      slice is caller-side: ternary actual arguments whose branches are
+      returned-call families now materialize a branch-selected returned
+      callable payload first, then rebuild one dynamic callable object from
+      that payload before the final `call_indirect`. Focused IR, lower-IR, and
+      compiler-driver regression coverage is now in place for this ternary
+      returned-call actual-argument consumer too. The next nearby blocker is
+      the still broader family where these recursive returned-callee and
+      returned actual-argument reconstructions must survive through even more
+      mixed chains, especially when several higher-order wrappers and deeper
+      dynamic producer families compose in the same expression tree.
     - current returned multi-capture dynamic forwarding checkpoint:
       the nearby returned multi-capture closure forwarding family is now also
       real instead of remaining blocked on `IR-INT-123`. The focused witness

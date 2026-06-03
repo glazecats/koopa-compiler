@@ -6876,6 +6876,8 @@ static int ir_materialize_ternary_function_value_argument_callable_object_view(
     size_t *payload_local_ids = NULL;
     const char **dynamic_target_names = NULL;
     size_t capture_index;
+    struct IrLowerReturnedFunctionValueFamilyInfo then_family_info;
+    struct IrLowerReturnedFunctionValueFamilyInfo else_family_info;
 
     if (out_view) {
         memset(out_view, 0, sizeof(*out_view));
@@ -6891,9 +6893,136 @@ static int ir_materialize_ternary_function_value_argument_callable_object_view(
         function_arg_base->kind != AST_EXPR_TERNARY) {
         return 0;
     }
+    ir_init_returned_function_value_family_info(&then_family_info);
+    ir_init_returned_function_value_family_info(&else_family_info);
 
     then_base = ir_unwrap_paren_expression(function_arg_base->as.ternary.then_expr);
     else_base = ir_unwrap_paren_expression(function_arg_base->as.ternary.else_expr);
+    if (then_base && else_base &&
+        then_base->kind == AST_EXPR_CALL &&
+        else_base->kind == AST_EXPR_CALL &&
+        ir_try_analyze_returned_function_value_family(ctx, then_base, &then_family_info) &&
+        ir_try_analyze_returned_function_value_family(ctx, else_base, &else_family_info) &&
+        then_family_info.primary_target_name &&
+        else_family_info.primary_target_name &&
+        then_family_info.is_closure_family == else_family_info.is_closure_family &&
+        then_family_info.capture_count == else_family_info.capture_count &&
+        !ir_function_append_local(
+            ctx->function,
+            "__ternary_fn_argtag",
+            0,
+            &dynamic_tag_local_id,
+            ctx->error)) {
+        ir_free_returned_function_value_family_info(&then_family_info);
+        ir_free_returned_function_value_family_info(&else_family_info);
+        return 0;
+    }
+    if (then_base && else_base &&
+        then_base->kind == AST_EXPR_CALL &&
+        else_base->kind == AST_EXPR_CALL &&
+        then_family_info.primary_target_name &&
+        else_family_info.primary_target_name &&
+        then_family_info.is_closure_family == else_family_info.is_closure_family &&
+        then_family_info.capture_count == else_family_info.capture_count &&
+        ir_lower_register_function_value_target(
+            ctx,
+            "__ternary_fn_arg",
+            then_family_info.primary_target_name,
+            &then_tag_value) &&
+        ir_lower_register_function_value_target(
+            ctx,
+            "__ternary_fn_arg",
+            else_family_info.primary_target_name,
+            &else_tag_value)) {
+        if (then_family_info.target_count == 0u ||
+            then_family_info.target_count != else_family_info.target_count) {
+            ir_free_returned_function_value_family_info(&then_family_info);
+            ir_free_returned_function_value_family_info(&else_family_info);
+            return 0;
+        }
+        dynamic_target_names = (const char **)malloc(
+            then_family_info.target_count * sizeof(const char *));
+        if (!dynamic_target_names) {
+            ir_free_returned_function_value_family_info(&then_family_info);
+            ir_free_returned_function_value_family_info(&else_family_info);
+            ir_set_error(ctx->error,
+                function_arg_base->line,
+                function_arg_base->column,
+                "IR-INT-029: out of memory while preparing ternary callable-object targets");
+            return 0;
+        }
+        for (capture_index = 0u; capture_index < then_family_info.target_count; ++capture_index) {
+            dynamic_target_names[capture_index] = then_family_info.target_names[capture_index];
+        }
+        if (then_family_info.capture_count > 0u) {
+            payload_local_ids = (size_t *)malloc(then_family_info.capture_count * sizeof(size_t));
+            if (!payload_local_ids) {
+                free((void *)dynamic_target_names);
+                ir_free_returned_function_value_family_info(&then_family_info);
+                ir_free_returned_function_value_family_info(&else_family_info);
+                ir_set_error(ctx->error,
+                    function_arg_base->line,
+                    function_arg_base->column,
+                    "IR-INT-029: out of memory while preparing ternary returned-call payload");
+                return 0;
+            }
+            for (capture_index = 0u; capture_index < then_family_info.capture_count; ++capture_index) {
+                char payload_local_name[256];
+
+                snprintf(payload_local_name,
+                    sizeof(payload_local_name),
+                    "__ternary_fn_argcap_%zu",
+                    capture_index);
+                if (!ir_function_append_local(
+                        ctx->function,
+                        payload_local_name,
+                        0,
+                        &payload_local_ids[capture_index],
+                        ctx->error)) {
+                    free(payload_local_ids);
+                    free((void *)dynamic_target_names);
+                    ir_free_returned_function_value_family_info(&then_family_info);
+                    ir_free_returned_function_value_family_info(&else_family_info);
+                    return 0;
+                }
+            }
+        }
+        if (!ir_emit_materialized_returned_call_family_selection(
+                ctx,
+                function_arg_base->as.ternary.condition,
+                "__ternary_fn_arg",
+                &then_family_info,
+                &else_family_info,
+                dynamic_tag_local_id,
+                payload_local_ids)) {
+            free(payload_local_ids);
+            free((void *)dynamic_target_names);
+            ir_free_returned_function_value_family_info(&then_family_info);
+            ir_free_returned_function_value_family_info(&else_family_info);
+            return 0;
+        }
+        out_view->direct_target_name = then_family_info.primary_target_name;
+        out_view->dynamic_target_names = dynamic_target_names;
+        out_view->dynamic_target_count = then_family_info.target_count;
+        out_view->owned_payload_local_ids = payload_local_ids;
+        out_view->capture_local_ids = payload_local_ids;
+        out_view->capture_count = then_family_info.capture_count;
+        out_view->dynamic_tag_local_id = dynamic_tag_local_id;
+        out_view->is_closure_family = then_family_info.capture_count > 0u ? 1 : 0;
+        out_view->has_dynamic_family = 1;
+        if (out_owned_dynamic_target_names) {
+            *out_owned_dynamic_target_names = dynamic_target_names;
+        }
+        if (out_then_tag_value) {
+            *out_then_tag_value = then_tag_value;
+        }
+        ir_free_returned_function_value_family_info(&then_family_info);
+        ir_free_returned_function_value_family_info(&else_family_info);
+        return 1;
+    }
+    ir_free_returned_function_value_family_info(&then_family_info);
+    ir_free_returned_function_value_family_info(&else_family_info);
+
     if (then_base && else_base &&
         then_base->kind == AST_EXPR_CALL &&
         else_base->kind == AST_EXPR_CALL &&

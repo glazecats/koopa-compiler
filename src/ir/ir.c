@@ -209,6 +209,18 @@ typedef struct {
     int has_identifier_binding_payload;
 } IrLowerFunctionValueReturnResolution;
 
+typedef struct IrLowerReturnedFunctionValueFamilyInfo {
+    const AstExpression *materialize_call_expr;
+    const AstExternal *producer_external;
+    const char **target_names;
+    size_t target_count;
+    const char *primary_target_name;
+    size_t capture_count;
+    size_t payload_slot_count;
+    int is_closure_family;
+    int needs_tag_local;
+} IrLowerReturnedFunctionValueFamilyInfo;
+
 typedef struct {
     char *data;
     size_t length;
@@ -759,6 +771,22 @@ static int ir_lower_emit_function_value_wrapper_side_effects(IrLowerContext *ctx
 static int ir_resolve_function_value_wrapper_direct_identifier(const IrLowerContext *ctx,
     const AstExpression *expr,
     const char **out_name);
+static int ir_emit_materialized_returned_call_family_selection(
+    IrLowerContext *ctx,
+    const AstExpression *condition_expr,
+    const char *binding_name,
+    const struct IrLowerReturnedFunctionValueFamilyInfo *then_family_info,
+    const struct IrLowerReturnedFunctionValueFamilyInfo *else_family_info,
+    size_t tag_local_id,
+    const size_t *capture_local_ids);
+static int ir_try_analyze_returned_function_value_family(
+    IrLowerContext *ctx,
+    const AstExpression *call_expr,
+    IrLowerReturnedFunctionValueFamilyInfo *out_info);
+static void ir_init_returned_function_value_family_info(
+    IrLowerReturnedFunctionValueFamilyInfo *info);
+static void ir_free_returned_function_value_family_info(
+    IrLowerReturnedFunctionValueFamilyInfo *info);
 static int ir_resolve_function_value_initializer_binding(IrLowerContext *ctx,
     const AstExpression *expr,
     const char **out_target_name,

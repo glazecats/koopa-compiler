@@ -2078,18 +2078,6 @@ static int ir_prepare_materialized_ternary_function_value_tags(IrLowerContext *c
     long long *out_then_tag_value,
     long long *out_else_tag_value);
 
-struct IrLowerReturnedFunctionValueFamilyInfo {
-    const AstExpression *materialize_call_expr;
-    const AstExternal *producer_external;
-    const char **target_names;
-    size_t target_count;
-    const char *primary_target_name;
-    size_t capture_count;
-    size_t payload_slot_count;
-    int is_closure_family;
-    int needs_tag_local;
-};
-
 static void ir_init_returned_function_value_family_info(
     IrLowerReturnedFunctionValueFamilyInfo *info) {
     if (!info) {
