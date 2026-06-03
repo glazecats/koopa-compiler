@@ -172,6 +172,10 @@ typedef struct {
     IrFunctionShape *function_shapes;
     size_t function_shape_count;
     size_t function_shape_capacity;
+    const AstExternal **function_external_refs;
+    int *function_external_ref_owned;
+    size_t function_external_ref_count;
+    size_t function_external_ref_capacity;
     IrGlobal *globals;
     size_t global_count;
     size_t global_capacity;

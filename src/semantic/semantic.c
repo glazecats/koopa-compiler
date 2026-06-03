@@ -64,6 +64,12 @@ struct SemanticTypeDescriptor {
     const int *parameter_value_kinds;
     const AstFunctionReturnType *parameter_function_return_types;
     const size_t *parameter_function_parameter_counts;
+    const int *const *parameter_function_parameter_value_kinds;
+    const AstFunctionReturnType *const *parameter_function_parameter_return_types;
+    const size_t *const *parameter_function_parameter_parameter_counts;
+    const int *const *const *parameter_function_parameter_parameter_value_kinds;
+    const AstFunctionReturnType *const *const *parameter_function_parameter_parameter_return_types;
+    const size_t *const *const *parameter_function_parameter_parameter_parameter_counts;
 };
 
 typedef enum {
@@ -199,10 +205,22 @@ static int semantic_function_value_return_matches_type_descriptor(
 static int semantic_build_closure_type_descriptor(
     const AstExpression *closure_expr,
     SemanticTypeDescriptor *out_type);
+static int semantic_build_function_type_parameter_descriptor(
+    const SemanticTypeDescriptor *function_type,
+    size_t param_index,
+    SemanticTypeDescriptor *out_type);
 static int semantic_make_function_type_descriptor(
     AstFunctionReturnType return_type,
     size_t parameter_count,
     const int *parameter_value_kinds,
+    const AstFunctionReturnType *parameter_function_return_types,
+    const size_t *parameter_function_parameter_counts,
+    const int *const *parameter_function_parameter_value_kinds,
+    const AstFunctionReturnType *const *parameter_function_parameter_return_types,
+    const size_t *const *parameter_function_parameter_parameter_counts,
+    const int *const *const *parameter_function_parameter_parameter_value_kinds,
+    const AstFunctionReturnType *const *const *parameter_function_parameter_parameter_return_types,
+    const size_t *const *const *parameter_function_parameter_parameter_parameter_counts,
     SemanticTypeDescriptor *out_type);
 static int semantic_top_level_declarations_have_compatible_types(const AstExternal *lhs,
     const AstExternal *rhs);

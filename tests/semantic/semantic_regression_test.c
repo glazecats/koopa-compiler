@@ -218,6 +218,66 @@ int main(void) {
         if (strstr("SEMANTIC-FLOAT-CONVERT-WHILE-COND-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_explicit_float_while_condition_under_extension() ? 0 : 1;
         }
+        if (strstr("SEMANTIC-SECOND-ORDER-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-CLOSURE-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_closure_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-ZERO-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_zero_arg_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-ZERO-CLOSURE-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_zero_arg_closure_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-ZERO-VOID-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_zero_arg_void_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-ZERO-VOID-CLOSURE-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_zero_arg_void_closure_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-VOID-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_returned_passthrough_dynamic_zero_arg_void_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_returned_passthrough_dynamic_zero_arg_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-LOCAL-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_local_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-RETURNED-FNVAL-IMM-CALL", filter) != NULL) {
+            return test_semantic_accepts_second_order_returned_function_value_parameter_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-RETURNED-CLOSURE-FNVAL-IMM-CALL", filter) != NULL) {
+            return test_semantic_accepts_second_order_returned_closure_function_value_parameter_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-DYNAMIC-RETURNED-FNVAL-IMM-CALL", filter) != NULL) {
+            return test_semantic_accepts_second_order_dynamic_returned_function_value_parameter_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-FNVAL-IMM-CALL", filter) != NULL) {
+            return test_semantic_accepts_second_order_returned_passthrough_dynamic_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-DYNAMIC-LOCAL-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_dynamic_local_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-DYNAMIC-LOCAL-CLOSURE-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_dynamic_local_closure_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-SECOND-ORDER-RETURNED-CLOSURE-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_second_order_returned_closure_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-THIRD-ORDER-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_third_order_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-THIRD-ORDER-RETURNED-FNVAL-BIND", filter) != NULL) {
+            return test_semantic_accepts_third_order_returned_function_value_parameter_bind_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-THIRD-ORDER-LOCAL-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_third_order_local_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
         if (strstr("SEMANTIC-FLOAT-CONVERT-RECURSIVE-FOR-COND-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_recursive_explicit_float_for_condition_under_extension() ? 0 : 1;
         }
@@ -718,6 +778,13 @@ int main(void) {
     ok &= test_semantic_accepts_recursive_explicit_float_condition_under_extension();
     ok &= test_semantic_accepts_explicit_float_while_condition_under_extension();
     ok &= test_semantic_accepts_recursive_explicit_float_for_condition_under_extension();
+    ok &= test_semantic_accepts_second_order_closure_function_value_parameter_forwarding_under_extension();
+    ok &= test_semantic_accepts_second_order_zero_arg_closure_function_value_parameter_forwarding_under_extension();
+    ok &= test_semantic_accepts_second_order_zero_arg_void_closure_function_value_parameter_forwarding_under_extension();
+    ok &= test_semantic_accepts_second_order_returned_closure_function_value_parameter_immediate_call_under_extension();
+    ok &= test_semantic_accepts_second_order_dynamic_local_closure_function_value_parameter_forwarding_under_extension();
+    ok &= test_semantic_accepts_second_order_returned_closure_function_value_parameter_forwarding_under_extension();
+    ok &= test_semantic_accepts_third_order_function_value_parameter_forwarding_under_extension();
     ok &= test_semantic_accepts_explicit_float_logical_condition_composition_under_extension();
     ok &= test_semantic_accepts_recursive_float_if_condition_under_extension();
     ok &= test_semantic_accepts_recursive_float_while_condition_under_extension();
@@ -895,6 +962,52 @@ int main(void) {
     ok &= test_semantic_accepts_assignment_result_function_value_direct_call_under_extension();
     ok &= test_semantic_rejects_assignment_result_function_value_direct_call_scalar_type_mismatch_under_extension();
     ok &= test_semantic_accepts_wrapped_function_value_local_initializer_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_function_value_local_initializer_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_zero_arg_function_value_local_initializer_under_extension();
+    ok &= test_semantic_accepts_assignment_result_returned_closure_local_initializer_under_extension();
+    ok &= test_semantic_accepts_assignment_result_returned_zero_arg_void_closure_local_initializer_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_function_value_local_initializer_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_closure_local_initializer_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_function_value_local_bounce_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_function_value_forward_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_closure_local_bounce_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_closure_forward_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_function_value_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_function_value_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_closure_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_closure_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_closure_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_closure_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_function_value_bounce_passthrough_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_function_value_bounce_passthrough_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_closure_bounce_passthrough_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_closure_bounce_passthrough_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bounce_passthrough_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bounce_passthrough_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bounce_passthrough_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bounce_passthrough_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_closure_bounce_passthrough_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_closure_bounce_passthrough_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bounce_passthrough_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bounce_passthrough_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_function_value_statement_reassign_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_function_value_statement_reassign_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_closure_statement_reassign_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_closure_statement_reassign_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_function_value_statement_reassign_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_function_value_statement_reassign_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_statement_reassign_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_statement_reassign_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_closure_statement_reassign_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_closure_statement_reassign_bind_return_actual_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_statement_reassign_bind_return_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_statement_reassign_bind_return_actual_under_extension();
     ok &= test_semantic_accepts_ternary_function_value_local_initializer_under_extension();
     ok &= test_semantic_rejects_ternary_function_value_local_initializer_parameter_kind_mismatch_under_extension();
     ok &= test_semantic_rejects_function_valued_return_call_local_initializer_parameter_kind_mismatch_under_extension();
@@ -956,6 +1069,14 @@ int main(void) {
     ok &= test_semantic_rejects_local_function_value_alias_chain_expected_parameter_kind_mismatch_under_extension();
     ok &= test_semantic_rejects_local_function_value_assignment_parameter_kind_mismatch_under_extension();
     ok &= test_semantic_accepts_local_function_value_reassignment_under_extension();
+    ok &= test_semantic_accepts_returned_function_value_reassignment_under_extension();
+    ok &= test_semantic_accepts_returned_zero_arg_function_value_reassignment_under_extension();
+    ok &= test_semantic_accepts_returned_closure_reassignment_under_extension();
+    ok &= test_semantic_accepts_returned_zero_arg_void_closure_reassignment_under_extension();
+    ok &= test_semantic_accepts_wrapped_function_value_reassignment_under_extension();
+    ok &= test_semantic_accepts_assignment_result_function_value_reassignment_under_extension();
+    ok &= test_semantic_accepts_wrapped_returned_function_value_reassignment_under_extension();
+    ok &= test_semantic_accepts_assignment_result_returned_closure_reassignment_under_extension();
     ok &= test_semantic_accepts_dynamic_local_function_value_dispatch_under_extension();
     ok &= test_semantic_rejects_closure_literal_outside_extension_mode();
     ok &= test_semantic_accepts_closure_literal_function_local_initializer_shape_under_extension();

@@ -151,6 +151,11 @@ static int parse_compound_statement_with_local_control(Parser *p,
             AstFunctionReturnType *decl_function_return_types = NULL;
             size_t *decl_function_parameter_counts = NULL;
             int **decl_function_parameter_value_kinds = NULL;
+            AstFunctionReturnType **decl_function_parameter_return_types = NULL;
+            size_t **decl_function_parameter_parameter_counts = NULL;
+            int ***decl_function_parameter_parameter_value_kinds = NULL;
+            AstFunctionReturnType ***decl_function_parameter_parameter_return_types = NULL;
+            size_t ***decl_function_parameter_parameter_parameter_counts = NULL;
             char **decl_type_names = NULL;
             size_t *decl_array_ranks = NULL;
             AstExpression ***decl_array_extent_exprs = NULL;
@@ -166,6 +171,11 @@ static int parse_compound_statement_with_local_control(Parser *p,
                 out_statement ? &decl_function_return_types : NULL,
                 out_statement ? &decl_function_parameter_counts : NULL,
                 out_statement ? &decl_function_parameter_value_kinds : NULL,
+                out_statement ? &decl_function_parameter_return_types : NULL,
+                out_statement ? &decl_function_parameter_parameter_counts : NULL,
+                out_statement ? &decl_function_parameter_parameter_value_kinds : NULL,
+                out_statement ? &decl_function_parameter_parameter_return_types : NULL,
+                out_statement ? &decl_function_parameter_parameter_parameter_counts : NULL,
                 out_statement ? &decl_type_names : NULL,
                 out_statement ? &decl_array_ranks : NULL,
                 out_statement ? &decl_array_extent_exprs : NULL,
@@ -203,6 +213,16 @@ static int parse_compound_statement_with_local_control(Parser *p,
                 decl_stmt->declaration_function_parameter_counts = decl_function_parameter_counts;
                 decl_stmt->declaration_function_parameter_value_kinds =
                     decl_function_parameter_value_kinds;
+                decl_stmt->declaration_function_parameter_return_types =
+                    decl_function_parameter_return_types;
+                decl_stmt->declaration_function_parameter_parameter_counts =
+                    decl_function_parameter_parameter_counts;
+                decl_stmt->declaration_function_parameter_parameter_value_kinds =
+                    decl_function_parameter_parameter_value_kinds;
+                decl_stmt->declaration_function_parameter_parameter_return_types =
+                    decl_function_parameter_parameter_return_types;
+                decl_stmt->declaration_function_parameter_parameter_parameter_counts =
+                    decl_function_parameter_parameter_parameter_counts;
                 decl_stmt->declaration_type_names = decl_type_names;
                 decl_stmt->declaration_array_ranks = decl_array_ranks;
                 decl_stmt->declaration_array_extent_exprs = decl_array_extent_exprs;
@@ -615,9 +635,14 @@ static int parse_for_statement_with_local_control(Parser *p,
     size_t for_init_decl_name_count = 0;
     int *for_init_decl_value_kinds = NULL;
     AstFunctionReturnType *for_init_decl_function_return_types = NULL;
-    size_t *for_init_decl_function_parameter_counts = NULL;
-    int **for_init_decl_function_parameter_value_kinds = NULL;
-    char **for_init_decl_type_names = NULL;
+            size_t *for_init_decl_function_parameter_counts = NULL;
+            int **for_init_decl_function_parameter_value_kinds = NULL;
+            AstFunctionReturnType **for_init_decl_function_parameter_return_types = NULL;
+            size_t **for_init_decl_function_parameter_parameter_counts = NULL;
+            int ***for_init_decl_function_parameter_parameter_value_kinds = NULL;
+            AstFunctionReturnType ***for_init_decl_function_parameter_parameter_return_types = NULL;
+            size_t ***for_init_decl_function_parameter_parameter_parameter_counts = NULL;
+            char **for_init_decl_type_names = NULL;
     size_t *for_init_decl_array_ranks = NULL;
     AstExpression ***for_init_decl_array_extent_exprs = NULL;
     const Token *for_tok = previous(p);
@@ -648,6 +673,11 @@ static int parse_for_statement_with_local_control(Parser *p,
             out_statement ? &for_init_decl_function_return_types : NULL,
             out_statement ? &for_init_decl_function_parameter_counts : NULL,
             out_statement ? &for_init_decl_function_parameter_value_kinds : NULL,
+            out_statement ? &for_init_decl_function_parameter_return_types : NULL,
+            out_statement ? &for_init_decl_function_parameter_parameter_counts : NULL,
+            out_statement ? &for_init_decl_function_parameter_parameter_value_kinds : NULL,
+            out_statement ? &for_init_decl_function_parameter_parameter_return_types : NULL,
+            out_statement ? &for_init_decl_function_parameter_parameter_parameter_counts : NULL,
             out_statement ? &for_init_decl_type_names : NULL,
             out_statement ? &for_init_decl_array_ranks : NULL,
             out_statement ? &for_init_decl_array_extent_exprs : NULL,
@@ -944,6 +974,16 @@ static int parse_for_statement_with_local_control(Parser *p,
         for_stmt->declaration_function_parameter_counts = for_init_decl_function_parameter_counts;
         for_stmt->declaration_function_parameter_value_kinds =
             for_init_decl_function_parameter_value_kinds;
+        for_stmt->declaration_function_parameter_return_types =
+            for_init_decl_function_parameter_return_types;
+        for_stmt->declaration_function_parameter_parameter_counts =
+            for_init_decl_function_parameter_parameter_counts;
+        for_stmt->declaration_function_parameter_parameter_value_kinds =
+            for_init_decl_function_parameter_parameter_value_kinds;
+        for_stmt->declaration_function_parameter_parameter_return_types =
+            for_init_decl_function_parameter_parameter_return_types;
+        for_stmt->declaration_function_parameter_parameter_parameter_counts =
+            for_init_decl_function_parameter_parameter_parameter_counts;
         for_stmt->declaration_type_names = for_init_decl_type_names;
         for_stmt->declaration_array_ranks = for_init_decl_array_ranks;
         for_stmt->declaration_array_extent_exprs = for_init_decl_array_extent_exprs;
@@ -1594,6 +1634,11 @@ static int parse_init_declarator(Parser *p,
     int *out_is_function_declarator,
     int **out_function_parameter_value_kinds,
     size_t *out_function_parameter_count,
+    AstFunctionReturnType **out_function_parameter_return_types,
+    size_t **out_function_parameter_parameter_counts,
+    int ***out_function_parameter_parameter_value_kinds,
+    AstFunctionReturnType ***out_function_parameter_parameter_return_types,
+    size_t ***out_function_parameter_parameter_parameter_counts,
     int *out_has_initializer,
     AstExpression **out_initializer_expr) {
     AstExpression **array_extent_exprs = NULL;
@@ -1602,6 +1647,11 @@ static int parse_init_declarator(Parser *p,
     AstFunctionReturnType function_return_type = base_function_return_type;
     int *function_parameter_value_kinds = NULL;
     size_t function_parameter_count = 0u;
+    AstFunctionReturnType *function_parameter_return_types = NULL;
+    size_t *function_parameter_parameter_counts = NULL;
+    int **function_parameter_parameter_value_kinds = NULL;
+    AstFunctionReturnType **function_parameter_parameter_return_types = NULL;
+    size_t **function_parameter_parameter_parameter_counts = NULL;
 
     if (out_array_rank) {
         *out_array_rank = 0u;
@@ -1621,6 +1671,21 @@ static int parse_init_declarator(Parser *p,
     if (out_function_parameter_count) {
         *out_function_parameter_count = 0u;
     }
+    if (out_function_parameter_return_types) {
+        *out_function_parameter_return_types = NULL;
+    }
+    if (out_function_parameter_parameter_counts) {
+        *out_function_parameter_parameter_counts = NULL;
+    }
+    if (out_function_parameter_parameter_value_kinds) {
+        *out_function_parameter_parameter_value_kinds = NULL;
+    }
+    if (out_function_parameter_parameter_return_types) {
+        *out_function_parameter_parameter_return_types = NULL;
+    }
+    if (out_function_parameter_parameter_parameter_counts) {
+        *out_function_parameter_parameter_parameter_counts = NULL;
+    }
     if (out_has_initializer) {
         *out_has_initializer = 0;
     }
@@ -1638,6 +1703,7 @@ static int parse_init_declarator(Parser *p,
         }
 
         if (!parse_parameter_list(p,
+                0u,
                 &nested_param_count,
                 NULL,
                 NULL,
@@ -1645,16 +1711,38 @@ static int parse_init_declarator(Parser *p,
                 NULL,
                 NULL,
                 NULL,
+                out_function_parameter_return_types ? &function_parameter_return_types : NULL,
+                out_function_parameter_parameter_counts ? &function_parameter_parameter_counts : NULL,
+                out_function_parameter_parameter_value_kinds
+                    ? &function_parameter_parameter_value_kinds
+                    : NULL,
+                out_function_parameter_parameter_return_types
+                    ? &function_parameter_parameter_return_types
+                    : NULL,
+                out_function_parameter_parameter_parameter_counts
+                    ? &function_parameter_parameter_parameter_counts
+                    : NULL,
+                NULL,
                 NULL,
                 NULL,
                 NULL,
                 NULL,
                 NULL)) {
             free(function_parameter_value_kinds);
+            free(function_parameter_return_types);
+            free(function_parameter_parameter_counts);
+            free(function_parameter_parameter_value_kinds);
+            free(function_parameter_parameter_return_types);
+            free(function_parameter_parameter_parameter_counts);
             return 0;
         }
         if (!consume(p, TOKEN_RPAREN, "')'")) {
             free(function_parameter_value_kinds);
+            free(function_parameter_return_types);
+            free(function_parameter_parameter_counts);
+            free(function_parameter_parameter_value_kinds);
+            free(function_parameter_parameter_return_types);
+            free(function_parameter_parameter_parameter_counts);
             return 0;
         }
         function_parameter_count = nested_param_count;
@@ -1714,6 +1802,46 @@ static int parse_init_declarator(Parser *p,
     if (out_function_parameter_count) {
         *out_function_parameter_count = function_parameter_count;
     }
+    if (out_function_parameter_return_types) {
+        *out_function_parameter_return_types = function_parameter_return_types;
+    } else {
+        free(function_parameter_return_types);
+    }
+    if (out_function_parameter_parameter_counts) {
+        *out_function_parameter_parameter_counts = function_parameter_parameter_counts;
+    } else {
+        free(function_parameter_parameter_counts);
+    }
+    if (out_function_parameter_parameter_value_kinds) {
+        *out_function_parameter_parameter_value_kinds = function_parameter_parameter_value_kinds;
+    } else {
+        if (function_parameter_parameter_value_kinds) {
+            size_t i;
+            for (i = 0u; i < function_parameter_count; ++i) {
+                free(function_parameter_parameter_value_kinds[i]);
+            }
+        }
+        free(function_parameter_parameter_value_kinds);
+    }
+    if (out_function_parameter_parameter_return_types) {
+        *out_function_parameter_parameter_return_types = function_parameter_parameter_return_types;
+    } else if (function_parameter_parameter_return_types) {
+        size_t i;
+        for (i = 0u; i < function_parameter_count; ++i) {
+            free(function_parameter_parameter_return_types[i]);
+        }
+        free(function_parameter_parameter_return_types);
+    }
+    if (out_function_parameter_parameter_parameter_counts) {
+        *out_function_parameter_parameter_parameter_counts =
+            function_parameter_parameter_parameter_counts;
+    } else if (function_parameter_parameter_parameter_counts) {
+        size_t i;
+        for (i = 0u; i < function_parameter_count; ++i) {
+            free(function_parameter_parameter_parameter_counts[i]);
+        }
+        free(function_parameter_parameter_parameter_counts);
+    }
     if (match(p, TOKEN_ASSIGN)) {
         AstExpression *init_expr = NULL;
 
@@ -1749,6 +1877,11 @@ static int parse_declaration(Parser *p,
     AstFunctionReturnType **out_decl_function_return_types,
     size_t **out_decl_function_parameter_counts,
     int ***out_decl_function_parameter_value_kinds,
+    AstFunctionReturnType ***out_decl_function_parameter_return_types,
+    size_t ***out_decl_function_parameter_parameter_counts,
+    int ****out_decl_function_parameter_parameter_value_kinds,
+    AstFunctionReturnType ****out_decl_function_parameter_parameter_return_types,
+    size_t ****out_decl_function_parameter_parameter_parameter_counts,
     char ***out_decl_type_names,
     size_t **out_decl_array_ranks,
     AstExpression ****out_decl_array_extent_exprs,
@@ -1769,6 +1902,11 @@ static int parse_declaration(Parser *p,
     AstFunctionReturnType *decl_function_return_types = NULL;
     size_t *decl_function_parameter_counts = NULL;
     int **decl_function_parameter_value_kinds = NULL;
+    AstFunctionReturnType **decl_function_parameter_return_types = NULL;
+    size_t **decl_function_parameter_parameter_counts = NULL;
+    int ***decl_function_parameter_parameter_value_kinds = NULL;
+    AstFunctionReturnType ***decl_function_parameter_parameter_return_types = NULL;
+    size_t ***decl_function_parameter_parameter_parameter_counts = NULL;
     size_t decl_function_return_type_capacity = 0;
     size_t decl_function_parameter_count_capacity = 0;
     size_t decl_function_parameter_value_kind_capacity = 0;
@@ -1786,6 +1924,11 @@ static int parse_declaration(Parser *p,
     AstFunctionReturnType declaration_function_return_type = AST_FUNCTION_RETURN_INT;
     int *declaration_function_parameter_value_kinds = NULL;
     size_t declaration_function_parameter_count = 0u;
+    AstFunctionReturnType *declaration_function_parameter_return_types = NULL;
+    size_t *declaration_function_parameter_parameter_counts = NULL;
+    int **declaration_function_parameter_parameter_value_kinds = NULL;
+    AstFunctionReturnType **declaration_function_parameter_parameter_return_types = NULL;
+    size_t **declaration_function_parameter_parameter_parameter_counts = NULL;
     char *declaration_type_name = NULL;
 
     if (out_decl_names) {
@@ -1805,6 +1948,21 @@ static int parse_declaration(Parser *p,
     }
     if (out_decl_function_parameter_value_kinds) {
         *out_decl_function_parameter_value_kinds = NULL;
+    }
+    if (out_decl_function_parameter_return_types) {
+        *out_decl_function_parameter_return_types = NULL;
+    }
+    if (out_decl_function_parameter_parameter_counts) {
+        *out_decl_function_parameter_parameter_counts = NULL;
+    }
+    if (out_decl_function_parameter_parameter_value_kinds) {
+        *out_decl_function_parameter_parameter_value_kinds = NULL;
+    }
+    if (out_decl_function_parameter_parameter_return_types) {
+        *out_decl_function_parameter_parameter_return_types = NULL;
+    }
+    if (out_decl_function_parameter_parameter_parameter_counts) {
+        *out_decl_function_parameter_parameter_parameter_counts = NULL;
     }
     if (out_decl_type_names) {
         *out_decl_type_names = NULL;
@@ -1870,17 +2028,22 @@ static int parse_declaration(Parser *p,
         free(declaration_type_name);
         return 0;
     }
-    if (!parse_init_declarator(p,
-        &ident,
-        &array_rank,
-        &array_extent_exprs,
-        declaration_function_return_type,
+        if (!parse_init_declarator(p,
+            &ident,
+            &array_rank,
+            &array_extent_exprs,
+            declaration_function_return_type,
         &declaration_function_return_type,
         &declaration_is_function_declarator,
         &declaration_function_parameter_value_kinds,
         &declaration_function_parameter_count,
-        &has_initializer,
-        &external_initializer_expr)) {
+            &declaration_function_parameter_return_types,
+            &declaration_function_parameter_parameter_counts,
+            &declaration_function_parameter_parameter_value_kinds,
+            &declaration_function_parameter_parameter_return_types,
+            &declaration_function_parameter_parameter_parameter_counts,
+            &has_initializer,
+            &external_initializer_expr)) {
         free_name_array(decl_names, decl_name_count);
         free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
         free(decl_array_ranks);
@@ -1894,6 +2057,11 @@ static int parse_declaration(Parser *p,
             "Local 'void' declarations must use a function declarator in the current extension slice");
         free_name_array(decl_names, decl_name_count);
         free(declaration_function_parameter_value_kinds);
+        free(declaration_function_parameter_return_types);
+        free(declaration_function_parameter_parameter_counts);
+        free(declaration_function_parameter_parameter_value_kinds);
+        free(declaration_function_parameter_parameter_return_types);
+        free(declaration_function_parameter_parameter_parameter_counts);
         free_ast_expression_array(array_extent_exprs, array_rank);
         free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
         free(decl_array_ranks);
@@ -1990,6 +2158,52 @@ static int parse_declaration(Parser *p,
             return 0;
         }
         declaration_function_parameter_value_kinds = NULL;
+        if (!append_pointer_list_slot(p,
+                (void ***)&decl_function_parameter_return_types,
+                decl_name_count - 1u,
+                &decl_function_parameter_value_kind_capacity,
+                (void *)declaration_function_parameter_return_types,
+                ident) ||
+            !append_pointer_list_slot(p,
+                (void ***)&decl_function_parameter_parameter_counts,
+                decl_name_count - 1u,
+                &decl_function_parameter_value_kind_capacity,
+                (void *)declaration_function_parameter_parameter_counts,
+                ident) ||
+            !append_pointer_list_slot(p,
+                (void ***)&decl_function_parameter_parameter_value_kinds,
+                decl_name_count - 1u,
+                &decl_function_parameter_value_kind_capacity,
+                (void *)declaration_function_parameter_parameter_value_kinds,
+                ident) ||
+            !append_pointer_list_slot(p,
+                (void ***)&decl_function_parameter_parameter_return_types,
+                decl_name_count - 1u,
+                &decl_function_parameter_value_kind_capacity,
+                (void *)declaration_function_parameter_parameter_return_types,
+                ident) ||
+            !append_pointer_list_slot(p,
+                (void ***)&decl_function_parameter_parameter_parameter_counts,
+                decl_name_count - 1u,
+                &decl_function_parameter_value_kind_capacity,
+                (void *)declaration_function_parameter_parameter_parameter_counts,
+                ident)) {
+            free_name_array(decl_names, decl_name_count);
+            free_ast_expression_array(array_extent_exprs, array_rank);
+            free(decl_value_kinds);
+            free(decl_function_return_types);
+            free(decl_function_parameter_counts);
+            free(decl_function_parameter_value_kinds);
+            free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+            free(decl_array_ranks);
+            free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
+            return 0;
+        }
+        declaration_function_parameter_return_types = NULL;
+        declaration_function_parameter_parameter_counts = NULL;
+        declaration_function_parameter_parameter_value_kinds = NULL;
+        declaration_function_parameter_parameter_return_types = NULL;
+        declaration_function_parameter_parameter_parameter_counts = NULL;
         if (!append_nullable_name_array_item(p,
                 &decl_type_names,
                 decl_name_count - 1u,
@@ -2066,10 +2280,15 @@ static int parse_declaration(Parser *p,
             &array_rank,
             &array_extent_exprs,
             declaration_function_return_type,
-            &declaration_function_return_type,
-            &declaration_is_function_declarator,
-            &declaration_function_parameter_value_kinds,
-            &declaration_function_parameter_count,
+        &declaration_function_return_type,
+        &declaration_is_function_declarator,
+        &declaration_function_parameter_value_kinds,
+        &declaration_function_parameter_count,
+            &declaration_function_parameter_return_types,
+            &declaration_function_parameter_parameter_counts,
+            &declaration_function_parameter_parameter_value_kinds,
+            &declaration_function_parameter_parameter_return_types,
+            &declaration_function_parameter_parameter_parameter_counts,
             &has_initializer,
             &external_initializer_expr)) {
             free_name_array(decl_names, decl_name_count);
@@ -2180,6 +2399,52 @@ static int parse_declaration(Parser *p,
                 return 0;
             }
             declaration_function_parameter_value_kinds = NULL;
+            if (!append_pointer_list_slot(p,
+                    (void ***)&decl_function_parameter_return_types,
+                    decl_name_count - 1u,
+                    &decl_function_parameter_value_kind_capacity,
+                    (void *)declaration_function_parameter_return_types,
+                    ident) ||
+                !append_pointer_list_slot(p,
+                    (void ***)&decl_function_parameter_parameter_counts,
+                    decl_name_count - 1u,
+                    &decl_function_parameter_value_kind_capacity,
+                    (void *)declaration_function_parameter_parameter_counts,
+                    ident) ||
+                !append_pointer_list_slot(p,
+                    (void ***)&decl_function_parameter_parameter_value_kinds,
+                    decl_name_count - 1u,
+                    &decl_function_parameter_value_kind_capacity,
+                    (void *)declaration_function_parameter_parameter_value_kinds,
+                    ident) ||
+                !append_pointer_list_slot(p,
+                    (void ***)&decl_function_parameter_parameter_return_types,
+                    decl_name_count - 1u,
+                    &decl_function_parameter_value_kind_capacity,
+                    (void *)declaration_function_parameter_parameter_return_types,
+                    ident) ||
+                !append_pointer_list_slot(p,
+                    (void ***)&decl_function_parameter_parameter_parameter_counts,
+                    decl_name_count - 1u,
+                    &decl_function_parameter_value_kind_capacity,
+                    (void *)declaration_function_parameter_parameter_parameter_counts,
+                    ident)) {
+                free_name_array(decl_names, decl_name_count);
+                free_ast_expression_array(array_extent_exprs, array_rank);
+                free(decl_value_kinds);
+                free(decl_function_return_types);
+                free(decl_function_parameter_counts);
+                free(decl_function_parameter_value_kinds);
+                free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+                free(decl_array_ranks);
+                free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
+                return 0;
+            }
+            declaration_function_parameter_return_types = NULL;
+            declaration_function_parameter_parameter_counts = NULL;
+            declaration_function_parameter_parameter_value_kinds = NULL;
+            declaration_function_parameter_parameter_return_types = NULL;
+            declaration_function_parameter_parameter_parameter_counts = NULL;
             if (!append_nullable_name_array_item(p,
                     &decl_type_names,
                     decl_name_count - 1u,
@@ -2296,6 +2561,84 @@ static int parse_declaration(Parser *p,
         }
         free(decl_function_parameter_value_kinds);
     }
+    if (out_decl_function_parameter_return_types) {
+        *out_decl_function_parameter_return_types = decl_function_parameter_return_types;
+    } else if (decl_function_parameter_return_types) {
+        size_t decl_index;
+        for (decl_index = 0u; decl_index < decl_name_count; ++decl_index) {
+            free(decl_function_parameter_return_types[decl_index]);
+        }
+        free(decl_function_parameter_return_types);
+    }
+    if (out_decl_function_parameter_parameter_counts) {
+        *out_decl_function_parameter_parameter_counts = decl_function_parameter_parameter_counts;
+    } else if (decl_function_parameter_parameter_counts) {
+        size_t decl_index;
+        for (decl_index = 0u; decl_index < decl_name_count; ++decl_index) {
+            free(decl_function_parameter_parameter_counts[decl_index]);
+        }
+        free(decl_function_parameter_parameter_counts);
+    }
+    if (out_decl_function_parameter_parameter_value_kinds) {
+        *out_decl_function_parameter_parameter_value_kinds =
+            decl_function_parameter_parameter_value_kinds;
+    } else if (decl_function_parameter_parameter_value_kinds) {
+        size_t decl_index;
+        for (decl_index = 0u; decl_index < decl_name_count; ++decl_index) {
+            size_t param_index;
+            int **nested_lists = decl_function_parameter_parameter_value_kinds[decl_index];
+            size_t param_count =
+                decl_function_parameter_counts ? decl_function_parameter_counts[decl_index] : 0u;
+            if (!nested_lists) {
+                continue;
+            }
+            for (param_index = 0u; param_index < param_count; ++param_index) {
+                free(nested_lists[param_index]);
+            }
+            free(nested_lists);
+        }
+        free(decl_function_parameter_parameter_value_kinds);
+    }
+    if (out_decl_function_parameter_parameter_return_types) {
+        *out_decl_function_parameter_parameter_return_types =
+            decl_function_parameter_parameter_return_types;
+    } else if (decl_function_parameter_parameter_return_types) {
+        size_t decl_index;
+        for (decl_index = 0u; decl_index < decl_name_count; ++decl_index) {
+            size_t param_index;
+            AstFunctionReturnType **nested_lists = decl_function_parameter_parameter_return_types[decl_index];
+            size_t param_count =
+                decl_function_parameter_counts ? decl_function_parameter_counts[decl_index] : 0u;
+            if (!nested_lists) {
+                continue;
+            }
+            for (param_index = 0u; param_index < param_count; ++param_index) {
+                free(nested_lists[param_index]);
+            }
+            free(nested_lists);
+        }
+        free(decl_function_parameter_parameter_return_types);
+    }
+    if (out_decl_function_parameter_parameter_parameter_counts) {
+        *out_decl_function_parameter_parameter_parameter_counts =
+            decl_function_parameter_parameter_parameter_counts;
+    } else if (decl_function_parameter_parameter_parameter_counts) {
+        size_t decl_index;
+        for (decl_index = 0u; decl_index < decl_name_count; ++decl_index) {
+            size_t param_index;
+            size_t **nested_lists = decl_function_parameter_parameter_parameter_counts[decl_index];
+            size_t param_count =
+                decl_function_parameter_counts ? decl_function_parameter_counts[decl_index] : 0u;
+            if (!nested_lists) {
+                continue;
+            }
+            for (param_index = 0u; param_index < param_count; ++param_index) {
+                free(nested_lists[param_index]);
+            }
+            free(nested_lists);
+        }
+        free(decl_function_parameter_parameter_parameter_counts);
+    }
     if (out_decl_type_names) {
         *out_decl_type_names = decl_type_names;
     } else {
@@ -2328,6 +2671,7 @@ static int parse_declaration(Parser *p,
 }
 
 static int parse_parameter_list(Parser *p,
+    size_t function_type_depth,
     size_t *out_param_count,
     int *out_has_unnamed_parameter,
     char ***out_parameter_names,
@@ -2337,6 +2681,12 @@ static int parse_parameter_list(Parser *p,
     AstExpression ****out_parameter_array_extent_exprs,
     AstFunctionReturnType **out_parameter_function_return_types,
     size_t **out_parameter_function_parameter_counts,
+    int ***out_parameter_function_parameter_value_kinds,
+    AstFunctionReturnType ***out_parameter_function_parameter_return_types,
+    size_t ***out_parameter_function_parameter_parameter_counts,
+    int ****out_parameter_function_parameter_parameter_value_kinds,
+    AstFunctionReturnType ****out_parameter_function_parameter_parameter_return_types,
+    size_t ****out_parameter_function_parameter_parameter_parameter_counts,
     int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns) {
@@ -2351,6 +2701,12 @@ static int parse_parameter_list(Parser *p,
     char **parameter_type_names = NULL;
     AstFunctionReturnType *parameter_function_return_types = NULL;
     size_t *parameter_function_parameter_counts = NULL;
+    int **parameter_function_parameter_value_kinds = NULL;
+    AstFunctionReturnType **parameter_function_parameter_return_types = NULL;
+    size_t **parameter_function_parameter_parameter_counts = NULL;
+    int ***parameter_function_parameter_parameter_value_kinds = NULL;
+    AstFunctionReturnType ***parameter_function_parameter_parameter_return_types = NULL;
+    size_t ***parameter_function_parameter_parameter_parameter_counts = NULL;
     int *parameter_is_const = NULL;
     int capture_parameter_metadata =
         (out_parameter_names != NULL) ||
@@ -2359,6 +2715,9 @@ static int parse_parameter_list(Parser *p,
         (out_parameter_array_ranks != NULL) ||
         (out_parameter_function_return_types != NULL) ||
         (out_parameter_function_parameter_counts != NULL) ||
+        (out_parameter_function_parameter_value_kinds != NULL) ||
+        (out_parameter_function_parameter_return_types != NULL) ||
+        (out_parameter_function_parameter_parameter_counts != NULL) ||
         (out_parameter_is_const != NULL) ||
         (out_parameter_name_lines != NULL) ||
         (out_parameter_name_columns != NULL);
@@ -2393,6 +2752,24 @@ static int parse_parameter_list(Parser *p,
     if (out_parameter_function_parameter_counts) {
         *out_parameter_function_parameter_counts = NULL;
     }
+    if (out_parameter_function_parameter_value_kinds) {
+        *out_parameter_function_parameter_value_kinds = NULL;
+    }
+    if (out_parameter_function_parameter_return_types) {
+        *out_parameter_function_parameter_return_types = NULL;
+    }
+    if (out_parameter_function_parameter_parameter_counts) {
+        *out_parameter_function_parameter_parameter_counts = NULL;
+    }
+    if (out_parameter_function_parameter_parameter_value_kinds) {
+        *out_parameter_function_parameter_parameter_value_kinds = NULL;
+    }
+    if (out_parameter_function_parameter_parameter_return_types) {
+        *out_parameter_function_parameter_parameter_return_types = NULL;
+    }
+    if (out_parameter_function_parameter_parameter_parameter_counts) {
+        *out_parameter_function_parameter_parameter_parameter_counts = NULL;
+    }
     if (out_parameter_is_const) {
         *out_parameter_is_const = NULL;
     }
@@ -2425,6 +2802,27 @@ static int parse_parameter_list(Parser *p,
         if (out_parameter_function_parameter_counts) {
             *out_parameter_function_parameter_counts = parameter_function_parameter_counts;
         }
+        if (out_parameter_function_parameter_value_kinds) {
+            *out_parameter_function_parameter_value_kinds = parameter_function_parameter_value_kinds;
+        }
+        if (out_parameter_function_parameter_return_types) {
+            *out_parameter_function_parameter_return_types = parameter_function_parameter_return_types;
+        }
+        if (out_parameter_function_parameter_parameter_counts) {
+            *out_parameter_function_parameter_parameter_counts = parameter_function_parameter_parameter_counts;
+        }
+        if (out_parameter_function_parameter_parameter_value_kinds) {
+            *out_parameter_function_parameter_parameter_value_kinds =
+                parameter_function_parameter_parameter_value_kinds;
+        }
+        if (out_parameter_function_parameter_parameter_return_types) {
+            *out_parameter_function_parameter_parameter_return_types =
+                parameter_function_parameter_parameter_return_types;
+        }
+        if (out_parameter_function_parameter_parameter_parameter_counts) {
+            *out_parameter_function_parameter_parameter_parameter_counts =
+                parameter_function_parameter_parameter_parameter_counts;
+        }
         if (out_parameter_is_const) {
             *out_parameter_is_const = parameter_is_const;
         }
@@ -2450,6 +2848,12 @@ static int parse_parameter_list(Parser *p,
         int parameter_value_kind = AST_PARAMETER_VALUE_INT;
         AstFunctionReturnType parameter_function_return_type = AST_FUNCTION_RETURN_INT;
         size_t parameter_function_parameter_count = 0u;
+        int *parameter_function_parameter_value_kind_list = NULL;
+        AstFunctionReturnType *parameter_function_parameter_return_type_list = NULL;
+        size_t *parameter_function_parameter_parameter_count_list = NULL;
+        int **nested_parameter_function_parameter_value_kinds = NULL;
+        AstFunctionReturnType **nested_parameter_function_parameter_return_types = NULL;
+        size_t **nested_parameter_function_parameter_parameter_counts = NULL;
         char *parameter_type_name = NULL;
 
         if (match(p, TOKEN_KW_CONST)) {
@@ -2511,9 +2915,15 @@ static int parse_parameter_list(Parser *p,
             if (check(p, TOKEN_LPAREN)) {
                 size_t nested_param_count = 0u;
                 int *nested_parameter_value_kinds = NULL;
+                AstFunctionReturnType *nested_parameter_function_return_types = NULL;
+                size_t *nested_parameter_function_parameter_counts = NULL;
+                int ***nested_parameter_function_parameter_parameter_value_kinds = NULL;
+                AstFunctionReturnType ***nested_parameter_function_parameter_parameter_return_types = NULL;
+                size_t ***nested_parameter_function_parameter_parameter_parameter_counts = NULL;
 
                 advance(p);
                 if (!parse_parameter_list(p,
+                        function_type_depth + 1u,
                         &nested_param_count,
                         NULL,
                         NULL,
@@ -2521,8 +2931,14 @@ static int parse_parameter_list(Parser *p,
                         NULL,
                         NULL,
                         NULL,
-                        NULL,
-                        NULL,
+                        &nested_parameter_function_return_types,
+                        &nested_parameter_function_parameter_counts,
+                        &nested_parameter_function_parameter_value_kinds,
+                        &nested_parameter_function_parameter_return_types,
+                        &nested_parameter_function_parameter_parameter_counts,
+                        &nested_parameter_function_parameter_parameter_value_kinds,
+                        &nested_parameter_function_parameter_parameter_return_types,
+                        &nested_parameter_function_parameter_parameter_parameter_counts,
                         NULL,
                         NULL,
                         NULL)) {
@@ -2537,6 +2953,50 @@ static int parse_parameter_list(Parser *p,
                     free(parameter_function_return_types);
                     free(parameter_function_parameter_counts);
                     free(nested_parameter_value_kinds);
+                    free(nested_parameter_function_return_types);
+                    free(nested_parameter_function_parameter_counts);
+                    if (nested_parameter_function_parameter_value_kinds) {
+                        size_t nested_index;
+                        for (nested_index = 0u; nested_index < nested_param_count; ++nested_index) {
+                            free(nested_parameter_function_parameter_value_kinds[nested_index]);
+                        }
+                    }
+                    free(nested_parameter_function_parameter_value_kinds);
+                    if (nested_parameter_function_parameter_return_types) {
+                        size_t nested_index;
+                        for (nested_index = 0u; nested_index < nested_param_count; ++nested_index) {
+                            free(nested_parameter_function_parameter_return_types[nested_index]);
+                        }
+                    }
+                    free(nested_parameter_function_parameter_return_types);
+                    if (nested_parameter_function_parameter_parameter_counts) {
+                        size_t nested_index;
+                        for (nested_index = 0u; nested_index < nested_param_count; ++nested_index) {
+                            free(nested_parameter_function_parameter_parameter_counts[nested_index]);
+                        }
+                    }
+                    free(nested_parameter_function_parameter_parameter_counts);
+                    if (nested_parameter_function_parameter_parameter_value_kinds) {
+                        size_t nested_index;
+                        for (nested_index = 0u; nested_index < nested_param_count; ++nested_index) {
+                            free(nested_parameter_function_parameter_parameter_value_kinds[nested_index]);
+                        }
+                    }
+                    free(nested_parameter_function_parameter_parameter_value_kinds);
+                    if (nested_parameter_function_parameter_parameter_return_types) {
+                        size_t nested_index;
+                        for (nested_index = 0u; nested_index < nested_param_count; ++nested_index) {
+                            free(nested_parameter_function_parameter_parameter_return_types[nested_index]);
+                        }
+                    }
+                    free(nested_parameter_function_parameter_parameter_return_types);
+                    if (nested_parameter_function_parameter_parameter_parameter_counts) {
+                        size_t nested_index;
+                        for (nested_index = 0u; nested_index < nested_param_count; ++nested_index) {
+                            free(nested_parameter_function_parameter_parameter_parameter_counts[nested_index]);
+                        }
+                    }
+                    free(nested_parameter_function_parameter_parameter_parameter_counts);
                     return 0;
                 }
                 if (nested_parameter_value_kinds) {
@@ -2544,21 +3004,47 @@ static int parse_parameter_list(Parser *p,
 
                     for (nested_index = 0u; nested_index < nested_param_count; ++nested_index) {
                         if (nested_parameter_value_kinds[nested_index] == AST_PARAMETER_VALUE_FUNCTION) {
-                            set_error(p,
-                                parameter_name_tok,
-                                "Nested function-typed parameters currently support only one level of function signature");
-                            free_name_array(parameter_names, count);
-                            free(parameter_value_kinds);
-                            free_name_array(parameter_type_names, count);
-                            free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
-                            free(parameter_array_ranks);
-                            free(parameter_is_const);
-                            free(parameter_name_lines);
-                            free(parameter_name_columns);
+                            if (function_type_depth >= 2u) {
+                                set_error(p,
+                                    parameter_name_tok,
+                                    "Nested function-typed parameters currently support only three levels of function signature");
+                                free_name_array(parameter_names, count);
+                                free(parameter_value_kinds);
+                                free_name_array(parameter_type_names, count);
+                                free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                                free(parameter_array_ranks);
+                                free(parameter_is_const);
+                                free(parameter_name_lines);
+                                free(parameter_name_columns);
                             free(parameter_function_return_types);
                             free(parameter_function_parameter_counts);
                             free(nested_parameter_value_kinds);
+                            free(nested_parameter_function_return_types);
+                            free(nested_parameter_function_parameter_counts);
+                            if (nested_parameter_function_parameter_value_kinds) {
+                                size_t free_index;
+                                for (free_index = 0u; free_index < nested_param_count; ++free_index) {
+                                    free(nested_parameter_function_parameter_value_kinds[free_index]);
+                                }
+                            }
+                            free(nested_parameter_function_parameter_value_kinds);
+                            if (nested_parameter_function_parameter_return_types) {
+                                size_t free_index;
+                                for (free_index = 0u; free_index < nested_param_count; ++free_index) {
+                                    free(nested_parameter_function_parameter_return_types[free_index]);
+                                }
+                            }
+                            free(nested_parameter_function_parameter_return_types);
+                            if (nested_parameter_function_parameter_parameter_counts) {
+                                size_t free_index;
+                                for (free_index = 0u; free_index < nested_param_count; ++free_index) {
+                                    free(nested_parameter_function_parameter_parameter_counts[free_index]);
+                                }
+                            }
+                            free(nested_parameter_function_parameter_parameter_counts);
                             return 0;
+                        }
+                        continue;
                         }
                         if (nested_parameter_value_kinds[nested_index] != AST_PARAMETER_VALUE_INT) {
                             set_error(p,
@@ -2575,6 +3061,29 @@ static int parse_parameter_list(Parser *p,
                             free(parameter_function_return_types);
                             free(parameter_function_parameter_counts);
                             free(nested_parameter_value_kinds);
+                            free(nested_parameter_function_return_types);
+                            free(nested_parameter_function_parameter_counts);
+                            if (nested_parameter_function_parameter_value_kinds) {
+                                size_t free_index;
+                                for (free_index = 0u; free_index < nested_param_count; ++free_index) {
+                                    free(nested_parameter_function_parameter_value_kinds[free_index]);
+                                }
+                            }
+                            free(nested_parameter_function_parameter_value_kinds);
+                            if (nested_parameter_function_parameter_return_types) {
+                                size_t free_index;
+                                for (free_index = 0u; free_index < nested_param_count; ++free_index) {
+                                    free(nested_parameter_function_parameter_return_types[free_index]);
+                                }
+                            }
+                            free(nested_parameter_function_parameter_return_types);
+                            if (nested_parameter_function_parameter_parameter_counts) {
+                                size_t free_index;
+                                for (free_index = 0u; free_index < nested_param_count; ++free_index) {
+                                    free(nested_parameter_function_parameter_parameter_counts[free_index]);
+                                }
+                            }
+                            free(nested_parameter_function_parameter_parameter_counts);
                             return 0;
                         }
                     }
@@ -2591,12 +3100,38 @@ static int parse_parameter_list(Parser *p,
                     free(parameter_function_return_types);
                     free(parameter_function_parameter_counts);
                     free(nested_parameter_value_kinds);
+                    free(nested_parameter_function_return_types);
+                    free(nested_parameter_function_parameter_counts);
+                    if (nested_parameter_function_parameter_value_kinds) {
+                        size_t free_index;
+                        for (free_index = 0u; free_index < nested_param_count; ++free_index) {
+                            free(nested_parameter_function_parameter_value_kinds[free_index]);
+                        }
+                    }
+                    free(nested_parameter_function_parameter_value_kinds);
+                    if (nested_parameter_function_parameter_return_types) {
+                        size_t free_index;
+                        for (free_index = 0u; free_index < nested_param_count; ++free_index) {
+                            free(nested_parameter_function_parameter_return_types[free_index]);
+                        }
+                    }
+                    free(nested_parameter_function_parameter_return_types);
+                    if (nested_parameter_function_parameter_parameter_counts) {
+                        size_t free_index;
+                        for (free_index = 0u; free_index < nested_param_count; ++free_index) {
+                            free(nested_parameter_function_parameter_parameter_counts[free_index]);
+                        }
+                    }
+                    free(nested_parameter_function_parameter_parameter_counts);
                     return 0;
                 }
                 parameter_value_kind = AST_PARAMETER_VALUE_FUNCTION;
                 parameter_function_return_type = parameter_decl_type;
                 parameter_function_parameter_count = nested_param_count;
-                free(nested_parameter_value_kinds);
+                parameter_function_parameter_value_kind_list = nested_parameter_value_kinds;
+                parameter_function_parameter_return_type_list = nested_parameter_function_return_types;
+                parameter_function_parameter_parameter_count_list =
+                    nested_parameter_function_parameter_counts;
                 free(parameter_type_name);
                 parameter_type_name = NULL;
             } else if (parameter_decl_type == AST_FUNCTION_RETURN_FLOAT) {
@@ -2894,6 +3429,258 @@ static int parse_parameter_list(Parser *p,
                 parameter_function_parameter_counts = new_parameter_function_parameter_counts;
                 parameter_function_parameter_counts[count - 1] = parameter_function_parameter_count;
             }
+            if (out_parameter_function_parameter_value_kinds) {
+                int ***new_parameter_function_parameter_value_kinds;
+
+                if (!parameter_function_parameter_value_kinds) {
+                    new_parameter_function_parameter_value_kinds =
+                        (int ***)malloc(name_capacity * sizeof(int **));
+                } else {
+                    new_parameter_function_parameter_value_kinds =
+                        (int ***)realloc(parameter_function_parameter_value_kinds,
+                            name_capacity * sizeof(int **));
+                }
+                if (!new_parameter_function_parameter_value_kinds) {
+                    set_error(p,
+                        parameter_name_tok ? parameter_name_tok : peek(p),
+                        "Out of memory while building function parameter metadata");
+                    free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
+                    free_name_array(parameter_type_names, count);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
+                    free(parameter_function_parameter_value_kind_list);
+                    free(parameter_function_parameter_return_type_list);
+                    free(parameter_function_parameter_parameter_count_list);
+                    return 0;
+                }
+                if (name_capacity > count) {
+                    size_t init_index;
+                    for (init_index = count; init_index < name_capacity; ++init_index) {
+                        new_parameter_function_parameter_value_kinds[init_index] = NULL;
+                    }
+                }
+                parameter_function_parameter_value_kinds =
+                    (int **)new_parameter_function_parameter_value_kinds;
+                parameter_function_parameter_value_kinds[count - 1] =
+                    parameter_function_parameter_value_kind_list;
+                parameter_function_parameter_value_kind_list = NULL;
+            }
+            if (out_parameter_function_parameter_return_types) {
+                AstFunctionReturnType ***new_parameter_function_parameter_return_types;
+
+                if (!parameter_function_parameter_return_types) {
+                    new_parameter_function_parameter_return_types =
+                        (AstFunctionReturnType ***)malloc(name_capacity * sizeof(AstFunctionReturnType **));
+                } else {
+                    new_parameter_function_parameter_return_types =
+                        (AstFunctionReturnType ***)realloc(parameter_function_parameter_return_types,
+                            name_capacity * sizeof(AstFunctionReturnType **));
+                }
+                if (!new_parameter_function_parameter_return_types) {
+                    set_error(p,
+                        parameter_name_tok ? parameter_name_tok : peek(p),
+                        "Out of memory while building function parameter metadata");
+                    free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
+                    free_name_array(parameter_type_names, count);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
+                    free(parameter_function_parameter_value_kind_list);
+                    free(parameter_function_parameter_return_type_list);
+                    free(parameter_function_parameter_parameter_count_list);
+                    return 0;
+                }
+                if (name_capacity > count) {
+                    size_t init_index;
+                    for (init_index = count; init_index < name_capacity; ++init_index) {
+                        new_parameter_function_parameter_return_types[init_index] = NULL;
+                    }
+                }
+                parameter_function_parameter_return_types =
+                    (AstFunctionReturnType **)new_parameter_function_parameter_return_types;
+                parameter_function_parameter_return_types[count - 1] =
+                    parameter_function_parameter_return_type_list;
+                parameter_function_parameter_return_type_list = NULL;
+            }
+            if (out_parameter_function_parameter_parameter_counts) {
+                size_t ***new_parameter_function_parameter_parameter_counts;
+
+                if (!parameter_function_parameter_parameter_counts) {
+                    new_parameter_function_parameter_parameter_counts =
+                        (size_t ***)malloc(name_capacity * sizeof(size_t **));
+                } else {
+                    new_parameter_function_parameter_parameter_counts =
+                        (size_t ***)realloc(parameter_function_parameter_parameter_counts,
+                            name_capacity * sizeof(size_t **));
+                }
+                if (!new_parameter_function_parameter_parameter_counts) {
+                    set_error(p,
+                        parameter_name_tok ? parameter_name_tok : peek(p),
+                        "Out of memory while building function parameter metadata");
+                    free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
+                    free_name_array(parameter_type_names, count);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
+                    free(parameter_function_parameter_value_kind_list);
+                    free(parameter_function_parameter_return_type_list);
+                    free(parameter_function_parameter_parameter_count_list);
+                    return 0;
+                }
+                if (name_capacity > count) {
+                    size_t init_index;
+                    for (init_index = count; init_index < name_capacity; ++init_index) {
+                        new_parameter_function_parameter_parameter_counts[init_index] = NULL;
+                    }
+                }
+                parameter_function_parameter_parameter_counts =
+                    (size_t **)new_parameter_function_parameter_parameter_counts;
+                parameter_function_parameter_parameter_counts[count - 1] =
+                    parameter_function_parameter_parameter_count_list;
+                parameter_function_parameter_parameter_count_list = NULL;
+            }
+            if (out_parameter_function_parameter_parameter_value_kinds) {
+                int ****new_parameter_function_parameter_parameter_value_kinds;
+
+                if (!parameter_function_parameter_parameter_value_kinds) {
+                    new_parameter_function_parameter_parameter_value_kinds =
+                        (int ****)malloc(name_capacity * sizeof(int ***));
+                } else {
+                    new_parameter_function_parameter_parameter_value_kinds =
+                        (int ****)realloc(parameter_function_parameter_parameter_value_kinds,
+                            name_capacity * sizeof(int ***));
+                }
+                if (!new_parameter_function_parameter_parameter_value_kinds) {
+                    set_error(p,
+                        parameter_name_tok ? parameter_name_tok : peek(p),
+                        "Out of memory while building function parameter metadata");
+                    free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
+                    free_name_array(parameter_type_names, count);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
+                    free(parameter_function_parameter_value_kind_list);
+                    free(parameter_function_parameter_return_type_list);
+                    free(parameter_function_parameter_parameter_count_list);
+                    return 0;
+                }
+                if (name_capacity > count) {
+                    size_t init_index;
+                    for (init_index = count; init_index < name_capacity; ++init_index) {
+                        new_parameter_function_parameter_parameter_value_kinds[init_index] = NULL;
+                    }
+                }
+                parameter_function_parameter_parameter_value_kinds =
+                    (int ***)new_parameter_function_parameter_parameter_value_kinds;
+                parameter_function_parameter_parameter_value_kinds[count - 1] =
+                    nested_parameter_function_parameter_value_kinds;
+                nested_parameter_function_parameter_value_kinds = NULL;
+            }
+            if (out_parameter_function_parameter_parameter_return_types) {
+                AstFunctionReturnType ****new_parameter_function_parameter_parameter_return_types;
+
+                if (!parameter_function_parameter_parameter_return_types) {
+                    new_parameter_function_parameter_parameter_return_types =
+                        (AstFunctionReturnType ****)malloc(name_capacity * sizeof(AstFunctionReturnType ***));
+                } else {
+                    new_parameter_function_parameter_parameter_return_types =
+                        (AstFunctionReturnType ****)realloc(parameter_function_parameter_parameter_return_types,
+                            name_capacity * sizeof(AstFunctionReturnType ***));
+                }
+                if (!new_parameter_function_parameter_parameter_return_types) {
+                    set_error(p,
+                        parameter_name_tok ? parameter_name_tok : peek(p),
+                        "Out of memory while building function parameter metadata");
+                    free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
+                    free_name_array(parameter_type_names, count);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
+                    free(parameter_function_parameter_value_kind_list);
+                    free(parameter_function_parameter_return_type_list);
+                    free(parameter_function_parameter_parameter_count_list);
+                    return 0;
+                }
+                if (name_capacity > count) {
+                    size_t init_index;
+                    for (init_index = count; init_index < name_capacity; ++init_index) {
+                        new_parameter_function_parameter_parameter_return_types[init_index] = NULL;
+                    }
+                }
+                parameter_function_parameter_parameter_return_types =
+                    (AstFunctionReturnType ***)new_parameter_function_parameter_parameter_return_types;
+                parameter_function_parameter_parameter_return_types[count - 1] =
+                    nested_parameter_function_parameter_return_types;
+                nested_parameter_function_parameter_return_types = NULL;
+            }
+            if (out_parameter_function_parameter_parameter_parameter_counts) {
+                size_t ****new_parameter_function_parameter_parameter_parameter_counts;
+
+                if (!parameter_function_parameter_parameter_parameter_counts) {
+                    new_parameter_function_parameter_parameter_parameter_counts =
+                        (size_t ****)malloc(name_capacity * sizeof(size_t ***));
+                } else {
+                    new_parameter_function_parameter_parameter_parameter_counts =
+                        (size_t ****)realloc(parameter_function_parameter_parameter_parameter_counts,
+                            name_capacity * sizeof(size_t ***));
+                }
+                if (!new_parameter_function_parameter_parameter_parameter_counts) {
+                    set_error(p,
+                        parameter_name_tok ? parameter_name_tok : peek(p),
+                        "Out of memory while building function parameter metadata");
+                    free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
+                    free_name_array(parameter_type_names, count);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
+                    free(parameter_function_parameter_value_kind_list);
+                    free(parameter_function_parameter_return_type_list);
+                    free(parameter_function_parameter_parameter_count_list);
+                    return 0;
+                }
+                if (name_capacity > count) {
+                    size_t init_index;
+                    for (init_index = count; init_index < name_capacity; ++init_index) {
+                        new_parameter_function_parameter_parameter_parameter_counts[init_index] = NULL;
+                    }
+                }
+                parameter_function_parameter_parameter_parameter_counts =
+                    (size_t ***)new_parameter_function_parameter_parameter_parameter_counts;
+                parameter_function_parameter_parameter_parameter_counts[count - 1] =
+                    nested_parameter_function_parameter_parameter_counts;
+                nested_parameter_function_parameter_parameter_counts = NULL;
+            }
             if (out_parameter_is_const) {
                 int *new_parameter_is_const;
 
@@ -3029,6 +3816,63 @@ static int parse_parameter_list(Parser *p,
     } else {
         free(parameter_function_parameter_counts);
     }
+    if (out_parameter_function_parameter_value_kinds) {
+        *out_parameter_function_parameter_value_kinds = parameter_function_parameter_value_kinds;
+    } else if (parameter_function_parameter_value_kinds) {
+        size_t free_index;
+        for (free_index = 0u; free_index < count; ++free_index) {
+            free(parameter_function_parameter_value_kinds[free_index]);
+        }
+        free(parameter_function_parameter_value_kinds);
+    }
+    if (out_parameter_function_parameter_return_types) {
+        *out_parameter_function_parameter_return_types = parameter_function_parameter_return_types;
+    } else if (parameter_function_parameter_return_types) {
+        size_t free_index;
+        for (free_index = 0u; free_index < count; ++free_index) {
+            free(parameter_function_parameter_return_types[free_index]);
+        }
+        free(parameter_function_parameter_return_types);
+    }
+    if (out_parameter_function_parameter_parameter_counts) {
+        *out_parameter_function_parameter_parameter_counts = parameter_function_parameter_parameter_counts;
+    } else if (parameter_function_parameter_parameter_counts) {
+        size_t free_index;
+        for (free_index = 0u; free_index < count; ++free_index) {
+            free(parameter_function_parameter_parameter_counts[free_index]);
+        }
+        free(parameter_function_parameter_parameter_counts);
+    }
+    if (out_parameter_function_parameter_parameter_value_kinds) {
+        *out_parameter_function_parameter_parameter_value_kinds =
+            parameter_function_parameter_parameter_value_kinds;
+    } else if (parameter_function_parameter_parameter_value_kinds) {
+        size_t free_index;
+        for (free_index = 0u; free_index < count; ++free_index) {
+            free(parameter_function_parameter_parameter_value_kinds[free_index]);
+        }
+        free(parameter_function_parameter_parameter_value_kinds);
+    }
+    if (out_parameter_function_parameter_parameter_return_types) {
+        *out_parameter_function_parameter_parameter_return_types =
+            parameter_function_parameter_parameter_return_types;
+    } else if (parameter_function_parameter_parameter_return_types) {
+        size_t free_index;
+        for (free_index = 0u; free_index < count; ++free_index) {
+            free(parameter_function_parameter_parameter_return_types[free_index]);
+        }
+        free(parameter_function_parameter_parameter_return_types);
+    }
+    if (out_parameter_function_parameter_parameter_parameter_counts) {
+        *out_parameter_function_parameter_parameter_parameter_counts =
+            parameter_function_parameter_parameter_parameter_counts;
+    } else if (parameter_function_parameter_parameter_parameter_counts) {
+        size_t free_index;
+        for (free_index = 0u; free_index < count; ++free_index) {
+            free(parameter_function_parameter_parameter_parameter_counts[free_index]);
+        }
+        free(parameter_function_parameter_parameter_parameter_counts);
+    }
     if (out_parameter_is_const) {
         *out_parameter_is_const = parameter_is_const;
     } else {
@@ -3063,6 +3907,9 @@ static void parsed_function_signature_init(ParsedFunctionSignature *signature) {
     signature->function_return_function_parameter_type_names = NULL;
     signature->function_return_function_parameter_return_types = NULL;
     signature->function_return_function_parameter_parameter_counts = NULL;
+    signature->function_return_function_parameter_parameter_value_kinds = NULL;
+    signature->function_return_function_parameter_parameter_return_types = NULL;
+    signature->function_return_function_parameter_parameter_parameter_counts = NULL;
     signature->name_tok = NULL;
     signature->parameter_count = 0;
     signature->parameter_names = NULL;
@@ -3072,6 +3919,12 @@ static void parsed_function_signature_init(ParsedFunctionSignature *signature) {
     signature->parameter_array_extent_exprs = NULL;
     signature->parameter_function_return_types = NULL;
     signature->parameter_function_parameter_counts = NULL;
+    signature->parameter_function_parameter_value_kinds = NULL;
+    signature->parameter_function_parameter_return_types = NULL;
+    signature->parameter_function_parameter_parameter_counts = NULL;
+    signature->parameter_function_parameter_parameter_value_kinds = NULL;
+    signature->parameter_function_parameter_parameter_return_types = NULL;
+    signature->parameter_function_parameter_parameter_parameter_counts = NULL;
     signature->parameter_is_const = NULL;
     signature->parameter_name_lines = NULL;
     signature->parameter_name_columns = NULL;
@@ -3090,6 +3943,27 @@ static void parsed_function_signature_release(ParsedFunctionSignature *signature
         signature->function_return_function_parameter_count);
     free(signature->function_return_function_parameter_return_types);
     free(signature->function_return_function_parameter_parameter_counts);
+    if (signature->function_return_function_parameter_parameter_value_kinds) {
+        size_t i;
+        for (i = 0u; i < signature->function_return_function_parameter_count; ++i) {
+            free(signature->function_return_function_parameter_parameter_value_kinds[i]);
+        }
+    }
+    free(signature->function_return_function_parameter_parameter_value_kinds);
+    if (signature->function_return_function_parameter_parameter_return_types) {
+        size_t i;
+        for (i = 0u; i < signature->function_return_function_parameter_count; ++i) {
+            free(signature->function_return_function_parameter_parameter_return_types[i]);
+        }
+    }
+    free(signature->function_return_function_parameter_parameter_return_types);
+    if (signature->function_return_function_parameter_parameter_parameter_counts) {
+        size_t i;
+        for (i = 0u; i < signature->function_return_function_parameter_count; ++i) {
+            free(signature->function_return_function_parameter_parameter_parameter_counts[i]);
+        }
+    }
+    free(signature->function_return_function_parameter_parameter_parameter_counts);
     free_name_array(signature->parameter_names, signature->parameter_count);
     free(signature->parameter_value_kinds);
     free_name_array(signature->parameter_type_names, signature->parameter_count);
@@ -3099,6 +3973,48 @@ static void parsed_function_signature_release(ParsedFunctionSignature *signature
     free(signature->parameter_array_ranks);
     free(signature->parameter_function_return_types);
     free(signature->parameter_function_parameter_counts);
+    if (signature->parameter_function_parameter_value_kinds) {
+        size_t i;
+        for (i = 0u; i < signature->parameter_count; ++i) {
+            free(signature->parameter_function_parameter_value_kinds[i]);
+        }
+    }
+    free(signature->parameter_function_parameter_value_kinds);
+    if (signature->parameter_function_parameter_return_types) {
+        size_t i;
+        for (i = 0u; i < signature->parameter_count; ++i) {
+            free(signature->parameter_function_parameter_return_types[i]);
+        }
+    }
+    free(signature->parameter_function_parameter_return_types);
+    if (signature->parameter_function_parameter_parameter_counts) {
+        size_t i;
+        for (i = 0u; i < signature->parameter_count; ++i) {
+            free(signature->parameter_function_parameter_parameter_counts[i]);
+        }
+    }
+    free(signature->parameter_function_parameter_parameter_counts);
+    if (signature->parameter_function_parameter_parameter_value_kinds) {
+        size_t i;
+        for (i = 0u; i < signature->parameter_count; ++i) {
+            free(signature->parameter_function_parameter_parameter_value_kinds[i]);
+        }
+    }
+    free(signature->parameter_function_parameter_parameter_value_kinds);
+    if (signature->parameter_function_parameter_parameter_return_types) {
+        size_t i;
+        for (i = 0u; i < signature->parameter_count; ++i) {
+            free(signature->parameter_function_parameter_parameter_return_types[i]);
+        }
+    }
+    free(signature->parameter_function_parameter_parameter_return_types);
+    if (signature->parameter_function_parameter_parameter_parameter_counts) {
+        size_t i;
+        for (i = 0u; i < signature->parameter_count; ++i) {
+            free(signature->parameter_function_parameter_parameter_parameter_counts[i]);
+        }
+    }
+    free(signature->parameter_function_parameter_parameter_parameter_counts);
     free(signature->parameter_is_const);
     free(signature->parameter_name_lines);
     free(signature->parameter_name_columns);
@@ -3112,6 +4028,12 @@ static void parser_commit_parameter_names(char ***out_parameter_names,
     AstExpression ****out_parameter_array_extent_exprs,
     AstFunctionReturnType **out_parameter_function_return_types,
     size_t **out_parameter_function_parameter_counts,
+    int ***out_parameter_function_parameter_value_kinds,
+    AstFunctionReturnType ***out_parameter_function_parameter_return_types,
+    size_t ***out_parameter_function_parameter_parameter_counts,
+    int ****out_parameter_function_parameter_parameter_value_kinds,
+    AstFunctionReturnType ****out_parameter_function_parameter_parameter_return_types,
+    size_t ****out_parameter_function_parameter_parameter_parameter_counts,
     int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns,
@@ -3122,6 +4044,12 @@ static void parser_commit_parameter_names(char ***out_parameter_names,
     AstExpression ***parameter_array_extent_exprs,
     AstFunctionReturnType *parameter_function_return_types,
     size_t *parameter_function_parameter_counts,
+    int **parameter_function_parameter_value_kinds,
+    AstFunctionReturnType **parameter_function_parameter_return_types,
+    size_t **parameter_function_parameter_parameter_counts,
+    int ***parameter_function_parameter_parameter_value_kinds,
+    AstFunctionReturnType ***parameter_function_parameter_parameter_return_types,
+    size_t ***parameter_function_parameter_parameter_parameter_counts,
     int *parameter_is_const,
     int *parameter_name_lines,
     int *parameter_name_columns,
@@ -3161,6 +4089,63 @@ static void parser_commit_parameter_names(char ***out_parameter_names,
         *out_parameter_function_parameter_counts = parameter_function_parameter_counts;
     } else {
         free(parameter_function_parameter_counts);
+    }
+    if (out_parameter_function_parameter_value_kinds) {
+        *out_parameter_function_parameter_value_kinds = parameter_function_parameter_value_kinds;
+    } else if (parameter_function_parameter_value_kinds) {
+        size_t i;
+        for (i = 0u; i < parameter_count; ++i) {
+            free(parameter_function_parameter_value_kinds[i]);
+        }
+        free(parameter_function_parameter_value_kinds);
+    }
+    if (out_parameter_function_parameter_return_types) {
+        *out_parameter_function_parameter_return_types = parameter_function_parameter_return_types;
+    } else if (parameter_function_parameter_return_types) {
+        size_t i;
+        for (i = 0u; i < parameter_count; ++i) {
+            free(parameter_function_parameter_return_types[i]);
+        }
+        free(parameter_function_parameter_return_types);
+    }
+    if (out_parameter_function_parameter_parameter_counts) {
+        *out_parameter_function_parameter_parameter_counts = parameter_function_parameter_parameter_counts;
+    } else if (parameter_function_parameter_parameter_counts) {
+        size_t i;
+        for (i = 0u; i < parameter_count; ++i) {
+            free(parameter_function_parameter_parameter_counts[i]);
+        }
+        free(parameter_function_parameter_parameter_counts);
+    }
+    if (out_parameter_function_parameter_parameter_value_kinds) {
+        *out_parameter_function_parameter_parameter_value_kinds =
+            parameter_function_parameter_parameter_value_kinds;
+    } else if (parameter_function_parameter_parameter_value_kinds) {
+        size_t i;
+        for (i = 0u; i < parameter_count; ++i) {
+            free(parameter_function_parameter_parameter_value_kinds[i]);
+        }
+        free(parameter_function_parameter_parameter_value_kinds);
+    }
+    if (out_parameter_function_parameter_parameter_return_types) {
+        *out_parameter_function_parameter_parameter_return_types =
+            parameter_function_parameter_parameter_return_types;
+    } else if (parameter_function_parameter_parameter_return_types) {
+        size_t i;
+        for (i = 0u; i < parameter_count; ++i) {
+            free(parameter_function_parameter_parameter_return_types[i]);
+        }
+        free(parameter_function_parameter_parameter_return_types);
+    }
+    if (out_parameter_function_parameter_parameter_parameter_counts) {
+        *out_parameter_function_parameter_parameter_parameter_counts =
+            parameter_function_parameter_parameter_parameter_counts;
+    } else if (parameter_function_parameter_parameter_parameter_counts) {
+        size_t i;
+        for (i = 0u; i < parameter_count; ++i) {
+            free(parameter_function_parameter_parameter_parameter_counts[i]);
+        }
+        free(parameter_function_parameter_parameter_parameter_counts);
     }
     if (out_parameter_is_const) {
         *out_parameter_is_const = parameter_is_const;
@@ -3216,6 +4201,7 @@ static int parse_function_external_signature(Parser *p,
         return 0;
     }
     if (!parse_parameter_list(p,
+        0u,
         &out_signature->parameter_count,
         &out_signature->has_unnamed_parameter,
         capture_parameter_names ? &out_signature->parameter_names : NULL,
@@ -3225,6 +4211,12 @@ static int parse_function_external_signature(Parser *p,
         capture_parameter_names ? &out_signature->parameter_array_extent_exprs : NULL,
         capture_parameter_names ? &out_signature->parameter_function_return_types : NULL,
         capture_parameter_names ? &out_signature->parameter_function_parameter_counts : NULL,
+        capture_parameter_names ? &out_signature->parameter_function_parameter_value_kinds : NULL,
+        capture_parameter_names ? &out_signature->parameter_function_parameter_return_types : NULL,
+        capture_parameter_names ? &out_signature->parameter_function_parameter_parameter_counts : NULL,
+        capture_parameter_names ? &out_signature->parameter_function_parameter_parameter_value_kinds : NULL,
+        capture_parameter_names ? &out_signature->parameter_function_parameter_parameter_return_types : NULL,
+        capture_parameter_names ? &out_signature->parameter_function_parameter_parameter_parameter_counts : NULL,
         capture_parameter_names ? &out_signature->parameter_is_const : NULL,
         capture_parameter_names ? &out_signature->parameter_name_lines : NULL,
         capture_parameter_names ? &out_signature->parameter_name_columns : NULL)) {
@@ -3241,6 +4233,9 @@ static int parse_function_external_signature(Parser *p,
         char **nested_parameter_type_names = NULL;
         AstFunctionReturnType *nested_parameter_function_return_types = NULL;
         size_t *nested_parameter_function_parameter_counts = NULL;
+        int **nested_parameter_function_parameter_value_kinds = NULL;
+        AstFunctionReturnType **nested_parameter_function_parameter_return_types = NULL;
+        size_t **nested_parameter_function_parameter_parameter_counts = NULL;
 
         out_signature->has_function_return_signature = 1;
         out_signature->function_return_function_return_type = out_signature->return_type;
@@ -3249,6 +4244,7 @@ static int parse_function_external_signature(Parser *p,
         out_signature->return_type_name = NULL;
 
         if (!parse_parameter_list(p,
+                0u,
                 &nested_parameter_count,
                 NULL,
                 NULL,
@@ -3266,6 +4262,18 @@ static int parse_function_external_signature(Parser *p,
                 capture_parameter_names
                     ? &out_signature->function_return_function_parameter_parameter_counts
                     : &nested_parameter_function_parameter_counts,
+                capture_parameter_names
+                    ? &out_signature->function_return_function_parameter_parameter_value_kinds
+                    : &nested_parameter_function_parameter_value_kinds,
+                capture_parameter_names
+                    ? &out_signature->function_return_function_parameter_parameter_return_types
+                    : &nested_parameter_function_parameter_return_types,
+                capture_parameter_names
+                    ? &out_signature->function_return_function_parameter_parameter_parameter_counts
+                    : &nested_parameter_function_parameter_parameter_counts,
+                NULL,
+                NULL,
+                NULL,
                 NULL,
                 NULL,
                 NULL)) {
@@ -3273,6 +4281,27 @@ static int parse_function_external_signature(Parser *p,
             free_name_array(nested_parameter_type_names, nested_parameter_count);
             free(nested_parameter_function_return_types);
             free(nested_parameter_function_parameter_counts);
+            if (nested_parameter_function_parameter_value_kinds) {
+                size_t nested_index;
+                for (nested_index = 0u; nested_index < nested_parameter_count; ++nested_index) {
+                    free(nested_parameter_function_parameter_value_kinds[nested_index]);
+                }
+            }
+            free(nested_parameter_function_parameter_value_kinds);
+            if (nested_parameter_function_parameter_return_types) {
+                size_t nested_index;
+                for (nested_index = 0u; nested_index < nested_parameter_count; ++nested_index) {
+                    free(nested_parameter_function_parameter_return_types[nested_index]);
+                }
+            }
+            free(nested_parameter_function_parameter_return_types);
+            if (nested_parameter_function_parameter_parameter_counts) {
+                size_t nested_index;
+                for (nested_index = 0u; nested_index < nested_parameter_count; ++nested_index) {
+                    free(nested_parameter_function_parameter_parameter_counts[nested_index]);
+                }
+            }
+            free(nested_parameter_function_parameter_parameter_counts);
             parsed_function_signature_release(out_signature);
             return 0;
         }
@@ -3281,6 +4310,27 @@ static int parse_function_external_signature(Parser *p,
             free_name_array(nested_parameter_type_names, nested_parameter_count);
             free(nested_parameter_function_return_types);
             free(nested_parameter_function_parameter_counts);
+            if (nested_parameter_function_parameter_value_kinds) {
+                size_t nested_index;
+                for (nested_index = 0u; nested_index < nested_parameter_count; ++nested_index) {
+                    free(nested_parameter_function_parameter_value_kinds[nested_index]);
+                }
+            }
+            free(nested_parameter_function_parameter_value_kinds);
+            if (nested_parameter_function_parameter_return_types) {
+                size_t nested_index;
+                for (nested_index = 0u; nested_index < nested_parameter_count; ++nested_index) {
+                    free(nested_parameter_function_parameter_return_types[nested_index]);
+                }
+            }
+            free(nested_parameter_function_parameter_return_types);
+            if (nested_parameter_function_parameter_parameter_counts) {
+                size_t nested_index;
+                for (nested_index = 0u; nested_index < nested_parameter_count; ++nested_index) {
+                    free(nested_parameter_function_parameter_parameter_counts[nested_index]);
+                }
+            }
+            free(nested_parameter_function_parameter_parameter_counts);
             parsed_function_signature_release(out_signature);
             return 0;
         }
@@ -3289,6 +4339,27 @@ static int parse_function_external_signature(Parser *p,
         free_name_array(nested_parameter_type_names, nested_parameter_count);
         free(nested_parameter_function_return_types);
         free(nested_parameter_function_parameter_counts);
+        if (nested_parameter_function_parameter_value_kinds) {
+            size_t nested_index;
+            for (nested_index = 0u; nested_index < nested_parameter_count; ++nested_index) {
+                free(nested_parameter_function_parameter_value_kinds[nested_index]);
+            }
+        }
+        free(nested_parameter_function_parameter_value_kinds);
+        if (nested_parameter_function_parameter_return_types) {
+            size_t nested_index;
+            for (nested_index = 0u; nested_index < nested_parameter_count; ++nested_index) {
+                free(nested_parameter_function_parameter_return_types[nested_index]);
+            }
+        }
+        free(nested_parameter_function_parameter_return_types);
+        if (nested_parameter_function_parameter_parameter_counts) {
+            size_t nested_index;
+            for (nested_index = 0u; nested_index < nested_parameter_count; ++nested_index) {
+                free(nested_parameter_function_parameter_parameter_counts[nested_index]);
+            }
+        }
+        free(nested_parameter_function_parameter_parameter_counts);
     }
 
     return 1;
@@ -3341,6 +4412,9 @@ static int parse_function_external(Parser *p,
     char ***out_function_return_function_parameter_type_names,
     AstFunctionReturnType **out_function_return_function_parameter_return_types,
     size_t **out_function_return_function_parameter_parameter_counts,
+    int ***out_function_return_function_parameter_parameter_value_kinds,
+    AstFunctionReturnType ***out_function_return_function_parameter_parameter_return_types,
+    size_t ***out_function_return_function_parameter_parameter_parameter_counts,
     size_t *out_parameter_count,
     char ***out_parameter_names,
     int **out_parameter_value_kinds,
@@ -3349,6 +4423,12 @@ static int parse_function_external(Parser *p,
     AstExpression ****out_parameter_array_extent_exprs,
     AstFunctionReturnType **out_parameter_function_return_types,
     size_t **out_parameter_function_parameter_counts,
+    int ***out_parameter_function_parameter_value_kinds,
+    AstFunctionReturnType ***out_parameter_function_parameter_return_types,
+    size_t ***out_parameter_function_parameter_parameter_counts,
+    int ****out_parameter_function_parameter_parameter_value_kinds,
+    AstFunctionReturnType ****out_parameter_function_parameter_parameter_return_types,
+    size_t ****out_parameter_function_parameter_parameter_parameter_counts,
     int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns,
@@ -3401,6 +4481,21 @@ static int parse_function_external(Parser *p,
     if (out_function_return_function_parameter_parameter_counts) {
         *out_function_return_function_parameter_parameter_counts = NULL;
     }
+    if (out_function_return_function_parameter_parameter_value_kinds) {
+        *out_function_return_function_parameter_parameter_value_kinds = NULL;
+    }
+    if (out_function_return_function_parameter_parameter_return_types) {
+        *out_function_return_function_parameter_parameter_return_types = NULL;
+    }
+    if (out_function_return_function_parameter_parameter_parameter_counts) {
+        *out_function_return_function_parameter_parameter_parameter_counts = NULL;
+    }
+    if (out_function_return_function_parameter_parameter_return_types) {
+        *out_function_return_function_parameter_parameter_return_types = NULL;
+    }
+    if (out_function_return_function_parameter_parameter_parameter_counts) {
+        *out_function_return_function_parameter_parameter_parameter_counts = NULL;
+    }
     if (out_parameter_count) {
         *out_parameter_count = 0;
     }
@@ -3424,6 +4519,24 @@ static int parse_function_external(Parser *p,
     }
     if (out_parameter_function_parameter_counts) {
         *out_parameter_function_parameter_counts = NULL;
+    }
+    if (out_parameter_function_parameter_value_kinds) {
+        *out_parameter_function_parameter_value_kinds = NULL;
+    }
+    if (out_parameter_function_parameter_return_types) {
+        *out_parameter_function_parameter_return_types = NULL;
+    }
+    if (out_parameter_function_parameter_parameter_counts) {
+        *out_parameter_function_parameter_parameter_counts = NULL;
+    }
+    if (out_parameter_function_parameter_parameter_value_kinds) {
+        *out_parameter_function_parameter_parameter_value_kinds = NULL;
+    }
+    if (out_parameter_function_parameter_parameter_return_types) {
+        *out_parameter_function_parameter_parameter_return_types = NULL;
+    }
+    if (out_parameter_function_parameter_parameter_parameter_counts) {
+        *out_parameter_function_parameter_parameter_parameter_counts = NULL;
     }
     if (out_parameter_is_const) {
         *out_parameter_is_const = NULL;
@@ -3508,6 +4621,45 @@ static int parse_function_external(Parser *p,
         free(signature.function_return_function_parameter_parameter_counts);
     }
     signature.function_return_function_parameter_parameter_counts = NULL;
+    if (out_function_return_function_parameter_parameter_value_kinds) {
+        *out_function_return_function_parameter_parameter_value_kinds =
+            signature.function_return_function_parameter_parameter_value_kinds;
+    } else {
+        if (signature.function_return_function_parameter_parameter_value_kinds) {
+            size_t i;
+            for (i = 0u; i < signature.function_return_function_parameter_count; ++i) {
+                free(signature.function_return_function_parameter_parameter_value_kinds[i]);
+            }
+        }
+        free(signature.function_return_function_parameter_parameter_value_kinds);
+    }
+    signature.function_return_function_parameter_parameter_value_kinds = NULL;
+    if (out_function_return_function_parameter_parameter_return_types) {
+        *out_function_return_function_parameter_parameter_return_types =
+            signature.function_return_function_parameter_parameter_return_types;
+    } else {
+        if (signature.function_return_function_parameter_parameter_return_types) {
+            size_t i;
+            for (i = 0u; i < signature.function_return_function_parameter_count; ++i) {
+                free(signature.function_return_function_parameter_parameter_return_types[i]);
+            }
+        }
+        free(signature.function_return_function_parameter_parameter_return_types);
+    }
+    signature.function_return_function_parameter_parameter_return_types = NULL;
+    if (out_function_return_function_parameter_parameter_parameter_counts) {
+        *out_function_return_function_parameter_parameter_parameter_counts =
+            signature.function_return_function_parameter_parameter_parameter_counts;
+    } else {
+        if (signature.function_return_function_parameter_parameter_parameter_counts) {
+            size_t i;
+            for (i = 0u; i < signature.function_return_function_parameter_count; ++i) {
+                free(signature.function_return_function_parameter_parameter_parameter_counts[i]);
+            }
+        }
+        free(signature.function_return_function_parameter_parameter_parameter_counts);
+    }
+    signature.function_return_function_parameter_parameter_parameter_counts = NULL;
     if (out_parameter_count) {
         *out_parameter_count = signature.parameter_count;
     }
@@ -3520,6 +4672,12 @@ static int parse_function_external(Parser *p,
             out_parameter_array_extent_exprs,
             out_parameter_function_return_types,
             out_parameter_function_parameter_counts,
+            out_parameter_function_parameter_value_kinds,
+            out_parameter_function_parameter_return_types,
+            out_parameter_function_parameter_parameter_counts,
+            out_parameter_function_parameter_parameter_value_kinds,
+            out_parameter_function_parameter_parameter_return_types,
+            out_parameter_function_parameter_parameter_parameter_counts,
             out_parameter_is_const,
             out_parameter_name_lines,
             out_parameter_name_columns,
@@ -3530,6 +4688,12 @@ static int parse_function_external(Parser *p,
             signature.parameter_array_extent_exprs,
             signature.parameter_function_return_types,
             signature.parameter_function_parameter_counts,
+            signature.parameter_function_parameter_value_kinds,
+            signature.parameter_function_parameter_return_types,
+            signature.parameter_function_parameter_parameter_counts,
+            signature.parameter_function_parameter_parameter_value_kinds,
+            signature.parameter_function_parameter_parameter_return_types,
+            signature.parameter_function_parameter_parameter_parameter_counts,
             signature.parameter_is_const,
             signature.parameter_name_lines,
             signature.parameter_name_columns,
@@ -3541,6 +4705,12 @@ static int parse_function_external(Parser *p,
         signature.parameter_array_extent_exprs = NULL;
         signature.parameter_function_return_types = NULL;
         signature.parameter_function_parameter_counts = NULL;
+        signature.parameter_function_parameter_value_kinds = NULL;
+        signature.parameter_function_parameter_return_types = NULL;
+        signature.parameter_function_parameter_parameter_counts = NULL;
+        signature.parameter_function_parameter_parameter_value_kinds = NULL;
+        signature.parameter_function_parameter_parameter_return_types = NULL;
+        signature.parameter_function_parameter_parameter_parameter_counts = NULL;
         signature.parameter_is_const = NULL;
         signature.parameter_name_lines = NULL;
         signature.parameter_name_columns = NULL;
@@ -3566,6 +4736,12 @@ static int parse_function_external(Parser *p,
                 out_parameter_array_extent_exprs,
                 out_parameter_function_return_types,
                 out_parameter_function_parameter_counts,
+                out_parameter_function_parameter_value_kinds,
+                out_parameter_function_parameter_return_types,
+                out_parameter_function_parameter_parameter_counts,
+                out_parameter_function_parameter_parameter_value_kinds,
+                out_parameter_function_parameter_parameter_return_types,
+                out_parameter_function_parameter_parameter_parameter_counts,
                 out_parameter_is_const,
                 out_parameter_name_lines,
                 out_parameter_name_columns,
@@ -3576,6 +4752,12 @@ static int parse_function_external(Parser *p,
                 signature.parameter_array_extent_exprs,
                 signature.parameter_function_return_types,
                 signature.parameter_function_parameter_counts,
+                signature.parameter_function_parameter_value_kinds,
+                signature.parameter_function_parameter_return_types,
+                signature.parameter_function_parameter_parameter_counts,
+                signature.parameter_function_parameter_parameter_value_kinds,
+                signature.parameter_function_parameter_parameter_return_types,
+                signature.parameter_function_parameter_parameter_parameter_counts,
                 signature.parameter_is_const,
                 signature.parameter_name_lines,
                 signature.parameter_name_columns,
@@ -3587,6 +4769,12 @@ static int parse_function_external(Parser *p,
             signature.parameter_array_extent_exprs = NULL;
             signature.parameter_function_return_types = NULL;
             signature.parameter_function_parameter_counts = NULL;
+            signature.parameter_function_parameter_value_kinds = NULL;
+            signature.parameter_function_parameter_return_types = NULL;
+            signature.parameter_function_parameter_parameter_counts = NULL;
+            signature.parameter_function_parameter_parameter_value_kinds = NULL;
+            signature.parameter_function_parameter_parameter_return_types = NULL;
+            signature.parameter_function_parameter_parameter_parameter_counts = NULL;
             signature.parameter_is_const = NULL;
             signature.parameter_name_lines = NULL;
             signature.parameter_name_columns = NULL;
@@ -3886,6 +5074,9 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
     char **external_function_return_function_parameter_type_names = NULL;
     AstFunctionReturnType *external_function_return_function_parameter_return_types = NULL;
     size_t *external_function_return_function_parameter_parameter_counts = NULL;
+    int **external_function_return_function_parameter_parameter_value_kinds = NULL;
+    AstFunctionReturnType **external_function_return_function_parameter_parameter_return_types = NULL;
+    size_t **external_function_return_function_parameter_parameter_parameter_counts = NULL;
     size_t external_parameter_count = 0;
     char **external_parameter_names = NULL;
     int *external_parameter_value_kinds = NULL;
@@ -3894,6 +5085,12 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
     AstExpression ***external_parameter_array_extent_exprs = NULL;
     AstFunctionReturnType *external_parameter_function_return_types = NULL;
     size_t *external_parameter_function_parameter_counts = NULL;
+    int **external_parameter_function_parameter_value_kinds = NULL;
+    AstFunctionReturnType **external_parameter_function_parameter_return_types = NULL;
+    size_t **external_parameter_function_parameter_parameter_counts = NULL;
+    int ***external_parameter_function_parameter_parameter_value_kinds = NULL;
+    AstFunctionReturnType ***external_parameter_function_parameter_parameter_return_types = NULL;
+    size_t ***external_parameter_function_parameter_parameter_parameter_counts = NULL;
     int *external_parameter_is_const = NULL;
     int *external_parameter_name_lines = NULL;
     int *external_parameter_name_columns = NULL;
@@ -3920,6 +5117,9 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
         out_program ? &external_function_return_function_parameter_type_names : NULL,
         out_program ? &external_function_return_function_parameter_return_types : NULL,
         out_program ? &external_function_return_function_parameter_parameter_counts : NULL,
+        out_program ? &external_function_return_function_parameter_parameter_value_kinds : NULL,
+        out_program ? &external_function_return_function_parameter_parameter_return_types : NULL,
+        out_program ? &external_function_return_function_parameter_parameter_parameter_counts : NULL,
         out_program ? &external_parameter_count : NULL,
         out_program ? &external_parameter_names : NULL,
         out_program ? &external_parameter_value_kinds : NULL,
@@ -3928,6 +5128,12 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
         out_program ? &external_parameter_array_extent_exprs : NULL,
         out_program ? &external_parameter_function_return_types : NULL,
         out_program ? &external_parameter_function_parameter_counts : NULL,
+        out_program ? &external_parameter_function_parameter_value_kinds : NULL,
+        out_program ? &external_parameter_function_parameter_return_types : NULL,
+        out_program ? &external_parameter_function_parameter_parameter_counts : NULL,
+        out_program ? &external_parameter_function_parameter_parameter_value_kinds : NULL,
+        out_program ? &external_parameter_function_parameter_parameter_return_types : NULL,
+        out_program ? &external_parameter_function_parameter_parameter_parameter_counts : NULL,
         out_program ? &external_parameter_is_const : NULL,
         out_program ? &external_parameter_name_lines : NULL,
         out_program ? &external_parameter_name_columns : NULL,
@@ -3945,6 +5151,11 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
         return parse_declaration(
             p,
             out_program,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
             NULL,
             NULL,
             NULL,
@@ -3974,10 +5185,52 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
             external_function_return_function_parameter_count);
         free(external_function_return_function_parameter_return_types);
         free(external_function_return_function_parameter_parameter_counts);
+        if (external_function_return_function_parameter_parameter_value_kinds) {
+            size_t i;
+            for (i = 0u; i < external_function_return_function_parameter_count; ++i) {
+                free(external_function_return_function_parameter_parameter_value_kinds[i]);
+            }
+        }
+        free(external_function_return_function_parameter_parameter_value_kinds);
+        if (external_function_return_function_parameter_parameter_return_types) {
+            size_t i;
+            for (i = 0u; i < external_function_return_function_parameter_count; ++i) {
+                free(external_function_return_function_parameter_parameter_return_types[i]);
+            }
+        }
+        free(external_function_return_function_parameter_parameter_return_types);
+        if (external_function_return_function_parameter_parameter_parameter_counts) {
+            size_t i;
+            for (i = 0u; i < external_function_return_function_parameter_count; ++i) {
+                free(external_function_return_function_parameter_parameter_parameter_counts[i]);
+            }
+        }
+        free(external_function_return_function_parameter_parameter_parameter_counts);
         free(external_parameter_array_ranks);
         free(external_parameter_array_extent_exprs);
         free(external_parameter_function_return_types);
         free(external_parameter_function_parameter_counts);
+        if (external_parameter_function_parameter_value_kinds) {
+            size_t i;
+            for (i = 0u; i < external_parameter_count; ++i) {
+                free(external_parameter_function_parameter_value_kinds[i]);
+            }
+        }
+        free(external_parameter_function_parameter_value_kinds);
+        if (external_parameter_function_parameter_return_types) {
+            size_t i;
+            for (i = 0u; i < external_parameter_count; ++i) {
+                free(external_parameter_function_parameter_return_types[i]);
+            }
+        }
+        free(external_parameter_function_parameter_return_types);
+        if (external_parameter_function_parameter_parameter_counts) {
+            size_t i;
+            for (i = 0u; i < external_parameter_count; ++i) {
+                free(external_parameter_function_parameter_parameter_counts[i]);
+            }
+        }
+        free(external_parameter_function_parameter_parameter_counts);
         free(external_parameter_is_const);
         free(external_parameter_name_lines);
         free(external_parameter_name_columns);
@@ -4005,6 +5258,15 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
         external_function_return_function_parameter_return_types;
     out_program->externals[out_program->count - 1].function_return_function_parameter_parameter_counts =
         external_function_return_function_parameter_parameter_counts;
+    out_program->externals[out_program->count - 1]
+        .function_return_function_parameter_parameter_value_kinds =
+        external_function_return_function_parameter_parameter_value_kinds;
+    out_program->externals[out_program->count - 1]
+        .function_return_function_parameter_parameter_return_types =
+        external_function_return_function_parameter_parameter_return_types;
+    out_program->externals[out_program->count - 1]
+        .function_return_function_parameter_parameter_parameter_counts =
+        external_function_return_function_parameter_parameter_parameter_counts;
     out_program->externals[out_program->count - 1].parameter_names = external_parameter_names;
     out_program->externals[out_program->count - 1].parameter_value_kinds = external_parameter_value_kinds;
     out_program->externals[out_program->count - 1].parameter_type_names = external_parameter_type_names;
@@ -4015,6 +5277,18 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
         external_parameter_function_return_types;
     out_program->externals[out_program->count - 1].parameter_function_parameter_counts =
         external_parameter_function_parameter_counts;
+    out_program->externals[out_program->count - 1].parameter_function_parameter_value_kinds =
+        external_parameter_function_parameter_value_kinds;
+    out_program->externals[out_program->count - 1].parameter_function_parameter_return_types =
+        external_parameter_function_parameter_return_types;
+    out_program->externals[out_program->count - 1].parameter_function_parameter_parameter_counts =
+        external_parameter_function_parameter_parameter_counts;
+    out_program->externals[out_program->count - 1].parameter_function_parameter_parameter_value_kinds =
+        external_parameter_function_parameter_parameter_value_kinds;
+    out_program->externals[out_program->count - 1].parameter_function_parameter_parameter_return_types =
+        external_parameter_function_parameter_parameter_return_types;
+    out_program->externals[out_program->count - 1].parameter_function_parameter_parameter_parameter_counts =
+        external_parameter_function_parameter_parameter_parameter_counts;
     out_program->externals[out_program->count - 1].parameter_is_const = external_parameter_is_const;
     out_program->externals[out_program->count - 1].parameter_name_lines =
         external_parameter_name_lines;

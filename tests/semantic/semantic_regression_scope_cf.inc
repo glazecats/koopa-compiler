@@ -2850,6 +2850,191 @@ static int test_semantic_accepts_returned_function_value_parameter_bind_and_call
         "int main(){ int g(int)=id(add1); return g(41); }\n");
 }
 
+static int test_semantic_accepts_second_order_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-function-value-parameter-forward-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return pass(apply, add1, 41); }\n");
+}
+
+static int test_semantic_accepts_second_order_closure_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-closure-function-value-parameter-forward-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z){ return y+z; }; return pass(apply, f, 4); }\n");
+}
+
+static int test_semantic_accepts_second_order_zero_arg_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-zero-arg-function-value-parameter-forward-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int pass0(int h(int f()), int f()){ return h(f); }\n"
+        "int next(){ return 7; }\n"
+        "int main(){ return pass0(apply0, next); }\n");
+}
+
+static int test_semantic_accepts_second_order_zero_arg_closure_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-zero-arg-closure-function-value-parameter-forward-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int pass0(int h(int f()), int f()){ return h(f); }\n"
+        "int main(){ int y=3; int f()=closure [y] int (){ return y; }; return pass0(apply0, f); }\n");
+}
+
+static int test_semantic_accepts_second_order_zero_arg_void_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-zero-arg-void-function-value-parameter-forward-pass",
+        "void apply0(void f()){ f(); }\n"
+        "void pass0(void h(void f()), void f()){ h(f); return; }\n"
+        "void ping(){ putint(7); return; }\n"
+        "int main(){ pass0(apply0, ping); return 0; }\n");
+}
+
+static int test_semantic_accepts_second_order_zero_arg_void_closure_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-zero-arg-void-closure-function-value-parameter-forward-pass",
+        "void apply0(void f()){ f(); }\n"
+        "void pass0(void h(void f()), void f()){ h(f); return; }\n"
+        "int main(){ int y=3; void f()=closure [y] void (){ putint(y); return; }; pass0(apply0, f); return 0; }\n");
+}
+
+static int test_semantic_accepts_second_order_returned_passthrough_dynamic_zero_arg_void_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-returned-passthrough-dynamic-zero-arg-void-function-value-parameter-forward-pass",
+        "void applyv(void f()){ f(); return; }\n"
+        "void applyv_twice(void f()){ f(); f(); return; }\n"
+        "void ping(){ putint(7); return; }\n"
+        "void idhv(void h(void f()))(void f()){ return h; }\n"
+        "void pickhv(int c)(void f()){ return c ? applyv : applyv_twice; }\n"
+        "int main(){ idhv(pickhv(getint()))(ping); return 0; }\n");
+}
+
+static int test_semantic_accepts_second_order_returned_passthrough_dynamic_zero_arg_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-returned-passthrough-dynamic-zero-arg-function-value-parameter-forward-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int apply0_twice(int f()){ return f() + f(); }\n"
+        "int next(){ return 7; }\n"
+        "int idh0(int h(int f()))(int f()){ return h; }\n"
+        "int pickh0(int c)(int f()){ return c ? apply0 : apply0_twice; }\n"
+        "int main(){ return idh0(pickh0(getint()))(next); }\n");
+}
+
+static int test_semantic_accepts_second_order_local_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-local-function-value-parameter-forward-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int h(int f(int), int x)=apply; return pass(h, add1, 41); }\n");
+}
+
+static int test_semantic_accepts_second_order_returned_function_value_parameter_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-returned-function-value-parameter-immediate-call-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(apply)(add1, 41); }\n");
+}
+
+static int test_semantic_accepts_third_order_returned_function_value_parameter_bind_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "third-order-returned-function-value-parameter-bind-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int id3(int q(int h(int f(int), int x), int f(int), int x))(int h(int f(int), int x), int f(int), int x){ return q; }\n"
+        "int main(){ int g(int h(int f(int), int x), int f(int), int x)=id3(pass); return g(apply, add1, 41); }\n");
+}
+
+static int test_semantic_accepts_third_order_local_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "third-order-local-function-value-parameter-forward-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int relay(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return q(h, f, x); }\n"
+        "int main(){ int g(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x)=relay; return g(pass, apply, add1, 41); }\n");
+}
+
+static int test_semantic_accepts_second_order_returned_closure_function_value_parameter_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-returned-closure-function-value-parameter-immediate-call-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z){ return y+z; }; return idh(apply)(f, 4); }\n");
+}
+
+static int test_semantic_accepts_second_order_dynamic_returned_function_value_parameter_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-dynamic-returned-function-value-parameter-immediate-call-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int apply_twice(int f(int), int x){ return f(f(x)); }\n"
+        "int pick(int c)(int f(int), int x){ return c ? apply : apply_twice; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return pick(getint())(add1, 41); }\n");
+}
+
+static int test_semantic_accepts_second_order_returned_passthrough_dynamic_immediate_call_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-returned-passthrough-dynamic-immediate-call-pass",
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int pickh(int base, int c)(int f(int), int x){ int h(int f(int), int x)=closure [base] int (int g(int), int y){ return g(y) + base; }; int k(int f(int), int x)=closure [base] int (int g(int), int y){ return g(g(y)) + base; }; if(c) h=k; return h; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(pickh(5, getint()))(add1, 41); }\n");
+}
+
+static int test_semantic_accepts_second_order_dynamic_local_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-dynamic-local-function-value-parameter-forward-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int apply_twice(int f(int), int x){ return f(f(x)); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int c=getint(); int h(int f(int), int x)= c ? apply : apply_twice; return pass(h, add1, 41); }\n");
+}
+
+static int test_semantic_accepts_second_order_dynamic_local_closure_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-dynamic-local-closure-function-value-parameter-forward-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int apply_twice(int f(int), int x){ return f(f(x)); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int main(){ int c=getint(); int y=3; int f(int)=closure [y] int (int z){ return y+z; }; int h(int f(int), int x)= c ? apply : apply_twice; return pass(h, f, 4); }\n");
+}
+
+static int test_semantic_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-returned-passthrough-dynamic-local-function-value-parameter-forward-pass",
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int pickh(int base, int c)(int f(int), int x){ int h(int f(int), int x)=closure [base] int (int g(int), int y){ return g(y) + base; }; int k(int f(int), int x)=closure [base] int (int g(int), int y){ return g(g(y)) + base; }; if(c) h=k; return h; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int g(int f(int), int x)=idh(pickh(5, getint())); return g(add1, 41); }\n");
+}
+
+static int test_semantic_accepts_second_order_returned_closure_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "second-order-returned-closure-function-value-parameter-forward-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int make(int y)(int){ return closure [y] int (int z){ return y+z; }; }\n"
+        "int main(){ return pass(apply, make(3), 4); }\n");
+}
+
+static int test_semantic_accepts_third_order_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "third-order-function-value-parameter-forward-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int relay(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return q(h, f, x); }\n"
+        "int main(){ return relay(pass, apply, add1, 41); }\n");
+}
+
 static int test_semantic_accepts_dynamic_returned_function_value_parameter_immediate_call_under_extension(void) {
     return run_extension_semantic_expect_accepts(
         "dynamic-returned-function-value-parameter-immediate-call-pass",
@@ -3114,6 +3299,442 @@ static int test_semantic_accepts_wrapped_function_value_local_initializer_under_
         "wrapped-function-value-local-initializer-pass",
         "int add1(int x){ return x+1; }\n"
         "int main(){ int f(int)=add1; int h(int)=(0, f); return h(41); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_function_value_local_initializer_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-function-value-local-initializer-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; if(c) f=g; return f; }\n"
+        "int main(){ int h(int)=(0, pick(1)); return h(40); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_zero_arg_function_value_local_initializer_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-zero-arg-function-value-local-initializer-pass",
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; if(c) f=g; return f; }\n"
+        "int main(){ int h()=(0, pick(1)); return h(); }\n");
+}
+
+static int test_semantic_accepts_assignment_result_returned_closure_local_initializer_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "assignment-result-returned-closure-local-initializer-pass",
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int main(){ int g(int)=make(5); int h(int)=(g=make(4)); return h(5); }\n");
+}
+
+static int test_semantic_accepts_assignment_result_returned_zero_arg_void_closure_local_initializer_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "assignment-result-returned-zero-arg-void-closure-local-initializer-pass",
+        "void make(int x)(){ return closure [x] void (){ putint(x); return; }; }\n"
+        "int main(){ void g()=make(5); void h()=(g=make(4)); h(); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_function_value_local_initializer_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-function-value-local-initializer-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=(0, pick(1)); return h(40); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_closure_local_initializer_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-closure-local-initializer-pass",
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=(0, pick(1)); return h(4); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_function_value_local_bounce_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-function-value-local-bounce-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=(0, pick(1)); int g(int)=h; return g(40); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_function_value_forward_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-function-value-forward-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=(0, pick(1)); return apply(h, 40); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_closure_local_bounce_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-closure-local-bounce-pass",
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=(0, pick(1)); int g(int)=h; return g(4); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_closure_forward_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-closure-forward-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=(0, pick(1)); return apply(h, 4); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_function_value_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-function-value-bind-return-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); return h; }\n"
+        "int main(){ return wrap()(40); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_function_value_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-function-value-bind-return-actual-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); return h; }\n"
+        "int main(){ return apply(wrap(), 40); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_closure_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-closure-bind-return-pass",
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); return h; }\n"
+        "int main(){ return wrap()(4); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_closure_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-closure-bind-return-actual-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); return h; }\n"
+        "int main(){ return apply(wrap(), 4); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-function-value-bind-return-pass",
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); return h; }\n"
+        "int main(){ return wrap()(); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-function-value-bind-return-actual-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); return h; }\n"
+        "int main(){ return apply0(wrap()); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-void-function-value-bind-return-pass",
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "void pick(int c)(){ void f()=ping1; void g()=ping2; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); return h; }\n"
+        "int main(){ wrap()(); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-void-function-value-bind-return-actual-pass",
+        "void apply0(void f()){ f(); }\n"
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "void pick(int c)(){ void f()=ping1; void g()=ping2; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); return h; }\n"
+        "int main(){ apply0(wrap()); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_closure_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-closure-bind-return-pass",
+        "int pick(int c)(){ int x=3; int y=5; int f()=closure [x] int (){ return x; }; int g()=closure [y] int (){ return y; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); return h; }\n"
+        "int main(){ return wrap()(); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_closure_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-closure-bind-return-actual-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int pick(int c)(){ int x=3; int y=5; int f()=closure [x] int (){ return x; }; int g()=closure [y] int (){ return y; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); return h; }\n"
+        "int main(){ return apply0(wrap()); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-void-closure-bind-return-pass",
+        "void pick(int c)(){ int x=3; int y=5; void f()=closure [x] void (){ putint(x); return; }; void g()=closure [y] void (){ putint(y); return; }; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); return h; }\n"
+        "int main(){ wrap()(); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-void-closure-bind-return-actual-pass",
+        "void apply0(void f()){ f(); }\n"
+        "void pick(int c)(){ int x=3; int y=5; void f()=closure [x] void (){ putint(x); return; }; void g()=closure [y] void (){ putint(y); return; }; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); return h; }\n"
+        "int main(){ apply0(wrap()); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_function_value_bounce_passthrough_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-function-value-bounce-passthrough-bind-return-pass",
+        "int id(int f(int))(int){ return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=id(g); return p; }\n"
+        "int main(){ return wrap()(40); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_function_value_bounce_passthrough_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-function-value-bounce-passthrough-bind-return-actual-pass",
+        "int id(int f(int))(int){ return f; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=id(g); return p; }\n"
+        "int main(){ return apply(wrap(), 40); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_closure_bounce_passthrough_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-closure-bounce-passthrough-bind-return-pass",
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=id(g); return p; }\n"
+        "int main(){ return wrap()(4); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_closure_bounce_passthrough_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-closure-bounce-passthrough-bind-return-actual-pass",
+        "int id(int f(int))(int){ return f; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=id(g); return p; }\n"
+        "int main(){ return apply(wrap(), 4); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bounce_passthrough_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-function-value-bounce-passthrough-bind-return-pass",
+        "int id0(int f())(){ return f; }\n"
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=id0(g); return p; }\n"
+        "int main(){ return wrap()(); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bounce_passthrough_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-function-value-bounce-passthrough-bind-return-actual-pass",
+        "int id0(int f())(){ return f; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=id0(g); return p; }\n"
+        "int main(){ return apply0(wrap()); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bounce_passthrough_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-void-function-value-bounce-passthrough-bind-return-pass",
+        "void idv(void f())(){ return f; }\n"
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "void pick(int c)(){ void f()=ping1; void g()=ping2; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=idv(g); return p; }\n"
+        "int main(){ wrap()(); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bounce_passthrough_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-void-function-value-bounce-passthrough-bind-return-actual-pass",
+        "void idv(void f())(){ return f; }\n"
+        "void apply0(void f()){ f(); }\n"
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "void pick(int c)(){ void f()=ping1; void g()=ping2; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=idv(g); return p; }\n"
+        "int main(){ apply0(wrap()); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_closure_bounce_passthrough_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-closure-bounce-passthrough-bind-return-pass",
+        "int id0(int f())(){ return f; }\n"
+        "int pick(int c)(){ int x=3; int y=5; int f()=closure [x] int (){ return x; }; int g()=closure [y] int (){ return y; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=id0(g); return p; }\n"
+        "int main(){ return wrap()(); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_closure_bounce_passthrough_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-closure-bounce-passthrough-bind-return-actual-pass",
+        "int id0(int f())(){ return f; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int pick(int c)(){ int x=3; int y=5; int f()=closure [x] int (){ return x; }; int g()=closure [y] int (){ return y; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=id0(g); return p; }\n"
+        "int main(){ return apply0(wrap()); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bounce_passthrough_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-void-closure-bounce-passthrough-bind-return-pass",
+        "void idv(void f())(){ return f; }\n"
+        "void pick(int c)(){ int x=3; int y=5; void f()=closure [x] void (){ putint(x); return; }; void g()=closure [y] void (){ putint(y); return; }; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=idv(g); return p; }\n"
+        "int main(){ wrap()(); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bounce_passthrough_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-void-closure-bounce-passthrough-bind-return-actual-pass",
+        "void idv(void f())(){ return f; }\n"
+        "void apply0(void f()){ f(); }\n"
+        "void pick(int c)(){ int x=3; int y=5; void f()=closure [x] void (){ putint(x); return; }; void g()=closure [y] void (){ putint(y); return; }; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=idv(g); return p; }\n"
+        "int main(){ apply0(wrap()); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_function_value_statement_reassign_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-function-value-stmt-reassign-bind-return-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=g; p=h; return p; }\n"
+        "int main(){ return wrap()(40); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_function_value_statement_reassign_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-function-value-stmt-reassign-bind-return-actual-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=g; p=h; return p; }\n"
+        "int main(){ return apply(wrap(), 40); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_closure_statement_reassign_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-closure-stmt-reassign-bind-return-pass",
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=g; p=h; return p; }\n"
+        "int main(){ return wrap()(4); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_closure_statement_reassign_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-closure-stmt-reassign-bind-return-actual-pass",
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=g; p=h; return p; }\n"
+        "int main(){ return apply(wrap(), 4); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_function_value_statement_reassign_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-function-value-stmt-reassign-bind-return-pass",
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=g; p=h; return p; }\n"
+        "int main(){ return wrap()(); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_function_value_statement_reassign_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-function-value-stmt-reassign-bind-return-actual-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=g; p=h; return p; }\n"
+        "int main(){ return apply0(wrap()); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_statement_reassign_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-void-function-value-stmt-reassign-bind-return-pass",
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "void pick(int c)(){ void f()=ping1; void g()=ping2; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=g; p=h; return p; }\n"
+        "int main(){ wrap()(); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_statement_reassign_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-void-function-value-stmt-reassign-bind-return-actual-pass",
+        "void apply0(void f()){ f(); }\n"
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "void pick(int c)(){ void f()=ping1; void g()=ping2; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=g; p=h; return p; }\n"
+        "int main(){ apply0(wrap()); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_closure_statement_reassign_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-closure-stmt-reassign-bind-return-pass",
+        "int pick(int c)(){ int x=3; int y=5; int f()=closure [x] int (){ return x; }; int g()=closure [y] int (){ return y; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=g; p=h; return p; }\n"
+        "int main(){ return wrap()(); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_closure_statement_reassign_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-closure-stmt-reassign-bind-return-actual-pass",
+        "int apply0(int f()){ return f(); }\n"
+        "int pick(int c)(){ int x=3; int y=5; int f()=closure [x] int (){ return x; }; int g()=closure [y] int (){ return y; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=g; p=h; return p; }\n"
+        "int main(){ return apply0(wrap()); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_statement_reassign_bind_return_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-void-closure-stmt-reassign-bind-return-pass",
+        "void pick(int c)(){ int x=3; int y=5; void f()=closure [x] void (){ putint(x); return; }; void g()=closure [y] void (){ putint(y); return; }; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=g; p=h; return p; }\n"
+        "int main(){ wrap()(); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_statement_reassign_bind_return_actual_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-call-ternary-zero-arg-void-closure-stmt-reassign-bind-return-actual-pass",
+        "void apply0(void f()){ f(); }\n"
+        "void pick(int c)(){ int x=3; int y=5; void f()=closure [x] void (){ putint(x); return; }; void g()=closure [y] void (){ putint(y); return; }; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=g; p=h; return p; }\n"
+        "int main(){ apply0(wrap()); return 0; }\n");
 }
 
 static int test_semantic_accepts_ternary_function_value_local_initializer_under_extension(void) {
@@ -3567,6 +4188,70 @@ static int test_semantic_accepts_local_function_value_reassignment_under_extensi
         "int main(){ int f(int)=add1; f=add2; return f(40); }\n");
 }
 
+static int test_semantic_accepts_returned_function_value_reassignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-function-value-reassignment-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; if(c) f=g; return f; }\n"
+        "int main(){ int h(int)=add1; h=pick(1); return h(40); }\n");
+}
+
+static int test_semantic_accepts_returned_zero_arg_function_value_reassignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-zero-arg-function-value-reassignment-pass",
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; if(c) f=g; return f; }\n"
+        "int main(){ int h()=next1; h=pick(1); return h(); }\n");
+}
+
+static int test_semantic_accepts_returned_closure_reassignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-closure-reassignment-pass",
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int main(){ int h(int)=make(3); h=make(4); return h(5); }\n");
+}
+
+static int test_semantic_accepts_returned_zero_arg_void_closure_reassignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "returned-zero-arg-void-closure-reassignment-pass",
+        "void make(int x)(){ return closure [x] void (){ putint(x); return; }; }\n"
+        "int main(){ void h()=make(3); h=make(4); h(); return 0; }\n");
+}
+
+static int test_semantic_accepts_wrapped_function_value_reassignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-function-value-reassignment-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int f(int)=add1; int g(int)=add2; f=(0, g); return f(40); }\n");
+}
+
+static int test_semantic_accepts_assignment_result_function_value_reassignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "assignment-result-function-value-reassignment-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int f(int)=add1; int g(int)=add2; int h(int)=add1; f=(h=g); return f(40); }\n");
+}
+
+static int test_semantic_accepts_wrapped_returned_function_value_reassignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "wrapped-returned-function-value-reassignment-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; if(c) f=g; return f; }\n"
+        "int main(){ int h(int)=add1; h=(0, pick(1)); return h(40); }\n");
+}
+
+static int test_semantic_accepts_assignment_result_returned_closure_reassignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "assignment-result-returned-closure-reassignment-pass",
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int main(){ int h(int)=make(3); int g(int)=make(5); h=(g=make(4)); return h(5); }\n");
+}
+
 static int test_semantic_accepts_dynamic_local_function_value_dispatch_under_extension(void) {
     return run_extension_semantic_expect_accepts(
         "local-function-value-dynamic-dispatch-pass",
@@ -3595,38 +4280,34 @@ static int test_semantic_accepts_closure_literal_function_local_initializer_shap
 }
 
 static int test_semantic_rejects_closure_literal_non_int_capture_under_extension(void) {
-    return run_extension_semantic_expect_rejects(
-        "closure-literal-non-int-capture-ext-reject",
-        "int main(){ float x=1.25; int f(int)=closure [x] int (int y) { return y; }; return 0; }\n",
-        "SEMA-EXT-043");
+    return run_extension_semantic_expect_accepts(
+        "closure-literal-non-int-capture-ext-pass",
+        "int main(){ float x=1.25; int f(int)=closure [x] int (int y) { return y; }; return 0; }\n");
 }
 
 static int test_semantic_rejects_closure_literal_nested_local_capture_under_extension(void) {
-    return run_extension_semantic_expect_rejects(
-        "closure-literal-nested-local-capture-ext-reject",
-        "int main(){ if(1){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; } return 0; }\n",
-        "SEMA-EXT-041");
+    return run_extension_semantic_expect_accepts(
+        "closure-literal-nested-local-capture-ext-pass",
+        "int main(){ if(1){ int x=3; int f(int)=closure [x] int (int y) { return x + y; }; } return 0; }\n");
 }
 
 static int test_semantic_rejects_closure_literal_signature_mismatch_under_extension(void) {
     return run_extension_semantic_expect_rejects(
         "closure-literal-signature-mismatch-ext-reject",
         "int main(){ int x=3; int f()=closure [x] int (int y) { return x + y; }; return 0; }\n",
-        "SEMA-EXT-045");
+        "SEMA-EXT-018");
 }
 
 static int test_semantic_rejects_closure_literal_body_shape_under_extension(void) {
-    return run_extension_semantic_expect_rejects(
-        "closure-literal-body-shape-ext-reject",
-        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z=y; if(z) putint(z); return z; }; return 0; }\n",
-        "SEMA-EXT-041");
+    return run_extension_semantic_expect_accepts(
+        "closure-literal-body-shape-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int z=y; if(z) putint(z); return z; }; return 0; }\n");
 }
 
 static int test_semantic_rejects_closure_literal_uncaptured_identifier_in_body_under_extension(void) {
-    return run_extension_semantic_expect_rejects(
-        "closure-literal-uncaptured-body-name-ext-reject",
-        "int g=7; int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y + g; }; return 0; }\n",
-        "SEMA-EXT-044");
+    return run_extension_semantic_expect_accepts(
+        "closure-literal-uncaptured-body-name-ext-pass",
+        "int g=7; int main(){ int x=3; int f(int)=closure [x] int (int y) { return x + y + g; }; return 0; }\n");
 }
 
 static int test_semantic_accepts_closure_literal_alias_chain_under_extension(void) {
@@ -3775,7 +4456,7 @@ static int test_semantic_rejects_assignment_of_closure_literal_after_function_lo
     return run_extension_semantic_expect_rejects(
         "closure-assignment-after-local-decl-ext-reject",
         "int main(){ int y=3; int f(int); f = closure [y] int (int z) { return y + z; }; return 0; }\n",
-        "SEMA-EXT-040");
+        "SEMA-EXT-019");
 }
 
 static int test_semantic_accepts_zero_arg_closure_direct_local_call_under_extension(void) {
@@ -3816,10 +4497,9 @@ static int test_semantic_accepts_int_closure_expression_statement_prefix_under_e
 }
 
 static int test_semantic_rejects_int_closure_control_flow_prefix_under_extension(void) {
-    return run_extension_semantic_expect_rejects(
-        "closure-int-control-prefix-ext-reject",
-        "int main(){ int x=3; int f(int)=closure [x] int (int y) { if(y) putint(x); return x + y; }; return f(4); }\n",
-        "SEMA-EXT-041");
+    return run_extension_semantic_expect_accepts(
+        "closure-int-control-prefix-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { if(y) putint(x); return x + y; }; return f(4); }\n");
 }
 
 static int test_semantic_accepts_int_closure_local_decl_prefix_under_extension(void) {
@@ -3829,17 +4509,15 @@ static int test_semantic_accepts_int_closure_local_decl_prefix_under_extension(v
 }
 
 static int test_semantic_rejects_int_closure_local_decl_shadow_under_extension(void) {
-    return run_extension_semantic_expect_rejects(
-        "closure-int-local-decl-shadow-ext-reject",
-        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int x = y; return x; }; return f(4); }\n",
-        "SEMA-EXT-046");
+    return run_extension_semantic_expect_accepts(
+        "closure-int-local-decl-shadow-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int x = y; return x; }; return f(4); }\n");
 }
 
 static int test_semantic_rejects_int_closure_non_int_local_decl_under_extension(void) {
-    return run_extension_semantic_expect_rejects(
-        "closure-int-local-decl-float-ext-reject",
-        "int main(){ int x=3; int f(int)=closure [x] int (int y) { float z = 1.25; return y; }; return f(4); }\n",
-        "SEMA-EXT-041");
+    return run_extension_semantic_expect_accepts(
+        "closure-int-local-decl-float-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { float z = 1.25; return y; }; return f(4); }\n");
 }
 
 static int test_semantic_accepts_int_closure_parameter_assignment_prefix_under_extension(void) {
@@ -3855,10 +4533,9 @@ static int test_semantic_accepts_int_closure_local_assignment_prefix_under_exten
 }
 
 static int test_semantic_rejects_int_closure_capture_assignment_under_extension(void) {
-    return run_extension_semantic_expect_rejects(
-        "closure-int-capture-assign-ext-reject",
-        "int main(){ int x=3; int f(int)=closure [x] int (int y) { x = y; return x; }; return f(4); }\n",
-        "SEMA-EXT-047");
+    return run_extension_semantic_expect_accepts(
+        "closure-int-capture-assign-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { x = y; return x; }; return f(4); }\n");
 }
 
 static int test_semantic_accepts_int_closure_uninitialized_local_prefix_under_extension(void) {
@@ -3874,10 +4551,9 @@ static int test_semantic_accepts_int_closure_multi_declarator_local_prefix_under
 }
 
 static int test_semantic_rejects_int_closure_local_decl_shadow_parameter_under_extension(void) {
-    return run_extension_semantic_expect_rejects(
-        "closure-int-local-decl-shadow-param-ext-reject",
-        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int y; y = 1; return x + y; }; return f(4); }\n",
-        "SEMA-EXT-046");
+    return run_extension_semantic_expect_accepts(
+        "closure-int-local-decl-shadow-param-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { int y; y = 1; return x + y; }; return f(4); }\n");
 }
 
 static int test_semantic_accepts_int_closure_parameter_compound_assignment_under_extension(void) {
@@ -3905,10 +4581,9 @@ static int test_semantic_accepts_int_closure_local_postfix_increment_under_exten
 }
 
 static int test_semantic_rejects_int_closure_capture_prefix_increment_under_extension(void) {
-    return run_extension_semantic_expect_rejects(
-        "closure-int-capture-preinc-ext-reject",
-        "int main(){ int x=3; int f(int)=closure [x] int (int y) { ++x; return x + y; }; return f(4); }\n",
-        "SEMA-EXT-047");
+    return run_extension_semantic_expect_accepts(
+        "closure-int-capture-preinc-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { ++x; return x + y; }; return f(4); }\n");
 }
 
 static int test_semantic_accepts_int_closure_bitwise_expression_under_extension(void) {
@@ -3942,10 +4617,9 @@ static int test_semantic_accepts_int_closure_bitwise_not_expression_under_extens
 }
 
 static int test_semantic_rejects_int_closure_comma_expression_under_extension(void) {
-    return run_extension_semantic_expect_rejects(
-        "closure-int-comma-ext-reject",
-        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return (x = y, x + y); }; return f(4); }\n",
-        "SEMA-EXT-047");
+    return run_extension_semantic_expect_accepts(
+        "closure-int-comma-ext-pass",
+        "int main(){ int x=3; int f(int)=closure [x] int (int y) { return (x = y, x + y); }; return f(4); }\n");
 }
 
 static int test_semantic_accepts_int_closure_return_assignment_expression_under_extension(void) {

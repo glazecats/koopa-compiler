@@ -467,6 +467,26 @@ static int ir_lower_register_function_value_target(IrLowerContext *ctx,
     return 1;
 }
 
+static int ir_lower_reset_function_value_target_set(IrLowerContext *ctx,
+    const char *binding_name) {
+    IrFunctionValueTargetSet *set;
+
+    if (!ctx || !binding_name || binding_name[0] == '\0') {
+        return 0;
+    }
+
+    set = ir_lower_find_function_value_target_set(ctx, binding_name);
+    if (!set) {
+        return 1;
+    }
+
+    free(set->target_names);
+    set->target_names = NULL;
+    set->target_count = 0u;
+    set->target_capacity = 0u;
+    return 1;
+}
+
 static const char *ir_lower_function_value_target_name_for_tag(const IrLowerContext *ctx,
     const char *binding_name,
     long long tag_value) {
@@ -491,6 +511,8 @@ static int ir_lower_clone_function_value_target_set(IrLowerContext *ctx,
     const char *dest_name,
     const char *source_name) {
     IrFunctionValueTargetSet *source_set;
+    const char **source_target_names = NULL;
+    size_t source_target_count = 0u;
     size_t index;
     long long ignored_tag = 0;
 
@@ -502,18 +524,31 @@ static int ir_lower_clone_function_value_target_set(IrLowerContext *ctx,
     if (!source_set) {
         return 0;
     }
+    source_target_count = source_set->target_count;
+    if (source_target_count > 0u) {
+        source_target_names =
+            (const char **)malloc(source_target_count * sizeof(const char *));
+        if (!source_target_names) {
+            return 0;
+        }
+        for (index = 0u; index < source_target_count; ++index) {
+            source_target_names[index] = source_set->target_names[index];
+        }
+    }
 
-    for (index = 0u; index < source_set->target_count; ++index) {
-        if (!source_set->target_names[index] ||
+    for (index = 0u; index < source_target_count; ++index) {
+        if (!source_target_names[index] ||
             !ir_lower_register_function_value_target(
                 ctx,
                 dest_name,
-                source_set->target_names[index],
+                source_target_names[index],
                 &ignored_tag)) {
+            free(source_target_names);
             return 0;
         }
     }
 
+    free(source_target_names);
     return 1;
 }
 

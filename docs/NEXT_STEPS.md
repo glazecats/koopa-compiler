@@ -163,6 +163,41 @@
     branch at the caller into `apply__fv_0_add1` / `apply__fv_0_add2`, with
     compiler, canonical-IR, lower-IR, and extension-runtime regression
     coverage
+    - current higher-order returned-passthrough follow-up:
+      the same dynamic noncapturing specialization spine now also closes the
+      next higher-order passthrough family instead of stopping at direct
+      `pick(...)` consumers. Both the immediate-call sibling
+      `return idh(pickh(getint()))(add1, 41);` and the bind-and-call sibling
+      `int g(int f(int), int x)=idh(pickh(getint())); return g(add1, 41);`
+      are now accepted on the semantic path and lower through one
+      `call pickh(...)`, a returned tag slot (`__retfn_argcap_0` or
+      `g$ftag.0`), and branch-selected `apply__fv_0_add1` /
+      `apply_twice__fv_0_add1` helpers on canonical IR, with focused
+      semantic / canonical-IR / lower-IR / compiler-driver regression
+      coverage
+    - current zero-arg higher-order returned-passthrough closure:
+      the same returned-passthrough higher-order line now also closes the
+      zero-argument `int` and `void` siblings instead of stopping at the
+      one-argument family. Witnesses such as
+      `return idh0(pickh0(getint()))(next);` and
+      `idhv(pickhv(getint()))(ping);`
+      now lower through one `call pickh0/pickhv(...)`, a returned tag slot,
+      and branch-selected `apply0__fv_0_next` / `apply0_twice__fv_0_next`
+      or `applyv__fv_0_ping` / `applyv_twice__fv_0_ping` helpers. The key
+      enabling fix was below the witness level: zero-arg repeated higher-order
+      bodies like `return f() + f();` are now recognized as requiring
+      function-value specialization before direct body lowering, so the base
+      helper no longer falls through to an unresolved direct `call f`
+    - adjacent returned-closure actual-argument repair:
+      the same callable-object line also has one neighboring cleanup on the
+      closure-backed actual-argument family. Dynamic returned closure
+      actual-argument probes no longer materialize a redundant early
+      `__retclosure_anyview_*` object during dynamic-family pre-detection,
+      which had been causing duplicate producer calls like two visible
+      `call pick(...)` rows before the real `__retclosure_argslot_*` path.
+      Dynamic returned closure direct actual arguments, local bounce, and
+      three-hop passthrough focused surfaces are green again after switching
+      that pre-detection step to pure target-set analysis
     - current callable-object consumer follow-up:
       the noncapturing one-argument/non-void dynamic forwarding and
       actual-argument siblings are now also migrated onto the explicit
@@ -236,6 +271,15 @@
       in turn materializes an env-style wrapper object with
       `fn_make __fnwrap_closure_pick__closure_*` + `call_indirect`. Compiler
       and extension-runtime coverage are green on this family.
+    - current direct dynamic returned multi-capture immediate-call checkpoint:
+      the adjacent direct-callee sibling is now also on the same caller-side
+      callable-object spine instead of staying on the older branch-selected
+      direct closure-call path. The focused witness
+      `return pick(5, 7, 1)(3, 2);` now lowers through one `call pick(...)`,
+      caller-side `__closure_env_*` materialization, branch-selected
+      `fn_make __fnwrap_closure_pick__closure_*`, and `call_indirect`, with
+      focused IR, lower-IR, and compiler-driver regression coverage green on
+      that exact shape.
     - current closure-wrapper hardening follow-up:
       the old plain `lower_ir_regression_test` non-ASan crash that used to
       appear after the returned multi-capture dynamic forwarding cases is now
@@ -2866,6 +2910,49 @@
     boundary. Focused serial `make test-ir-regression`,
     `make test-compiler-driver`, and `make test-extension-runtime` remain
     green on that follow-up too.
+    The neighboring returned-closure actual-argument line has now also moved
+    one real step onto that same shared callable-object consumer model instead
+    of stopping at the earlier single-capture special case. Static returned
+    closure-valued actual arguments no longer only have the narrow
+    `capture_count == 1` indirect-call helper; a new shared closure-callable
+    helper now handles the general prepared-args form, and the returned
+    multi-capture family `apply(make(...), ...)` is now explicitly locked on a
+    specialized-helper body that materializes `fn_make
+    __fnwrap_closure_make__retclosure_*` plus `call_indirect`. That matters
+    because one more real producer/consumer pair now treats a richer returned
+    function value as an explicit callable object at the point of use, instead
+    of falling back to older target/capture-specific call shaping. Focused
+    serial `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-compiler-driver` are green on that follow-up too.
+    The next neighboring dynamic-closure line has now also moved a larger
+    piece of real call traffic onto the same callable-object spine instead of
+    stopping at the old single-capture fast path. Two-target dynamic closure
+    indirect dispatch now accepts multi-capture families too: it materializes
+    one shared env tuple, branches only on the callable tag, and calls the
+    corresponding synthesized `__fnwrap_closure_*` entry rather than falling
+    back immediately to older capture-prefixed direct-call shaping. The
+    strongest currently locked witness is the returned dynamic multi-capture
+    closure forwarding family `apply(pick(...), ...)`: canonical IR no longer
+    expects `apply__fv_*` helper calls on that path, but instead records the
+    consumer-side branch plus wrapper-backed callable-object dispatch
+    (`fn_make __fnwrap_closure_pick__closure_*` + `call_indirect`), while
+    lower-IR and final compiler output now preserve the same structural move
+    one stage later as direct wrapper calls from `main`. Focused serial
+    `make test-ir-regression`, `make test-lower-ir-regression`, and
+    `make test-compiler-driver` are green on that checkpoint too.
+    The neighboring ternary-callee consumer family has now also been pulled
+    onto that same callable-object dispatch story instead of preserving one
+    more old branch-selected direct-call pocket. Ternary function-value and
+    ternary closure callees now materialize the tag/payload locals as before,
+    but the actual consumer path asks the shared two-target callable-object
+    dispatch helper to do the call. For noncapturing callees that means
+    canonical IR now prefers `fn_make __fnwrap_add*` + `call_indirect` over
+    direct `call add*` in the branch arms; for closure callees the same move
+    now also reaches the new multi-capture witness instead of stopping at the
+    earlier single-capture/zero-arg siblings. Focused serial
+    `make test-ir-regression` and `make test-compiler-driver` are green after
+    widening canonical and compiler regression coverage to this stronger
+    callable-object expectation.
 - New composite-type feature candidate now also has a first concrete plan:
   [docs/language/PAIR_FEATURE_PLAN.md](/workspaces/compiler_lab/docs/language/PAIR_FEATURE_PLAN.md)
   - current checkpoint:
@@ -14156,3 +14243,3403 @@ The execution log is intentionally retained below them as historical record, not
     `make test-compiler-driver` PASS,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
     `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
+- 2026-05-31 callable-object zero-arg/void passthrough follow-up:
+  - the callable-object mainline now also covers the `void` sibling of the
+    earlier passthrough wrapper family instead of stopping at
+    `return f(...)` / value-returning wrappers only
+  - landed lowering change:
+    `ir_try_emit_function_parameter_passthrough_callable_dispatch(...)` now
+    recognizes single-statement `void` passthrough wrappers such as
+    `void apply0(void f()){ f(); }` in addition to the older
+    single-`return` passthrough shape
+  - current visible effect:
+    zero-arg/void closure forwarding through simple wrapper functions now
+    falls onto the same callable-object direct-dispatch skeleton as the
+    already-landed value-returning passthrough family, instead of preserving
+    older `apply0__fv_*` helper calls on those paths
+  - current proof boundary:
+    this moves plain local/alias/runtime-selected zero-arg void closure
+    passthrough forwarding onto the newer direct-dispatch shape, but direct
+    closure-literal actual-argument forms such as
+    `apply0(closure [...] void () { ... })` still keep the older helper path
+  - regression follow-up:
+    canonical IR, lower IR, and compiler-driver expectations are updated to
+    lock the new branch-direct / `fn_make + call_indirect` shape on the
+    migrated siblings while keeping the literal-argument helper expectations
+    unchanged
+  - focused rechecks after this expansion:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-05-31 callable-object static actual-argument follow-up:
+  - the same callable-object mainline now also reaches a first real static
+    actual-argument family instead of only callee-side wrappers and a few
+    dynamic/function-parameter bridges
+  - landed lowering change:
+    call lowering now tries one static actual-argument callable-object fast
+    path before falling back to older function-value specialization helpers
+    when the callee body is a passthrough wrapper and the function-valued
+    actual argument can be recovered as a stable callable object
+  - current visible effect:
+    several closure-backed and returned-closure-backed argument families now
+    bypass older `apply__fv_*` / `apply0__fv_*` helpers and fall more
+    directly onto target closure bodies or closure wrappers
+  - current concretely migrated siblings:
+    `apply(closure [...], x)`,
+    `apply0(closure [...])`,
+    `apply0(void closure [...])`,
+    `apply(make(...), x)`,
+    `apply0(make(...))`,
+    `apply0(void make(...))`,
+    plus the nearby local-returned closure forwarding siblings such as
+    `int f(int)=make(...); return apply(f, x);`
+  - multi-capture boundary update:
+    returned multi-capture closure actual-argument forwarding now still uses
+    the explicit closure wrapper object path, but it no longer has to pass
+    through an extra `apply__fv_*` helper before reaching that wrapper
+  - safety follow-up:
+    the static actual-argument fast path now also preserves wrapper-side
+    expression side effects, so wrapped forms such as comma/assignment-result
+    arguments do not silently drop `putint(...)`-style effects
+  - current proof boundary:
+    this slice does not remove the older specialization machinery entirely;
+    it only shifts the static actual-argument families that can already be
+    recovered as stable callable objects onto the newer default skeleton
+  - focused rechecks after this expansion:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-05-31 callable-object noncapturing actual-argument follow-up:
+  - the same static actual-argument callable-object line now also reaches one
+    broader noncapturing family instead of stopping at closure-backed cases
+  - landed effect on the front half:
+    top-level and direct-returned noncapturing actual arguments such as
+    `apply(add1, 4)`,
+    `apply(pick(), 4)`,
+    `apply0(next)`,
+    `apply0(pick())`,
+    and `apply0(pick_void())`
+    now lower through the same explicit noncapturing wrapper object skeleton
+    on canonical IR / lower IR, using `fn_make __fnwrap_*` plus
+    `call_indirect` / bridged `call __fnwrap_*`
+  - current backend/preview boundary:
+    on the compiler preview text path these same siblings now also appear as
+    direct `call __fnwrap_*` surfaces rather than the older
+    `apply__fv_*` / `apply0__fv_*` helper layer
+  - current proof boundary:
+    this does not yet claim that every downstream text/backend layer has
+    eliminated every specialization helper family everywhere; the kept
+    checkpoint is that the common noncapturing static actual-argument family
+    has moved onto the wrapper-object boundary and no longer needs the old
+    helper shell on the observed compiler path
+  - focused rechecks after this expansion:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-05-31 callable-object noncapturing compiler-boundary follow-up:
+  - the same noncapturing actual-argument mainline is now also recorded one
+    stage later on the compiler preview path instead of being treated as only
+    a canonical/lower-IR truth
+  - current observed compiler boundary:
+    common noncapturing static actual-argument siblings such as
+    `apply(add1, 4)`,
+    `apply(pick(), 4)`,
+    `apply0(next)`,
+    `apply0(pick())`,
+    `apply0(pick_void())`,
+    and builtin binding `apply(putint, 7)`
+    now appear on the compiler preview text path as direct `call __fnwrap_*`
+    rather than through older `apply__fv_*` / `apply0__fv_*` helper shells
+  - important surviving boundary:
+    this does **not** yet mean every wrapper-of-wrapper family is gone; a
+    source-level forwarding wrapper such as
+    `wrapper(int f(int), int x){ return apply(f, x); }`
+    may still keep a specialized shell like `wrapper__fv_*` around the newer
+    inner `__fnwrap_*` call
+  - current takeaway:
+    the center of gravity has shifted again toward the explicit callable
+    object / wrapper-object model, and the remaining cleanup surface is now
+    narrower and more clearly concentrated on extra wrapper shells rather
+    than on basic actual-argument lowering itself
+  - focused rechecks after this expansion:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-05-31 passthrough-wrapper shell follow-up:
+  - one more visible specialization shell has now been cleared from the
+    callable-object mainline instead of remaining as a harmless-looking but
+    still older bridge layer
+  - landed effect:
+    a direct forwarding wrapper such as
+    `wrapper(int f(int), int x){ return apply(f, x); }`
+    no longer needs a dedicated `wrapper__fv_*` shell when the bound actual
+    argument is already a stable noncapturing callable object
+  - current observed boundary:
+    the focused sibling `wrapper(add1, 41)` now reaches the compiler preview
+    path as a direct `call __fnwrap_add1` surface instead of first going
+    through `wrapper__fv_0_add1`
+  - current proof boundary:
+    this does not yet claim that every multi-function wrapper family is gone;
+    the nearby multi-parameter composition shell family such as
+    `compose__fv_0_add1_1_double1` still remains as a next natural cleanup
+    target
+  - focused rechecks after this expansion:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-03 zero-arg static passthrough scalar-update follow-up:
+  - the narrow static-noncapturing passthrough evaluator now also closes the
+    adjacent zero-argument `int` / `void` higher-order wrapper families when
+    the wrapper body contains scalar-only local setup before forwarding the
+    function value
+  - landed lowering change:
+    `ir_try_collect_function_parameter_passthrough_aliases(...)` now keeps
+    accepting scalar local mutations that are irrelevant to the passthrough
+    call when that passthrough uses only function-valued arguments, instead of
+    bailing out before the shared recursive callable-object dispatch can even
+    start
+  - important safety boundary:
+    this relaxation is intentionally narrow; it does **not** pretend that
+    arbitrary scalar updates are safe to ignore. The new tolerance only
+    applies when the final passthrough call uses function-valued parameters /
+    aliases exclusively, so scalar forwarding cases like `return h(f, x);`
+    still stay on the stricter path
+  - current visible effect on canonical IR / lower IR:
+    zero-arg witnesses such as
+    `int pass0(int h(int f()), int f()){ int x=0; x=x+1; return h(f); }`,
+    its repeated-update sibling, and the third-order sibling
+    `relay0(pass0, apply0, next)` no longer emit
+    `pass0__fv_*` / `relay0__fv_*` shells on the front half; the `int`
+    family now folds all the way to `ret 1`, while the `void` family keeps the
+    expected direct `fn_make __fnwrap_ping + call_indirect` / bridged
+    `call __fnwrap_ping(0)` shape in `main`
+  - compiler preview follow-up is now stronger on this exact family:
+    after rebuilding `build/compiler` on the kept state, the same zero-arg
+    scalar-update noncapturing witnesses no longer keep outer
+    `pass0__fv_*` / `relay0__fv_*` shells in final preview text either. The
+    `int` siblings may fold all the way to repeated `li a0, 1` / `ret`, while
+    the `void` siblings keep the direct `call __fnwrap_ping` path from
+    `main`, and the compiler-driver regressions now lock that stronger
+    boundary too
+  - focused rechecks after this expansion:
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+  - regression-lock follow-up:
+    the same checkpoint is now explicitly locked on a few neighboring static
+    noncapturing higher-order zero-arg families that were already green after
+    the implementation landed but had not yet been recorded in the suite:
+    returned immediate-call and bind-and-call siblings such as
+    `idh0(pass0)(apply0, next)`,
+    `int g(...)=idh0(pass0); return g(apply0, next);`,
+    and the matching `void` forms through `idv0(pass0)`
+  - current visible boundary on those new locks:
+    canonical IR and lower IR now require the same shell-free front-half
+    outcome as the direct `pass0(...)` / `relay0(...)` siblings, while the
+    compiler-driver surface now also records that the returned/local-bounce
+    `int` family may fold all the way to direct `li a0, 1` returns and the
+    `void` family must keep the direct `__fnwrap_ping` call path without
+    falling back to `idv0` / `pass0__fv_*` / `apply0__fv_*`
+  - focused rechecks after this hardening:
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-05-31 multi-function shell boundary follow-up:
+  - the next remaining specialization-shell family is now explicitly narrower
+    and better characterized after the direct forwarding-wrapper cleanup
+  - current observed state:
+    a single forwarding wrapper such as
+    `wrapper(int f(int), int x){ return apply(f, x); }`
+    no longer needs `wrapper__fv_*`, but a multi-function family such as
+    `compose(int f(int), int g(int), int x){ return f(g(x)); }`
+    still keeps a `compose__fv_*` shell
+  - important current boundary:
+    that remaining `compose__fv_*` shell is now already only a thin outer
+    shell around the newer noncapturing wrapper-object path:
+    the shell body itself calls `__fnwrap_double1` and `__fnwrap_add1`
+    directly rather than routing through older `apply__fv_*` helpers
+  - current takeaway:
+    the remaining cleanup surface has narrowed again from “general
+    noncapturing actual-argument transport” to “multi function-valued
+    parameter shells that still need a generalized passthrough fast path”
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+  - adjacent dynamic follow-up:
+    the nearby direct dynamic returned closure actual-argument sibling now
+    also has the same ordinary caller-side callable-object contract locked
+    explicitly instead of only being inferred from broader dynamic-returned
+    notes. The witness `return apply(pick(5, 1), 3);` already stays on one
+    `call pick(...)`, reuses `__retclosure_argslot_*`, and dispatches through
+    caller-side `fn_make __fnwrap_closure_pick__closure_*` +
+    `call_indirect`; focused IR, lower-IR, and compiler-driver coverage now
+    record that as the expected contract too. The zero-arg and zero-arg-void
+    siblings `return apply0(pick(5, 1));` and `apply0(pick(5, 1));` now also
+    follow that same direct dynamic caller-side spine and are regression
+    locked on the same one-`call pick(...)`, `__retclosure_argslot_*`,
+    wrapper-backed dispatch contract
+- 2026-05-31 nested-forwarding wrapper follow-up:
+  - the direct single-wrapper family is now also explicitly checkpointed as
+    cleared on the live tree, not only inferred from earlier exploratory
+    probes
+  - current observed state:
+    a nested forwarding wrapper such as
+    `wrapper(int f(int), int x){ return apply(f, x); }`
+    now lowers on canonical IR directly to
+    `fn_make __fnwrap_add1 + call_indirect`
+    and appears on the compiler preview path as direct
+    `call __fnwrap_add1`, with no remaining `wrapper__fv_*` shell
+  - remaining nearby mainline blocker:
+    the multi-function composition family such as
+    `compose(int f(int), int g(int), int x){ return f(g(x)); }`
+    still keeps a `compose__fv_*` shell because the current passthrough fast
+    path is not yet generalized to multiple static function-valued arguments
+  - current takeaway:
+    the residual specialization surface has narrowed one step further from
+    “direct wrapper shells” to specifically “multi function-valued parameter
+    shells”
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-05-31 multi-static passthrough callable-object follow-up:
+  - the next nearby mainline blocker on the callable-object path has now been
+    cleared too: the simple multi-function composition family no longer needs
+    a dedicated specialization shell when all function-valued actual
+    arguments are already statically recoverable callable objects
+  - landed effect:
+    a sibling such as
+    `compose(int f(int), int g(int), int x){ return f(g(x)); }`
+    now lowers through the shared passthrough callable-object dispatch path
+    itself rather than synthesizing `compose__fv_*`
+  - current observed boundary:
+    the focused witness `compose(add1, double1, 20)` now lowers on canonical
+    IR directly to nested `fn_make __fnwrap_double1` / `call_indirect`
+    followed by `fn_make __fnwrap_add1` / `call_indirect`, lowers on
+    lower-IR to the bridged `call __fnwrap_double1(0, 20)` then
+    `call __fnwrap_add1(0, tmp.*)` path, and appears on the compiler preview
+    path with direct `call __fnwrap_double1` / `call __fnwrap_add1` and no
+    remaining `compose__fv_0_add1_1_double1` shell
+  - kept safety boundary:
+    this new generalized passthrough entry is still intentionally narrow for
+    now; it only activates on the multi-function static-actual family when
+    the participating function-valued actual arguments are plain static
+    identifier-root callable objects without comma / assignment wrapper side
+    effects, so the more fragile wrapped dynamic families stay on their older
+    proven paths
+  - current takeaway:
+    the noncapturing function-valued-parameter mainline has moved one more
+    real step toward the generic callable-object model itself, because a
+    multi-function consumer now reuses the same shared object-dispatch
+    skeleton instead of depending on another witness-specific outer shell
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-05-31 single-target closure forwarding shell follow-up:
+  - the next concentrated closure-side specialization shell has now also been
+    cleared from the live callable-object mainline instead of remaining as a
+    harmless single-target helper layer
+  - landed effect:
+    a local or branch-converged single-target closure forwarding sibling such
+    as
+    `int apply(int f(int), int x){ return f(x); }`
+    with callers like
+    `g=f; return apply(g, 4);`
+    or
+    `if(c) f=g; return apply(f, 4);`
+    no longer synthesizes `apply__fv_0_main__closure_*`
+  - current observed boundary:
+    the focused local-alias witness now lowers on canonical IR directly to
+    `fn_make main__closure_f_* , g$closurecap$0.*, shape.0` followed by
+    `call_indirect`, lowers on lower-IR to the bridged direct
+    `call main__closure_f_*(capture, 4)` path, and appears on the compiler
+    preview path with direct `call main__closure_f_*` and no remaining
+    `apply__fv_0_main__closure_f_*` shell; the nearby branch-converged
+    single-target sibling does the same for `main__closure_g_*`
+  - kept safety boundary:
+    this new closure-side bypass is still deliberately narrow. It only fires
+    on the single function-valued-parameter static-actual family when the
+    bound local/closure binding is already const-proven to one target, so the
+    genuinely dynamic/runtime-selected closure families still stay on their
+    older proven object-dispatch paths
+  - current takeaway:
+    the closure-forwarding consumer mainline has moved one real step closer
+    to the generic callable-object target architecture, because even a
+    closure-backed function-valued-parameter consumer no longer needs a
+    witness-specific outer helper when the callee identity is already
+    statically known
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS,
+    `make -j1 test` PASS
+- 2026-05-31 returned dynamic closure materialization follow-up:
+  - the nearby returned-closure consumer line has now also moved one more
+    real step toward ordinary callable-object transport instead of
+    needlessly materializing the same returned function value twice on the
+    canonical path
+  - landed effect:
+    a dynamic returned single-capture closure forwarding sibling such as
+    `return apply(pick(5, 1), 3);`
+    no longer pays for one failed static returned-closure probe plus one real
+    dynamic callable-object materialization on canonical IR
+  - current observed boundary:
+    the focused witness now lowers on canonical IR with a single
+    `call pick(tmp.0, tmp.1, 5, 1)` materialization followed by one
+    branch-selected `fn_make pick__closure_* + call_indirect` consumer path,
+    instead of the older double-`call pick(...)` shape
+  - current downstream boundary:
+    lower-IR now inherits that same single returned payload materialization on
+    the front half, and a fresh extension-path recheck now confirms the
+    compiler preview text path also emits exactly one `call pick` before the
+    final branch-selected direct closure calls. The earlier “preview still
+    duplicates `call pick`” note turned out to be a stale/heterogeneous
+    observation from a mismatched debug pipeline rather than a live backend
+    blocker
+  - current takeaway:
+    returned closure values are behaving a bit more like ordinary transported
+    values on the explicit callable-object line, because the canonical
+    consumer no longer needs to re-materialize the same returned family just
+    to decide whether a dynamic closure path will apply, and the same
+    single-materialization fact now survives through the real `-extension`
+    compiler preview path too
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 single-capture closure callable-object contract follow-up:
+  - the next real closure-side contract gap on the callable-object mainline
+    is now also closed more honestly instead of leaving single-capture
+    siblings split across two different consumer conventions
+  - landed implementation effect:
+    single-capture closure consumers no longer rely on one remaining
+    special-case distinction where some surfaces still built callable objects
+    from raw closure entries plus scalar env values while multi-capture or
+    runtime-selected siblings already used wrapper-backed env-address objects
+  - current observed boundary:
+    returned closure-backed function-value parameter immediate/bind siblings,
+    dynamic returned closure-backed parameter immediate/bind siblings,
+    returned closure assignment-then-return, dynamic runtime/local zero-arg
+    closure direct-callee siblings, and the nearby ternary closure
+    assignment/return/local-init surfaces now all regression-lock on the
+    same wrapper-backed callable-object contract:
+    canonical IR uses `__closure_env_*` materialization plus
+    `fn_make __fnwrap_closure_*` and `call_indirect`, lower-IR uses the
+    bridged `call __fnwrap_closure_*`, and default ValueSSA now preserves
+    the same wrapper-backed env/load-indirect shape instead of pretending the
+    direct closure body itself is still the stable contract
+  - current takeaway:
+    the single-capture closure line is materially closer to the intended
+    generic function-value architecture now because "how closures travel as
+    callable objects" is no longer split primarily by capture count or by a
+    handful of older direct-callee/returned-parameter pockets
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS,
+    `make -j1 test` PASS
+- 2026-06-01 single-capture closure callable-object ValueSSA closure follow-up:
+  - the same single-capture closure callable-object contract now also stays
+    honest one stage deeper on the default ValueSSA surface instead of
+    leaving translation/default expectations split between "wrapper-backed
+    callable object" and "pretend the direct closure body is still the
+    canonical value-flow shape"
+  - landed effect:
+    default ValueSSA regression coverage for returned closure-backed
+    function-value parameter immediate/bind siblings plus the dynamic
+    returned closure-backed parameter immediate/bind siblings now locks the
+    wrapper-backed env-address / load-indirect / `__fnwrap_closure_*`
+    structure directly
+  - current observed boundary:
+    after lower-IR-to-default-ValueSSA conversion, these siblings may still
+    fold away some redundant `mov` transport around the wrapper-backed call
+    path, but they no longer regress back to the older "direct closure body
+    is the only stable contract" expectation
+  - current takeaway:
+    the single-capture closure callable-object line is now aligned across
+    canonical IR, lower-IR, default ValueSSA, compiler-driver, and extension
+    runtime instead of stopping at a front-half-only contract
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS,
+    `make -j1 test` PASS
+- 2026-06-01 returned function-value parameter consumer de-slot bridge follow-up:
+  - the next mainline callable-object cleanup has now landed on the actual
+    returned-parameter consumer path instead of only on neighboring closure
+    contract unification
+  - landed implementation effect:
+    when a returned function value is just a forwarded function-valued
+    parameter such as `id(add1)`, `id(f)`, or closure-backed `id(f)`, the
+    main direct-callee and bind consumers now prefer the source argument's
+    existing callable-object / binding transport directly instead of first
+    materializing a fresh returned payload bridge through
+    `__retfn_declslot` / `__retclosure_declslot` or the call-side
+    `__ret*_callcap` family
+  - current observed boundary:
+    the focused returned function-value parameter immediate/bind siblings on
+    canonical IR and lower-IR now explicitly lock the absence of those
+    `__retfn_*` / `__retclosure_*` bridge locals while still preserving the
+    existing local-binding transport contract (`g$ftag`, wrapper-backed
+    closure env transport, dynamic tag aliasing, and `call_indirect` /
+    bridged wrapper calls)
+  - current takeaway:
+    the returned-parameter consumer line is now meaningfully closer to
+    "ordinary callable-object value transport" because the consumer no
+    longer needs to pretend that a trivial parameter-forwarding producer is a
+    separate hidden-payload family
+  - remaining nearby gap:
+    the broader hidden returned-payload materialization helpers still exist
+    for true returned-producer families such as `pick(...)`; the next
+    worthwhile mainline pressure should stay on shrinking those producer-side
+    bridges rather than reopening the now-cleaner returned-parameter
+    consumer path
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-value-ssa-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 returned noncapturing producer bind transport follow-up:
+  - the next nearby producer-side cleanup has now landed on the
+    noncapturing returned-value bind line instead of leaving all returned
+    producers on the older "hidden declslot first, real binding later"
+    transport story
+  - landed implementation effect:
+    local bindings such as `int g(int)=pick(1);`,
+    `int f(int)=pick();`, and the nearby zero-arg / ternary noncapturing
+    siblings now pass the returned payload address from the producer call
+    directly into the destination binding's own `$ftag` transport local
+    rather than materializing a temporary `__retfn_declslot_*` bridge first
+  - current observed boundary:
+    canonical IR and lower-IR regression coverage for these noncapturing
+    returned-producer bind families now explicitly expects `addr_local
+    g$ftag.*` / `addr_local f$ftag.*` on the producer call edge and rejects
+    the old `__retfn_declslot_*` transport on that family, while the later
+    consumer still uses the same stable wrapper-backed callable dispatch path
+  - current takeaway:
+    one more slice of true returned producers now behaves more like ordinary
+    function-value storage transport instead of a distinct hidden-slot ABI,
+    so the remaining producer-side bridge debt is narrower and more honestly
+    concentrated in the closure-backed returned families
+  - kept boundary:
+    closure-backed returned producers such as `make(3)` still keep their
+    older `__retclosure_*` materialization path for now; that line needs its
+    own follow-up because its tag/capture aliasing interacts with closure
+    reassignment and copied env payloads more delicately than the
+    noncapturing case
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-value-ssa-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 returned single-target closure producer bind transport follow-up:
+  - the next closure-side producer cleanup has now also landed on the
+    single-target returned-closure mainline instead of leaving even the
+    simplest `make(3)`-style bind families on the older
+    `__retclosure_declslot_*` bridge
+  - landed implementation effect:
+    static single-target returned closures such as
+    `int f(int)=make(3);`, the nearby alias-forward sibling
+    `int g(int)=f;`, and the zero-arg / zero-arg-void forwarding variants
+    now pass the producer hidden-return address directly into the
+    destination binding's own `$closurecap$*` transport local; the binding
+    then materializes its normal static `$ftag` metadata on top of that
+  - current observed boundary:
+    canonical IR and lower-IR now explicitly reject
+    `__retclosure_declslot_*` on that static single-target family, while the
+    downstream compiler preview path expects the wrapper-backed
+    `__fnwrap_closure_make__retclosure_*` call shape rather than the older
+    direct-closure-call expectation
+  - current takeaway:
+    the closure-backed producer debt is now narrower too: the remaining
+    returned-closure bridge complexity is no longer “all closure producers”,
+    but mainly the genuinely dynamic / multi-target returned-closure
+    families and the call-side `__retclosure_callcap_*` immediate-call line
+  - kept boundary:
+    dynamic returned closures and broader multi-capture closure-return
+    families still keep their older bridging path for now; they need a
+    separate follow-up because tag/capture aliasing and callcap materialized
+    env transport are still entangled there
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-value-ssa-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 dynamic returned closure producer follow-up boundary:
+  - after the new static single-target closure-producer cleanup, the
+    remaining closure-side bridge debt is now concentrated much more
+    honestly in the genuinely dynamic returned families instead of being
+    spread across all returned closure producers
+  - current live split:
+    static single-target returned closures already bind directly into the
+    destination `$closurecap$*` transport locals, but dynamic returned
+    closures still rely on two older bridge surfaces:
+    `__retclosure_declslot_*` on the producer-side bind path and
+    `__retclosure_callcap_*` on the immediate-call path
+  - current recommended next cut:
+    treat dynamic single-capture returned closure bind transport as the next
+    highest-value slice, not the full dynamic closure universe all at once.
+    In practice that means starting from the bind-and-call / returned-forward
+    siblings where the destination binding already exists and the remaining
+    work is mainly to redirect tag-plus-capture payload writes into that
+    binding's own transport locals instead of the intermediate
+    `__retclosure_declslot_*` family
+  - reason for this narrower cut:
+    the immediate-call `__retclosure_callcap_*` line is still coupled to
+    callcap env materialization and wrapper-call shaping, while the dynamic
+    bind transport can be attacked more like the earlier noncapturing /
+    static-closure bind cleanups
+- 2026-06-01 dynamic returned local closure forward contract follow-up:
+  - the nearby dynamic returned local closure forward family now also has a
+    clearer cross-layer contract after the latest producer-side cleanups,
+    even though the immediate-call `__retclosure_callcap_*` line is still
+    intentionally left for a later cut
+  - current observed boundary:
+    canonical IR already keeps this family on the wrapper-backed callable
+    object path without duplicate producer rematerialization, and lower-IR /
+    compiler-driver now explicitly lock the same `call pick(...)` plus
+    wrapper-backed closure-call shape instead of older fuzzier direct-closure
+    expectations
+  - practical meaning:
+    the next risky part is no longer “what should dynamic returned local
+    closure forward look like?”; that contract is now clearer. The remaining
+    work is to physically delete more of the older bridge machinery under
+    that contract, especially on the immediate-call `__retclosure_callcap_*`
+    line
+- 2026-06-01 dynamic returned closure immediate-call next-cut note:
+  - this note is now partially obsolete after the returned-callee mainline
+    advanced further than the earlier checkpoint text recorded
+  - current observed boundary:
+    the dynamic returned closure immediate-call witness
+    `int main(){ return pick(1)(4); }` now already stays on one producer
+    materialization path on the live tree. Canonical IR shows one
+    `call pick(...)` followed by `__retclosure_immediate_*` payload reuse and
+    wrapper-backed `fn_make` + `call_indirect`, and lower-IR plus
+    compiler-driver now lock that same single-call contract too
+  - practical meaning:
+    the mainline blocker is no longer “stop duplicate producer calls on the
+    ternary returned-closure immediate-call witness”; that behavior is now
+    explicitly regression-locked. The remaining work on this closure-side
+    bridge is narrower cleanup and broader adjacent-surface alignment rather
+    than this core single-materialization fact
+- 2026-06-01 returned-callee call-chain interface follow-up:
+  - the call-lowering mainline now also has its first explicit structural
+    preparation for the remaining dynamic returned-closure immediate-call
+    cleanup instead of leaving that future change trapped behind an
+    all-or-nothing boolean helper contract
+  - landed implementation effect:
+    `ir_try_handle_returned_call_callee(...)` no longer reports only a
+    single `handled` bit; it now returns an explicit
+    `IrReturnedCallCalleeResult` with separate
+    `handled` / `stop_outer_chain` states, and the outer `AST_EXPR_CALL`
+    lowering path consumes that result before continuing into later
+    direct-callee / returned-binding / specialization probes
+  - current practical meaning:
+    the tree is still on the same stable behavior checkpoint today, but the
+    remaining dynamic returned-closure immediate-call work now has the right
+    control-flow hook to become a true single-materialization path later,
+    instead of being forced to piggyback on a too-weak helper protocol
+  - current takeaway:
+    the next implementation move should build directly on this stronger
+    returned-callee result contract rather than trying another ad hoc
+    payload-local fast path beside the old call chain
+- 2026-06-01 returned closure immediate-call bridge-naming follow-up:
+  - one smaller but still real piece of the old immediate-call bridge has now
+    been pushed off the live path even before the full single-materialization
+    cleanup lands
+  - landed effect:
+    the returned-closure immediate-call family no longer materializes its
+    live payload locals under the older `__retclosure_callcap_*` prefix.
+    Canonical IR and lower-IR now expose the same bridge under the more
+    neutral returned-immediate payload naming instead
+  - current takeaway:
+    this does not yet finish the dynamic returned-closure immediate-call
+    line, because the deeper remaining problem is still the outer call-chain
+    re-probe / single-materialization issue. But one more old bridge surface
+    is now gone from the observable contract, which narrows the remaining
+    cleanup to behavior rather than legacy naming
+- 2026-06-01 dynamic returned closure bind transport follow-up:
+  - the next nearby producer-side dynamic closure line has now also moved
+    another real step toward ordinary binding transport instead of preserving
+    the older returned-closure bridge as the only model
+  - current observed boundary:
+    dynamic returned local closure forward/bind siblings now consistently
+    expose the producer payload in terms of the destination binding's own
+    `$closurecap$*` / `$ftag` transport locals on the front half of the
+    pipeline, while lower-IR and compiler-driver continue to lock the same
+    wrapper-backed consumer path one stage later
+  - current takeaway:
+    the remaining closure-side bridge debt is now even more concentrated on
+    the dynamic immediate-call single-materialization problem; producer-side
+    dynamic bind/forward transport is less of a structural outlier than it
+    was a few rounds ago
+- 2026-06-01 direct returned closure actual-argument de-shell follow-up:
+  - the next mainline returned-closure consumer gap is now also closed on the
+    direct actual-argument family instead of stopping at the nearby
+    bind-then-forward siblings
+  - landed implementation effect:
+    direct returned closure actual-argument siblings such as
+    `apply(make(3), 4)`, `apply(make(3, 4), 5, 6)`,
+    `apply0(make(3))`, and `apply0(make(7))` no longer pay for one
+    producer-side specialization shell around a wrapper-backed callable call.
+    Their first returned-payload materialization now stays on the ordinary
+    returned payload slot path, so the caller can immediately build the
+    `__closure_env_*` tuple, `fn_make __fnwrap_closure_make__retclosure_*`,
+    and `call_indirect` directly
+  - current observed boundary:
+    canonical IR now shows exactly one `call make(...)` on this family,
+    exposes `__retclosure_argslot_*` payload reuse at the direct
+    actual-argument site, and rejects the older
+    `apply__fv_0_make__retclosure_*` / `apply0__fv_0_make__retclosure_*`
+    shells. Lower-IR now locks the same single-call producer path together
+    with direct wrapper calls from `main`, and compiler-driver now also
+    requires exactly one `call make` plus the final `call make__retclosure_`
+    path with no remaining `apply__fv_*` / `apply0__fv_*` shell names
+  - practical meaning:
+    the most important remaining returned-closure transport split is no
+    longer “bind form is modern, direct actual-argument form is still old”.
+    Both now share the same ordinary caller-side callable-object spine on the
+    single-target returned-closure family, which is a more honest step toward
+    the final generic first-class callable model
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 direct dynamic returned multi-capture closure immediate-call follow-up:
+  - the main remaining returned-closure immediate-call split is now also
+    closed on the dynamic multi-capture family instead of stopping at the
+    nearby forwarding-only sibling
+  - landed implementation effect:
+    direct dynamic returned multi-capture immediate-call
+    `pick(5, 7, 1)(3, 2)` no longer falls back to the older
+    `eq tag ; br ; call pick__closure_*` path after returned payload
+    materialization. Call lowering now reuses the broader
+    materializable callable-object view for callee expressions, so returned
+    call roots can flow into the same dynamic closure callable-object
+    dispatch helper as the already-landed caller-side families
+  - current observed boundary:
+    canonical IR now shows exactly one `call pick(...)`, explicit
+    `__closure_env_*` tuple setup, `fn_make __fnwrap_closure_pick__closure_*`,
+    and `call_indirect` on the immediate-call site. Lower-IR locks the same
+    caller-side environment materialization plus wrapped calls from `main`,
+    and compiler-driver now also requires exactly one `call pick` together
+    with both wrapped closure call targets on this exact witness
+  - practical meaning:
+    the highest-value remaining gap on the returned multi-capture closure
+    line is no longer “forwarding uses callable objects, immediate-call still
+    uses direct closure branches”. Both siblings now share the same
+    caller-side callable-object spine, which is a more honest checkpoint on
+    the path toward ordinary generic first-class callable values
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 dynamic returned noncapturing immediate-call generalization follow-up:
+  - the neighboring returned noncapturing immediate-call line has now also
+    moved past its older first-slice boundary instead of remaining the one
+    obvious callable-object consumer that still hard-coded a one-visible-arg
+    bridge
+  - landed implementation effect:
+    returned dynamic noncapturing immediate-call no longer routes through the
+    older one-argument-only argument builder, and its returned payload locals
+    no longer surface under the older `__retfn_callcap_*` prefix. The call
+    lowering path now feeds the returned callable-object view through the same
+    dynamic visible-args builder used by other caller-side callable-object
+    consumers, while the immediate payload naming is now aligned on
+    `__retfn_immediate_*`
+  - current observed boundary:
+    the existing one-arg witness `pick(1)(40)` now exposes
+    `eq __retfn_immediate_0.0, 1` on canonical IR and
+    `addr_local __retfn_immediate_0.0` on lower-IR instead of the older
+    `__retfn_callcap_*` spelling. The newly added two-arg witness
+    `pick(1)(9, 4)` is now green through canonical IR, lower-IR, and the
+    compiler-driver surface on the same wrapper-backed
+    `fn_make __fnwrap_add/sub` + `call_indirect` contract
+  - practical meaning:
+    the returned noncapturing immediate-call line is now less of a special
+    one-off slice and more of an ordinary caller-side callable-object
+    consumer. The remaining returned-immediate debt is therefore more honestly
+    concentrated on the genuinely closure-specific producer/env transport
+    cases rather than on an old noncapturing arity bridge
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 returned closure-backed parameter immediate-call callable-object follow-up:
+  - one more adjacent returned-closure consumer line has now been explicitly
+    pulled onto the same caller-side callable-object contract instead of
+    staying covered only by looser “it compiles and eventually calls the
+    closure body” checks
+  - current observed boundary:
+    dynamic returned closure-backed function-value parameter immediate-call
+    witnesses like `id(f)(4)` already bypass the older `call id(...)`
+    surface on the live tree and lower directly to caller-side
+    `__closure_env_*` materialization plus wrapped closure dispatch. The
+    newly added two-arg sibling `id(f)(3, 2)` is now also regression-locked
+    on canonical IR, lower-IR, and compiler-driver with the same
+    wrapper-backed `fn_make __fnwrap_closure_*` + `call_indirect` contract
+  - practical meaning:
+    this narrows the believable remaining returned-closure debt again. The
+    parameter-return immediate-call line is no longer an ambiguous possible
+    fallback surface; the real remaining cleanup is more honestly centered on
+    producer-side dynamic closure transport and descriptor/materialization
+    convergence
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 returned closure-backed parameter immediate-call family widening:
+  - the same returned-parameter closure immediate-call contract is now also
+    locked across more than the original one-argument/value-returning witness
+  - current observed boundary:
+    the dynamic returned closure-backed parameter immediate-call family now
+    has exact regression coverage not only for `id(f)(4)` but also for the
+    two-arg sibling `id(f)(3, 2)`, the zero-arg value-returning sibling
+    `id(f)()`, and the zero-arg `void` sibling `id(f)();`. Across canonical
+    IR, lower-IR, and compiler-driver, all of them now explicitly require the
+    same caller-side closure-env materialization plus wrapped callable path,
+    and reject fallback to `call id(...)`
+  - practical meaning:
+    the returned closure-backed parameter immediate-call line is now much less
+    likely to hide a family-specific old bridge. The believable remaining
+    mainline gap is therefore even more concentrated on producer-side dynamic
+    closure transport / descriptor-materialization convergence rather than on
+    one more unverified immediate-call consumer variant
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 dynamic returned closure re-return transport follow-up:
+  - one genuinely producer-side dynamic closure bug is now fixed instead of
+    only being surrounded by broader consumer-side contract tightening
+  - landed implementation effect:
+    return-target collection now preserves the full function-value family when
+    a tracked local function binding is initialized or reassigned from a
+    function-valued expression, rather than collapsing that binding to one
+    resolved primary target name. In practice this fixes re-returned dynamic
+    closure producers such as
+    `int wrap(int c)(int) { int h(int)=pick(5, c); return h; }`, which had
+    previously lost the dynamic family summary and later failed during
+    consumer lowering with `IR-LOWER-026`
+  - current observed boundary:
+    the focused witness `return wrap(1)(3);` is now green through canonical
+    IR, lower-IR, and compiler-driver. `wrap` now forwards `pick`'s hidden
+    return directly into `h$ftag` / `h$closurecap$*`, then re-returns that
+    payload, while `main` stays on the same caller-side
+    `__retclosure_immediate_*` + wrapped closure dispatch contract as other
+    dynamic returned-closure consumers
+  - practical meaning:
+    the remaining producer-side dynamic closure debt is now narrower and more
+    honest again. The live tree no longer falls over on one re-returned
+    dynamic closure family just because the return-target summary dropped the
+    dynamic family after a local binding hop
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 dynamic returned closure re-return family widening:
+  - the same producer-side fix now also looks like a family-level checkpoint
+    instead of a one-witness patch
+  - current observed boundary:
+    the repaired return-target summary now carries through not only the first
+    single-capture/value-returning witness
+    `int wrap(int c)(int) { int h(int)=pick(5, c); return h; }`,
+    but also a multi-capture/two-arg sibling and a zero-arg `void` sibling.
+    All of those now survive through canonical IR, lower-IR, and
+    compiler-driver while keeping the same modern contract: the re-returning
+    function writes `pick(...)` directly into `h$ftag` / `$closurecap$*`,
+    then the outer caller consumes the result through
+    `__retclosure_immediate_*` plus wrapped closure dispatch
+  - practical meaning:
+    this makes it less likely that the remaining producer-side dynamic
+    closure debt is still hiding in the obvious “bind local then return it”
+    shapes. The remaining gap is therefore more honestly about deeper
+    descriptor/materialization convergence beyond this direct re-return
+    family
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 dynamic returned closure passthrough bind-return follow-up:
+  - the same producer-side callable-object mainline now also covers one
+    deeper value-transport hop instead of stopping at plain
+    `pick(...) -> local bind -> return`
+  - landed implementation effect:
+    exact returned-parameter passthrough producers such as
+    `int wrap(int c)(int) { int h(int)=id(pick(5, c)); return h; }`
+    no longer lose the dynamic closure family or eagerly materialize the
+    producer twice while proving the local binding. Return-target collection
+    and returned-parameter descriptor recovery now follow the passthrough
+    argument down to the real dynamic closure family, while the passthrough
+    validation path itself no longer emits an extra speculative producer call
+  - current observed boundary:
+    canonical IR and lower-IR now both lock this exact witness on one
+    `call pick(...)` inside `wrap`, direct writes into `h$ftag` /
+    `h$closurecap$*`, no `call id(...)` on the consumer path, and the same
+    caller-side `__retclosure_immediate_*` +
+    `fn_make __fnwrap_closure_pick__closure_*` + `call_indirect` contract in
+    `main`. Compiler-driver now also explicitly requires exactly one
+    `call pick`, exactly one `call wrap`, both wrapped closure call targets,
+    and no `call id`
+  - practical meaning:
+    this is the first clearer proof that callable-object callee transport can
+    survive one more ordinary value hop before the final indirect call,
+    rather than only working when the dynamic returned closure family stays
+    very close to its original producer. The believable remaining mainline
+    debt is therefore more honestly concentrated on still-deeper generic
+    transport / escaping-function-object convergence
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 dynamic returned closure multi-hop passthrough follow-up:
+  - the same callable-object transport line now also survives one more
+    ordinary returned-parameter wrapper hop instead of stopping at the first
+    exact passthrough shell
+  - landed implementation effect:
+    returned-parameter passthrough recovery is no longer single-hop-only.
+    Producer/target recovery now follows exact function-valued passthrough
+    wrappers transitively, so shapes like
+    `int id2(int f(int))(int) { return id(f); }`
+    no longer break dynamic returned-closure descriptor recovery when the real
+    producer sits one wrapper deeper
+  - current observed boundary:
+    both
+    `int wrap(int c)(int) { int h(int)=id2(pick(5, c)); return h; }`
+    and
+    `return id2(pick(5, 1))(3);`
+    are now green through canonical IR, lower-IR, and compiler-driver.
+    The bind-return sibling now keeps exactly one `call pick(...)`, one
+    `call wrap(...)`, direct writes into `h$ftag` / `h$closurecap$*`, no
+    `call id(...)` / `call id2(...)`, and the same caller-side wrapped
+    closure dispatch contract in the final caller. The immediate-call sibling
+    now also keeps exactly one `call pick(...)`, no `call id(...)` /
+    `call id2(...)`, and the same caller-side
+    `__retclosure_immediate_*` + `fn_make __fnwrap_closure_pick__closure_*` +
+    `call_indirect` spine
+  - practical meaning:
+    this is a more honest generic-function-value step than another witness
+    special case. Callable-object callee transport now survives a small but
+    real multi-hop value path before the final indirect call, so the remaining
+    mainline gap is more honestly concentrated on still-deeper generic
+    transport / escaping-function-object convergence instead of on the first
+    wrapper-of-wrapper family
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 dynamic returned closure wrapper-of-wrapper passthrough follow-up:
+  - the same mainline now also reaches one slightly richer producer wrapper
+    family instead of stopping at direct `return id(f);`-style passthrough
+    shells
+  - landed implementation effect:
+    exact passthrough detection and returned-call consumer recovery now also
+    accept the narrow pure bind-return wrapper shape
+    `int id3(int f(int))(int) { int g(int)=id2(f); return g; }`
+    rather than only a single direct `return` of the parameter/wrapper call.
+    Just as importantly, the returned-call consumer path no longer
+    materializes the same deepest returned producer twice while probing that
+    wrapper family: the lightweight argument-expression recovery path is now
+    separated from the heavier returned-object materialization path
+  - current observed boundary:
+    the three-hop dynamic returned closure family built from
+    `id3(pick(...))` is now green across three real consumer surfaces:
+    bind-return
+    `int wrap(int c)(int) { int h(int)=id3(pick(5, c)); return h; }`,
+    immediate-call
+    `return id3(pick(5, 1))(3);`,
+    and actual-argument
+    `return apply(id3(pick(5, 1)), 3);`.
+    Across canonical IR, lower-IR, and compiler-driver, all three now
+    explicitly require exactly one `call pick(...)`, no `call id(...)` /
+    `call id2(...)` / `call id3(...)`, and the same caller-side wrapped
+    closure callable-object contract with both
+    `__fnwrap_closure_pick__closure_f_*` and
+    `__fnwrap_closure_pick__closure_g_*`
+  - practical meaning:
+    this is a more meaningful generic-function-value checkpoint than another
+    one-off special case. The callable-object spine now survives not only one
+    wrapper hop but also one first local bind-return wrapper-of-wrapper before
+    the final consumer, and it does so without regressing back into duplicate
+    producer materialization. The believable remaining mainline gap is
+    therefore pushed further toward still-deeper ordinary transport /
+    escaping-function-object convergence rather than these first small
+    wrapper-chain families
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 dynamic returned closure ordinary local-bounce follow-up:
+  - the same callable-object mainline now also covers one first ordinary
+    local transport family inside the returning function instead of only
+    wrapper-call chains
+  - landed implementation effect:
+    return-shape classification, payload-slot prediction, and return-target
+    recovery now follow simple local function-value initializer chains rather
+    than stopping at the first identifier hop. That means a returning function
+    such as
+    `int wrap(int c)(int) { int h(int)=pick(5,c); int k(int)=h; return k; }`
+    no longer loses the dynamic returned-closure family just because the
+    returned binding passed through one more ordinary local alias/bounce
+  - current observed boundary:
+    both the immediate-call sibling
+    `return wrap(1)(3);`
+    and the actual-argument sibling
+    `return apply(wrap(1), 3);`
+    are now green through canonical IR, lower-IR, and compiler-driver.
+    Across all three surfaces they now explicitly keep exactly one
+    `call pick(...)`, exactly one `call wrap(...)`, no fallback helper shells,
+    and the same caller-side wrapped callable-object contract with both
+    `__fnwrap_closure_pick__closure_f_*` and
+    `__fnwrap_closure_pick__closure_g_*`
+  - practical meaning:
+    this is another real generic-function-value step, not a cosmetic cleanup.
+    The callable-object spine now survives not only passthrough wrapper calls
+    but also one first ordinary local function-value bounce inside the
+    returning producer. The believable remaining mainline debt is therefore
+    pushed further toward richer escaping/storage transport rather than these
+    first direct local alias families
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 dynamic returned closure producer-side ternary-merge follow-up:
+  - the same callable-object mainline now also survives one first real
+    producer-side merge of two already-returned dynamic closure values,
+    instead of stopping at single-producer local bounces
+  - landed implementation effect:
+    returned-closure shape classification and payload transport no longer fall
+    over when a returning function first binds two dynamic returned-closure
+    locals and then merges them through an ordinary local ternary before
+    returning, for example
+    `int wrap(int c, int d)(int) { int h(int)=pick(5,c); int k(int)=pick(7,c); int m(int)=d ? h : k; return m; }`
+  - current observed boundary:
+    the focused bind-and-call witness
+    `int f(int)=wrap(1,0); return f(3);`
+    is now green through canonical IR, lower-IR, and compiler-driver. Across
+    those surfaces `wrap` now keeps two producer calls, stores the merged
+    result through `m$ftag` / `m$closurecap$0`, re-returns that payload, and
+    the final caller stays on the same wrapped callable-object contract with
+    `__fnwrap_closure_pick__closure_f_*` /
+    `__fnwrap_closure_pick__closure_g_*`
+  - practical meaning:
+    this is the clearest producer-side mainline move so far. The live tree no
+    longer requires the returned closure family to remain tied to one obvious
+    producer binding before the final indirect call; one real “returned value
+    from producer A or producer B, chosen later by local control flow” family
+    now survives end-to-end
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-BIND build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-BIND build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-BIND build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-01 dynamic returned closure producer-side ternary-merge consumer follow-up:
+  - the same producer-side merge family is now explicitly locked on two more
+    real consumer surfaces instead of stopping at bind-and-call only
+  - landed contract effect:
+    the merged returned closure family
+    `int wrap(int c, int d)(int) { int h(int)=pick(5,c); int k(int)=pick(7,c); int m(int)=d ? h : k; return m; }`
+    is now regression-locked not only for
+    `int f(int)=wrap(1,0); return f(3);`
+    but also for the immediate-call sibling
+    `return wrap(1,0)(3);`
+    and the actual-argument sibling
+    `return apply(wrap(1,0), 3);`
+  - current observed boundary:
+    canonical IR and lower IR now explicitly require the same two-producer
+    `call pick(...)` shape inside `wrap`, merged `m$ftag` /
+    `m$closurecap$0` payload re-return, and caller-side wrapped closure
+    dispatch through `fn_make __fnwrap_closure_pick__closure_*` +
+    `call_indirect` or bridged `call __fnwrap_closure_*` on both new
+    consumer siblings. Compiler-driver now also requires exactly two
+    `call pick`, exactly one `call wrap`, both wrapped closure call targets,
+    and no fallback `call apply` on the actual-argument surface
+  - practical meaning:
+    this is a stronger generic-function-value checkpoint than the earlier
+    bind-and-call-only version, because one producer-side merge now survives
+    through three distinct ordinary consumer shapes without collapsing back
+    to helper shells or reintroducing source-position-specific call lowering
+- 2026-06-01 dynamic returned closure producer-side merge plus ordinary local-bounce follow-up:
+  - the same producer-side merge family now also survives one more ordinary
+    function-valued local rebinding step inside the returning function
+  - landed implementation effect:
+    extension semantic validation no longer rejects
+    `int n(int)=m;`
+    when `m` is itself a compatible function-valued local formed by a
+    producer-side ternary merge of returned dynamic closure values. The same
+    family now lowers cleanly through canonical IR and lower IR as an
+    explicit extra local payload move
+    `n$ftag = mov m$ftag`, `n$closurecap$0 = mov m$closurecap$0`
+    before the final return transport
+  - current observed boundary:
+    both
+    `return wrap(1,0)(3);`
+    and
+    `return apply(wrap(1,0), 3);`
+    for
+    `int wrap(int c, int d)(int) { ... int m(int)=d ? h : k; int n(int)=m; return n; }`
+    are now green through canonical IR, lower-IR, and compiler-driver.
+    Across those surfaces the producer still keeps exactly two `call pick(...)`
+    plus one `call wrap(...)`, the extra ordinary local bounce is visible as
+    `n$ftag` / `n$closurecap$0` transport, and the final caller still stays
+    on the same wrapped callable-object dispatch contract with
+    `__fnwrap_closure_pick__closure_f_*` /
+    `__fnwrap_closure_pick__closure_g_*`
+  - practical meaning:
+    this is a more honest “ordinary value transport, then call” step than
+    another wrapper-only family. Callable-object transport now survives not
+    just producer-side merge and wrapper passthroughs, but also one more
+    ordinary local function-value rebinding after that merge, which moves the
+    live tree a bit closer to treating function values like truly ordinary
+    local values
+- 2026-06-01 dynamic returned closure producer-side merge + local-bounce + passthrough follow-up:
+  - the same ordinary local transport line now also survives one more exact
+    passthrough wrapper hop after the local rebinding instead of stopping at
+    `int n(int)=m; return n;`
+  - landed implementation effect:
+    returned-closure payload-shape recovery no longer loses track of the
+    real closure-backed family on shapes like
+    `int p(int)=id(n); return p;`
+    when `n` itself came from a producer-side ternary merge over returned
+    dynamic closure values. The resolved initializer walk now continues
+    through exact returned-parameter passthrough calls, so the return payload
+    shape follows
+    `p -> id(n) -> n -> m -> (h ? k)`
+    instead of stopping at the first call wrapper
+  - current observed boundary:
+    both
+    `return wrap(1,0)(3);`
+    and
+    `return apply(wrap(1,0), 3);`
+    for
+    `int wrap(int c, int d)(int) { ... int m(int)=d ? h : k; int n(int)=m; int p(int)=id(n); return p; }`
+    are now green through canonical IR, lower-IR, and compiler-driver.
+    Across those surfaces the producer still keeps exactly two `call pick(...)`,
+    one `call wrap(...)`, the ordinary local transport is now visible as
+    `m -> n -> p` tag/capture moves, and the final caller still stays on the
+    same wrapped callable-object dispatch contract with
+    `__fnwrap_closure_pick__closure_f_*` /
+    `__fnwrap_closure_pick__closure_g_*`
+  - practical meaning:
+    this pushes the live tree one more real step toward ordinary first-class
+    function values. Callable-object transport now survives producer-side
+    merge, one ordinary local bounce, and one exact passthrough wrapper hop
+    before the final call/forward, instead of requiring the function value to
+    stay very close to its original producer
+- 2026-06-02 dynamic returned zero-arg producer-side ternary-merge widening:
+  - the same producer-side callable-object merge family is now explicitly
+    locked on the zero-arg closure and zero-arg `void` closure siblings
+    instead of only the one-argument/value-returning line
+  - current observed boundary:
+    four focused siblings are now green through canonical IR, lower-IR, and
+    compiler-driver:
+    `return wrap(1,0)();`,
+    `return apply0(wrap(1,0));`,
+    `wrap(1,0)(); return 0;`,
+    and
+    `apply0(wrap(1,0)); return 0;`
+    built on
+    `int/void wrap(int c, int d)() { int/void h()=pick(...); int/void k()=pick(...); int/void m()=d ? h : k; return m; }`
+  - landed contract meaning:
+    the zero-arg producer-side merge family now keeps the same honest
+    callable-object story as the one-arg sibling: exactly two `call pick(...)`
+    inside `wrap`, merged `m$ftag` / `m$closurecap$0` payload transport, and
+    caller-side wrapped dispatch through
+    `__retclosure_immediate_*` or `__retclosure_argslot_*` plus
+    `fn_make __fnwrap_closure_pick__closure_*` + `call_indirect` / bridged
+    `call __fnwrap_closure_*`, with no fallback `call apply0`
+  - practical meaning:
+    this closes another real branch of the ordinary function-value transport
+    spine, not just a cosmetic sibling. The producer-side “returned value A
+    or B, merged later, then consumed” family now stays on one shared
+    callable-object contract across one-arg, zero-arg, and zero-arg-void
+    closure consumers
+- 2026-06-02 dynamic returned zero-arg producer-side ordinary transport widening:
+  - the same zero-arg producer-side merge family now also survives the next
+    ordinary local transport hops instead of stopping at the first direct
+    merge-return sibling
+  - current observed boundary:
+    zero-arg closure and zero-arg `void` closure producer-side merge families
+    are now explicitly locked through all three nearby ordinary transport
+    layers that were already green on the one-arg line:
+    local bounce
+    `int/void n()=m; return n;`,
+    exact passthrough wrapper
+    `int/void p()=id0/idv(n); return p;`,
+    and statement-shaped reassignment
+    `int/void p()=n; p=m; return p;`,
+    plus the matching immediate-call and `apply0(...)` actual-argument
+    consumer siblings
+  - landed contract meaning:
+    across canonical IR, lower-IR, and compiler-driver, these new zero-arg
+    siblings now keep the same structural callable-object story as the
+    already-locked one-arg family:
+    exactly two `call pick(...)` inside `wrap`,
+    visible ordinary payload transport
+    `m -> n`, `m -> n -> p`, or `m -> n -> p ; p = m`,
+    then caller-side wrapped dispatch through
+    `__retclosure_immediate_*` or `__retclosure_argslot_*` plus
+    `__fnwrap_closure_pick__closure_*`, with no fallback `call apply0`,
+    `call id0`, or `call idv`
+  - practical meaning:
+    this is another real mainline step toward ordinary first-class function
+    values. The zero-arg producer-side branch is no longer just “merge then
+    consume”; it now mirrors the one-arg callable-object spine across bounce,
+    passthrough, and reassign transport too
+  - adjacent returned-call/statement closure now also closed:
+    the nearby zero-arg and zero-arg-void siblings for
+    returned-call reassignment
+    `m = id0(m)` / `m = idv(m)`
+    and statement-only passthrough
+    `int/void m()=pick(...); id0/idv(m);`
+    are now also explicitly locked through canonical IR, lower-IR, and
+    compiler-driver. Across those surfaces the reassignment family keeps the
+    existing payload in ordinary transport form (`m$ftag = mov m$ftag`,
+    `m$closurecap$0 = mov m$closurecap$0`) and never falls back to
+    `call id0` / `call idv`, while the statement-only sibling stays a pure
+    producer bind with no stray indirect-call or specialization shell
+- 2026-06-02 returned-call reassignment storage slice:
+  - the next real storage-facing step on the callable-object mainline is now
+    open instead of staying stuck at “initializer-only” transport. An already
+    declared function-valued local may now be reassigned from a returned
+    function-value call, rather than only from direct identifier/local forms
+  - current observed boundary:
+    the new slice is now green through semantic, canonical IR, lower-IR, and
+    compiler-driver on four representative families:
+    noncapturing one-arg
+    `int h(int)=add1; h=pick(1); return h(40);`,
+    noncapturing zero-arg
+    `int h()=next1; h=pick(1); return h();`,
+    returned closure
+    `int h(int)=make(3); h=make(4); return h(5);`,
+    and zero-arg void returned closure
+    `void h()=make(3); h=make(4); h();`
+  - landed contract meaning:
+    reassignment lowering no longer drops returned function-value calls back
+    into ordinary scalar call lowering. Instead it resolves the returned
+    function object descriptor and writes the result directly into the
+    destination binding’s transport locals/tag, so the later call still goes
+    through the same wrapper-backed callable-object dispatch path
+  - practical meaning:
+    this is the first genuinely new storage slice beyond initializer-only
+    transport. Function values are now a little closer to behaving like
+    ordinary locals even when their source is a returned callable object,
+    which is a more meaningful move toward the final generic-first-class goal
+  - regression closure:
+    the originally staged focused tests are now fully wired into semantic,
+    canonical IR, lower IR, and compiler-driver aggregate/filter harnesses
+    too, so this slice is no longer only probe-green. Focused
+    `IR-RETURNED-*REASSIGN`, `LOWER-IR-RETURNED-*REASSIGN`, and
+    `COMPILER-RETURNED-*REASSIGN` checks are now directly runnable, which
+    makes this storage slice a real reusable checkpoint for the next
+    callable-object transport widening work
+  - current observed boundary extension:
+    that same zero-arg and zero-arg-void branch is now also explicitly locked
+    on the three ordinary transport layers above the first merge-return:
+    local bounce `n=m`,
+    exact passthrough wrapper `p=id0/idv(n)`,
+    and statement-shaped reassignment `p=n; p=m;`.
+    The matching immediate-call and `apply0(...)` actual-argument consumer
+    siblings are all green through canonical IR, lower-IR, and
+    compiler-driver, and they all keep the same `two call pick -> local
+    tag/capture moves -> wrapped closure dispatch` contract with no fallback
+    `call apply0`, `call id0`, or `call idv`
+- 2026-06-02 wrapper-RHS reassignment transport follow-up:
+  - the same storage-facing callable-object line now also survives one more
+    genuinely value-like transport boundary instead of requiring a bare
+    identifier/call RHS at reassignment sites
+  - landed effect:
+    function-valued reassignment now consumes wrapper-shaped RHS transport
+    too, including comma-wrapped and assignment-result forms such as
+    `f = (0, g)`,
+    `f = (h = g)`,
+    `h = (0, pick(1))`,
+    and closure-backed assignment-result transport like
+    `h = (g = make(4))`
+  - implementation meaning:
+    reassignment lowering now emits wrapper side effects first and then
+    resolves the RHS through the same function-value wrapper unwrapping path
+    used by other callable-object consumers, rather than treating wrapper
+    forms as outside the storage slice
+  - semantic meaning:
+    extension semantic checking now also treats wrapper-shaped RHS transport
+    as part of the allowed function-value assignment subset instead of
+    rejecting it early as a plain forbidden function-value expression
+  - current proof boundary:
+    semantic regression, focused canonical IR checks, focused compiler-driver
+    checks, plus broad `make -j1 test-ir-regression`,
+    `make -j1 test-compiler-driver`, and `build/semantic/semantic_regression_test`
+    are green on this follow-up. One focused lower-IR assertion still needs
+    expectation cleanup, but the transport path itself is already live and
+    aligned with the front-half/mainline callable-object model
+- 2026-06-02 wrapper-shaped returned initializer transport follow-up:
+  - the neighboring initializer line now also behaves more like ordinary
+    function-value transport instead of remaining stuck at only bare direct
+    identifier / bare return-call shapes
+  - landed effect:
+    local function-valued initializers now explicitly keep wrapper-shaped
+    returned callable transport too, including
+    `int h(int) = (0, pick(1));`,
+    `int h() = (0, pick(1));`,
+    `int h(int) = (g = make(4));`,
+    and the zero-arg-void closure sibling
+    `void h() = (g = make(4));`
+  - implementation meaning:
+    function-valued local declaration lowering now emits wrapper side effects
+    before descriptor recovery, so assignment-result/comma-wrapped initializer
+    forms no longer silently collapse back to the old pre-side-effect binding
+  - practical meaning:
+    this is another real “function values behave like ordinary locals” step.
+    The callable-object model now survives not only through reassignment and
+    return transport, but also through one more initializer boundary where the
+    source is a wrapper-shaped returned callable
+  - current proof boundary:
+    semantic regression plus focused IR / lower-IR / compiler-driver checks
+    are green on the new initializer siblings, and broad
+    `make -j1 test-lower-ir-regression` plus
+    `make -j1 test-compiler-driver` are green after the follow-up
+- 2026-06-02 wrapped returned-call ternary initializer follow-up:
+  - the same initializer mainline now also survives one more returned-call
+    producer shape instead of stopping at direct returned calls only
+  - landed effect:
+    wrapper-shaped local initializers now accept returned-call ternary
+    producers too, including noncapturing
+    `int h(int) = (0, pick(1));`
+    where `pick` returns `((putint(0), c) ? f : g)`,
+    and the matching closure-backed sibling
+    `int h(int) = (0, pick(1));`
+    where `pick` returns `((putint(0), c) ? f : g)` over closure locals
+  - practical meaning:
+    this joins three lines that used to feel separate:
+    returned-call ternary producers,
+    wrapper-shaped initializer transport,
+    and caller-side callable-object dispatch.
+    The live tree now preserves all three together on one path instead of
+    forcing users back to a naked `pick(...)` initializer
+  - current proof boundary:
+    semantic regression plus focused IR / lower-IR checks are green on these
+    siblings, and the broader `make -j1 test-ir-regression` /
+    `make -j1 test-lower-ir-regression` / `make -j1 test-compiler-driver`
+    gates remain green after the follow-up
+- 2026-06-02 wrapped returned-call ternary ordinary-transport follow-up:
+  - the same newly opened wrapper-shaped returned-call ternary initializer
+    family now also survives one more ordinary local bounce and one existing
+    function-valued-parameter forward on the compiler-facing path, instead of
+    stopping at direct post-initializer calls only
+  - landed effect:
+    both noncapturing and closure-backed siblings now compile through the live
+    extension/compiler path for:
+    `int h(int)=(0, pick(1)); int g(int)=h; return g(...);`
+    and
+    `int h(int)=(0, pick(1)); return apply(h, ...);`
+    where `pick` itself returns the runtime-selected
+    `((putint(0), c) ? f : g)` family
+  - implementation meaning:
+    local function-value binding recovery in semantic analysis now unwraps the
+    same function-value wrapper forms before resolving an already-declared
+    local binding, so later local transport and parameter-forward checks no
+    longer fall back to the stale “bare initializer only” view of that local
+  - practical meaning:
+    this is another real step toward ordinary first-class transport. The live
+    tree now keeps the callable-object model alive not only at the point where
+    the wrapped returned-call ternary initializer is created, but also through
+    the next two most ordinary consumer hops built on top of that initializer:
+    `g = h`-style local bounce and `apply(h, ...)`-style forwarding
+  - current proof boundary:
+    semantic regression and broad `make -j1 test-compiler-driver` are green on
+    this follow-up, and direct compiler probes for both the noncapturing and
+    closure-backed bounce/forward siblings now pass through the live compiler
+    path. The next cleanup should bring the stricter dump/IR-facing path into
+    the same explicit regression lock instead of relying only on compiler-path
+    proof for these newest siblings
+- 2026-06-02 wrapped returned-call ternary bounce/forward regression closure:
+  - the same compiler-facing ordinary-transport follow-up is now also
+    explicitly locked on the stricter front-half regression surfaces instead
+    of remaining only a compiler-path proof
+  - newly locked siblings:
+    noncapturing local bounce
+    `int h(int)=(0, pick(1)); int g(int)=h; return g(40);`,
+    noncapturing forward
+    `int h(int)=(0, pick(1)); return apply(h, 40);`,
+    closure local bounce
+    `int h(int)=(0, pick(1)); int g(int)=h; return g(4);`,
+    and closure forward
+    `int h(int)=(0, pick(1)); return apply(h, 4);`
+  - current observed boundary:
+    canonical IR now explicitly records the ordinary local transport on top of
+    the wrapped returned-call ternary initializer family itself:
+    noncapturing siblings move `h$ftag -> g$ftag` before the final
+    `fn_make __fnwrap_add* + call_indirect`,
+    while closure siblings move
+    `h$ftag / h$closurecap$0 -> g$ftag / g$closurecap$0`
+    before the final
+    `fn_make __fnwrap_closure_pick__closure_* + call_indirect`.
+    The forward siblings on both families now also explicitly lock that the
+    old `call apply(...)` shell disappears on the IR/lower-IR path and the
+    consumer is folded to the same final wrapped callable-object dispatch
+  - practical meaning:
+    this closes the next honest “ordinary locals really keep behaving like
+    function values after wrapped ternary returned initialization” gap. The
+    live tree now supports one more full chain:
+    wrapped returned-call ternary initializer ->
+    ordinary local bounce and/or existing function-valued-parameter forward ->
+    final callable-object dispatch
+  - current proof boundary:
+    semantic regression plus focused IR / lower-IR / compiler-driver checks
+    are green on all four siblings, and the broad
+    `make -j1 test-ir-regression`,
+    `make -j1 test-lower-ir-regression`,
+    and `make -j1 test-compiler-driver`
+    gates remain green after the follow-up
+- 2026-06-02 wrapped returned-call ternary compiler-gap closure:
+  - the same wrapped returned-call ternary ordinary-transport family is now
+    no longer only “compiler path happened to work”; it is explicitly closed
+    as one four-surface checkpoint across semantic, canonical IR, lower-IR,
+    and compiler-driver
+  - closed siblings:
+    noncapturing local bounce and forward
+    `int h(int)=(0, pick(1)); int g(int)=h; return g(40);`
+    and
+    `int h(int)=(0, pick(1)); return apply(h, 40);`,
+    plus the matching closure-backed siblings
+    `int h(int)=(0, pick(1)); int g(int)=h; return g(4);`
+    and
+    `int h(int)=(0, pick(1)); return apply(h, 4);`
+  - current observed boundary:
+    canonical IR and lower-IR now both explicitly lock the same transport:
+    the wrapped returned-call ternary initializer first materializes the
+    callable payload into `h`,
+    optional local bounce then moves `h -> g`,
+    and the final consumer becomes wrapped callable-object dispatch with no
+    surviving `call apply(...)` shell.
+    On the closure side the same contract now also includes explicit
+    `h$closurecap$0 -> g$closurecap$0` transport before the final
+    `__fnwrap_closure_pick__closure_*` dispatch
+  - practical meaning:
+    this is the next honest step past “initializer-only” transport on the
+    wrapped returned-call ternary sub-line. The live tree now treats this
+    family as an ordinary function-value source not only at declaration time,
+    but also across the first post-initializer local rebinding and existing
+    parameter-forward consumer positions
+  - current proof boundary:
+    direct focused regressions plus the broad
+    `make -j1 test-ir-regression`,
+    `make -j1 test-lower-ir-regression`,
+    `make -j1 test-compiler-driver`,
+    and `build/semantic/semantic_regression_test`
+    are green after this closure
+- 2026-06-02 wrapped returned-call ternary bind-return closure:
+  - the same sub-line now also survives one more returned consumer hop instead
+    of stopping at local bounce / direct forward from the initializer site
+  - closed siblings:
+    noncapturing bind-return
+    `int wrap()(int){ int h(int)=(0, pick(1)); return h; }`,
+    noncapturing bind-return actual-argument consumer
+    `return apply(wrap(), 40);`,
+    closure bind-return
+    `int wrap()(int){ int h(int)=(0, pick(1)); return h; }`,
+    and closure bind-return actual-argument consumer
+    `return apply(wrap(), 4);`
+  - current observed boundary:
+    canonical IR and lower-IR now explicitly keep the same wrapped
+    returned-call ternary initializer transport inside `wrap`, then re-export
+    that callable payload through `__retfn_immediate` / `__retfn_argslot` on
+    the noncapturing side and `__retclosure_immediate` / `__retclosure_argslot`
+    on the closure side before the final wrapped callable-object dispatch.
+    The adjacent actual-argument siblings now also explicitly lock that the
+    old `call apply(...)` shell disappears and the consumer is folded to the
+    same final `fn_make __fnwrap_* + call_indirect` or
+    `__fnwrap_closure_* + call_indirect` boundary
+  - practical meaning:
+    this pushes the wrapped returned-call ternary family one full level
+    deeper toward genuine first-class behavior. The live tree now supports:
+    wrapped returned-call ternary initializer ->
+    optional local bounce / forward ->
+    bind-return through another function ->
+    later direct call or existing actual-argument consumer
+  - current proof boundary:
+    semantic regression plus focused IR / lower-IR / compiler-driver checks
+    are green on all four siblings, and the broad
+    `make -j1 test-ir-regression`,
+    `make -j1 test-lower-ir-regression`,
+    and `make -j1 test-compiler-driver`
+    gates remain green after the follow-up
+- 2026-06-02 wrapped returned-call ternary zero-arg / void bind-return closure:
+  - the same latest wrapped returned-call ternary mainline now also covers the
+    nearby zero-argument and zero-argument-`void` siblings instead of leaving
+    the deeper returned-consumer step one-arg-only
+  - closed siblings:
+    noncapturing zero-arg bind-return
+    `int wrap()(){ int h()=(0, pick(1)); return h; }`,
+    noncapturing zero-arg actual-argument consumer
+    `return apply0(wrap());`,
+    noncapturing zero-arg-void bind-return
+    `void wrap()(){ void h()=(0, pick(1)); return h; }`,
+    noncapturing zero-arg-void actual-argument consumer
+    `apply0(wrap());`,
+    closure zero-arg bind-return
+    `int wrap()(){ int h()=(0, pick(1)); return h; }`,
+    closure zero-arg actual-argument consumer
+    `return apply0(wrap());`,
+    closure zero-arg-void bind-return
+    `void wrap()(){ void h()=(0, pick(1)); return h; }`,
+    and closure zero-arg-void actual-argument consumer
+    `apply0(wrap());`
+  - current observed boundary:
+    canonical IR now explicitly keeps the same returned-call ternary transport
+    inside `wrap`, then re-exports through `__retfn_immediate` /
+    `__retfn_argslot` on the noncapturing side and
+    `__retclosure_immediate` / `__retclosure_argslot` on the closure side
+    before final wrapped dispatch through
+    `fn_make __fnwrap_next*` / `__fnwrap_ping*` or
+    `fn_make __fnwrap_closure_pick__closure_*` plus `call_indirect`.
+    Lower-IR keeps the bridged `call __fnwrap_*` /
+    `call __fnwrap_closure_*` contract, and the actual-argument siblings again
+    lock that `call apply0(...)` disappears from the live path
+  - practical meaning:
+    this closes the next real parity gap on the callable-object spine. The
+    newest “wrapped returned-call ternary initializer -> bind-return through
+    another function -> later consume” family is no longer a one-arg-only
+    story; it now stays aligned across value-returning zero-arg, `void`
+    zero-arg, noncapturing, and closure-backed branches too
+  - current proof boundary:
+    semantic regression plus focused IR / lower-IR / compiler-driver checks
+    now cover all eight new siblings
+- 2026-06-02 wrapped returned-call ternary bounce+passthrough bind-return widening:
+  - the same newest wrapped returned-call ternary branch now also survives one
+    more ordinary local transport layer after `bind-return` instead of
+    stopping at `return h;`
+  - closed siblings:
+    one-arg noncapturing bounce+passthrough bind-return
+    `int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=id(g); return p; }`,
+    one-arg noncapturing actual-argument consumer
+    `return apply(wrap(), 40);`,
+    one-arg closure bounce+passthrough bind-return and actual-argument
+    consumer on the same `id(g)` shape,
+    plus the matching zero-arg value-returning, zero-arg `void`,
+    zero-arg closure, and zero-arg `void` closure siblings built on
+    `id0(...)` / `idv(...)`
+  - current observed boundary:
+    canonical IR now explicitly records ordinary payload transport through the
+    full chain
+    `h -> g -> p`
+    before the final re-return:
+    noncapturing siblings keep `g$ftag -> p$ftag`,
+    while closure-backed siblings also keep
+    `g$closurecap$0 -> p$closurecap$0`.
+    The exact passthrough wrapper declarations `id(...)`, `id0(...)`, and
+    `idv(...)` remain visible as declarations, but `call id(...)`,
+    `call id0(...)`, and `call idv(...)` do not reappear on the live path.
+    Final consumption still stays on the same wrapped callable-object
+    dispatch contract, and the adjacent actual-argument siblings again lock
+    that `call apply(...)` / `call apply0(...)` disappear from the live path
+  - practical meaning:
+    this is a more direct move toward the real first-class goal than adding
+    another shallow wrapper-only consumer. The wrapped returned-call ternary
+    family now survives:
+    initializer ->
+    local bounce ->
+    exact passthrough wrapper ->
+    bind-return through another function ->
+    later direct call or existing actual-argument consumer
+    across one-arg, zero-arg, zero-arg-`void`, noncapturing, and
+    closure-backed branches
+  - current proof boundary:
+    semantic regression plus focused IR / lower-IR / compiler-driver checks
+    now cover this deeper chain on all twelve new siblings
+- 2026-06-02 wrapped returned-call ternary statement-reassign-after-bind-return widening:
+  - the same wrapped returned-call ternary mainline now also survives one
+    real statement-shaped reassignment after the deeper `bind-return` branch
+    instead of stopping at pure declaration-shaped transport
+  - closed siblings:
+    one-arg noncapturing statement-reassign bind-return
+    `int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=g; p=h; return p; }`,
+    the matching one-arg actual-argument consumer
+    `return apply(wrap(), 40);`,
+    one-arg closure statement-reassign bind-return and actual-argument
+    consumer on the same `p=g; p=h;` shape,
+    plus the matching zero-arg value-returning, zero-arg `void`,
+    zero-arg closure, and zero-arg `void` closure siblings
+  - current observed boundary:
+    canonical IR now explicitly records the statement overwrite on the live
+    transport path:
+    first `h -> g`,
+    then `g -> p`,
+    then the later overwrite `p = h`.
+    On closure-backed siblings the same overwrite now also explicitly covers
+    both payload pieces, so `p$closurecap$0` is rewritten from `g` and then
+    overwritten from `h` alongside the matching `ftag`.
+    Lower-IR keeps the same “ordinary payload copy only” contract with no
+    helper re-entry, and final consumption still stays on the wrapped
+    callable-object dispatch boundary with no fallback `call apply(...)` /
+    `call apply0(...)`
+  - practical meaning:
+    this is one more real step toward the final first-class goal. The wrapped
+    returned-call ternary family now behaves a little more like an ordinary
+    local value across a full chain of:
+    initializer ->
+    optional bounce/passthrough ->
+    bind-return through another function ->
+    later statement reassignment ->
+    final direct call or existing actual-argument consumer
+  - current proof boundary:
+    semantic regression plus focused IR / lower-IR / compiler-driver checks
+    now cover this statement-reassign layer on all twelve new siblings
+- 2026-06-01 dynamic returned closure producer-side merge + statement reassign follow-up:
+  - the same ordinary local transport line now also survives one more
+    statement-shaped reassignment after the earlier local-bounce chain
+  - landed contract effect:
+    the family
+    `int wrap(int c, int d)(int) { int h(int)=pick(5,c); int k(int)=pick(7,c); int m(int)=d ? h : k; int n(int)=m; int p(int)=n; p=m; return p; }`
+    is now regression-locked on both
+    `return wrap(1,0)(3);`
+    and
+    `return apply(wrap(1,0), 3);`
+  - current observed boundary:
+    canonical IR and lower IR now explicitly record that the ordinary local
+    transport may continue one more step as statement-shaped reassignment:
+    first `m -> n`, then `n -> p`, then the later `p = m` overwrite before
+    the final return transport. Compiler-driver keeps the same two
+    `call pick(...)`, one `call wrap(...)`, and wrapped closure dispatch
+    contract on both consumer siblings
+  - practical meaning:
+    this is a stronger “function values behave like ordinary locals” proof
+    than the earlier pure initializer-only checkpoints. The live tree now
+    preserves callable-object transport not only across declaration-shaped
+    local bounces and exact passthrough wrappers, but also across one real
+    statement-shaped reassignment before the final call/forward
+- 2026-06-01 dynamic returned closure producer-side merge + returned-call reassign follow-up:
+  - the same ordinary local transport line now also survives one more
+    statement-shaped reassignment whose right-hand side is itself an exact
+    returned-parameter passthrough call, instead of stopping at plain
+    `p = m;`-style rebinding
+  - landed implementation effect:
+    the family
+    `int wrap(int c, int d)(int) { int h(int)=pick(5,c); int k(int)=pick(7,c); int m(int)=d ? h : k; m = id(m); return m; }`
+    is now green again through canonical IR, lower IR, and compiler-driver,
+    and the same adjacent actual-argument sibling
+    `return apply(wrap(1,0), 3);`
+    is green too
+  - current observed boundary:
+    canonical IR and lower IR now show that this returned-call reassignment is
+    treated as ordinary callable transport rather than as a fresh helper-call
+    producer: the `m = id(m)` step lowers to self-transport of the existing
+    tag/capture payload, `call id(...)` / `id__fv_*` do not reappear on the
+    live path, and the final consumer still stays on the same wrapped
+    callable-object dispatch contract with
+    `__fnwrap_closure_pick__closure_f_*` /
+    `__fnwrap_closure_pick__closure_g_*`
+  - practical meaning:
+    this closes the next real “function values behave like ordinary locals”
+    hole after the earlier local-bounce and plain statement-reassign slices.
+    Producer-side merge transport now survives not only
+    `m -> n -> p`-style rebinding chains, but also one real reassignment from
+    an exact returned-function-value passthrough call before the final
+    call/forward
+  - adjacent statement-only sibling now also closed:
+    the nearby expression-statement consumer
+    `int m(int)=pick(5,1); id(m);`
+    is now green too. Canonical IR / lower IR no longer re-enter
+    `id__fv_*`-style helper specialization or any stray callable dispatch for
+    that unused result; the statement simply preserves ordinary wrapper
+    side-effect behavior and otherwise leaves the existing local function-value
+    payload untouched
+- 2026-06-01 noncapturing ternary-return producer fix-up:
+  - the adjacent noncapturing producer line is now also back on the callable-
+    object mainline instead of failing earlier during return-shape lowering
+  - landed implementation effect:
+    function-valued returns of the form
+    `return ((putint(0), c) ? f : g);`
+    no longer fail with `IR-LOWER-020` just because the ternary branches
+    resolve through noncapturing local bindings whose initializer walk ends at
+    top-level function names. The return-family / payload-shape prediction path
+    now treats that as the ordinary noncapturing case instead of as
+    unsupported shape loss
+  - current observed boundary:
+    focused noncapturing ternary-return immediate-call and bind-and-call
+    witnesses are now green again, and `make -j1 test-compiler-driver` is back
+    to PASS on the live tree
+  - practical meaning:
+    the mainline blocking bugs have moved further away from returned/noncapturing
+    producer correctness and more toward canonical-IR / lower-IR regression
+    expectation sync on the newer callable-object shapes
+- 2026-06-01 assignment-result callable transport de-dup + regression re-sync:
+  - the nearby callable-object consumer spine now also has one concrete
+    “ordinary value transport, then call” repair instead of only more witness
+    coverage around the edges
+  - landed implementation effect:
+    function-valued actual arguments wrapped in assignment-result forms such as
+    `apply((f=h), 4)` or `apply0((f=h))` no longer replay the same
+    function-value transport twice during lowering. The static-actual-argument
+    probe and the later dynamic-specialization probe now share wrapper
+    side-effect state, so closure payload/tag moves happen exactly once before
+    the final callable-object dispatch
+  - current observed boundary:
+    the dynamic assignment-result closure and zero-arg void closure consumer
+    witnesses are now clean on canonical IR, and the broader canonical/lower-IR
+    regression suites are green again after syncing expectations to the newer
+    alias-capture / returned-payload shape (`h$closurecap$*`, `k$closurecap$*`,
+    `__retclosure_declslot_*`) instead of the older direct-source-local reuse
+  - practical meaning:
+    this is a real mainline stabilization step for generic function-value
+    transport. Callable-object consumers now tolerate one more ordinary
+    “evaluate wrapper side effects, bind through another local, then
+    call/forward” shape without falling back to duplicated transport or stale
+    pre-assignment views
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 direct closure-literal actual-argument callable-object follow-up:
+  - the same callable-object mainline is now also explicitly locked on the
+    direct closure-literal actual-argument family instead of leaving that
+    path as a compiler-only observed behavior
+  - landed implementation effect:
+    no new lowering rewrite was needed here; the important step was to make
+    the live contract explicit. Direct closure-literal actual arguments such
+    as `apply(closure [y] int (int z){...}, 4)`, `apply0(closure [y] int (){...})`,
+    and `apply0(closure [y] void (){...})` are now regression-locked through
+    canonical IR and lower IR on the same wrapper-backed callable-object
+    spine:
+    `__argclosure_cap_*` / `__closure_env_*` materialization,
+    `fn_make __fnwrap_closure_*`, and `call_indirect`
+  - current observed boundary:
+    canonical IR now expects explicit shape + wrapper-backed object creation
+    plus `call_indirect`, lower IR expects the bridged direct
+    `call __fnwrap_closure_*` form, and compiler preview expectations are
+    tightened to that same wrapper-backed call rather than the older loose
+    “some closure body call happened” check
+  - practical meaning:
+    this is another small but real mainline move toward ordinary first-class
+    function-value transport. A direct closure literal in actual-argument
+    value position is no longer merely accepted by the front end; it is now
+    part of the explicit callable-object contract across the middle stages
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 multi-capture direct closure-literal actual-argument follow-up:
+  - the same explicit callable-object contract now also covers the
+    multi-capture direct closure-literal actual-argument family
+  - landed implementation effect:
+    a direct multi-capture closure literal used in actual-argument position
+    now follows the same wrapper-backed `__argclosure_cap_*` /
+    `__closure_env_*` / `fn_make __fnwrap_closure_*` /
+    `call_indirect` spine that the single-capture direct-argument family was
+    already using, so the more general capture-payload transport shape is now
+    regression-locked too
+  - current observed boundary:
+    canonical IR, lower IR, and compiler preview all agree on the same
+    wrapper-backed callable-object contract for this family; the compiler
+    driver no longer only knows that the frontend accepts it, it now tracks
+    the expected backend shape as well
+  - practical meaning:
+    this is a more convincing “ordinary value transport, then call”
+    checkpoint than the single-capture case, because the callable-object path
+    now has to carry multiple captures through the same ordinary value
+    transport model before the final indirect call
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 closure alias-chain callable-object transport follow-up:
+  - the same callable-object/value-transport contract now also covers one
+    broader closure alias-chain family instead of stopping at direct literal
+    arguments and one-hop local forwarders
+  - landed implementation effect:
+    closure-valued locals that flow through ordinary alias steps such as
+    `f -> g -> h` now have their runtime tag and capture payload transport
+    locked together across the middle stages. Canonical IR and lower IR now
+    explicitly expect both:
+    `g$ftag = mov f$ftag`, `g$closurecap$0 = mov f$closurecap$0`, then the
+    same pattern again for later aliases before the final wrapper-backed
+    dispatch
+  - current observed boundary:
+    the new focused mixed witness covers:
+    one-arg closure alias-chain forwarding into `apply(...)`,
+    zero-arg closure alias-chain forwarding into `apply0(...)`,
+    and zero-arg `void` closure alias-chain forwarding into `apply0v(...)`.
+    Across canonical IR, lower IR, and compiler preview the family now agrees
+    on the same ordinary transport shape followed by wrapper-backed callable-
+    object dispatch instead of only “some closure body call happened”
+  - practical meaning:
+    this is a stronger ordinary-value checkpoint than the earlier direct
+    literal cases, because the closure object now survives multiple explicit
+    local transport hops before the final call while keeping tag and payload
+    synchronized on the same shared callable-object spine
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 closure direct-local-call callable-object transport follow-up:
+  - the same callable-object contract now also covers the direct local-call
+    closure family as one explicit mixed checkpoint instead of leaving that
+    family mostly implied by compiler preview behavior
+  - landed implementation effect:
+    canonical IR and lower IR now explicitly lock a mixed direct-local-call
+    witness spanning:
+    one-arg closure local call,
+    zero-arg closure local call,
+    multi-capture/two-arg closure local call,
+    and zero-arg `void` closure local call.
+    All four siblings materialize env payload through `__closure_env_*`,
+    construct one wrapper-backed callable object with
+    `fn_make __fnwrap_closure_*`, and dispatch via `call_indirect`
+  - current observed boundary:
+    compiler preview expectations for the same local-call family are now also
+    tightened to the wrapper-backed callable-object call path rather than the
+    older looser “some direct closure body call happened” check
+  - practical meaning:
+    this moves one more broad closure family from “extension surface works” to
+    “ordinary callable-object/value-transport contract is explicitly locked”.
+    The local-call family is now aligned with the already-kept direct-literal,
+    multi-capture direct-literal, alias-chain, and function-parameter-forward
+    families instead of remaining a special island
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 rich-body closure direct-local-call callable-object contract sync:
+  - the direct-local-call closure family now also explicitly locks a richer
+    closure-body sibling on the same callable-object spine instead of only
+    the simpler `return x + a;`-style bodies
+  - landed contract effect:
+    canonical IR and lower IR now cover a focused mixed witness where one
+    closure body has an expression-statement side effect (`putint(x);`) and
+    another uses assignment/comma-return flow (`return (b = b + 1, y + b);`),
+    while both still materialize env payload through `__closure_env_*`,
+    build wrapper-backed objects with `fn_make __fnwrap_closure_*`, and call
+    through `call_indirect` / bridged `call __fnwrap_closure_*`
+  - compiler-preview sync:
+    the older compiler-only rich-body direct-local-call checks no longer
+    assert the historical direct body-call shape from `main`; that whole
+    family now consistently expects the wrapper-backed local-call contract
+    already produced by the live tree
+  - practical meaning:
+    this makes the callable-object mainline a little more honest about real
+    closure bodies. We now explicitly lock that side-effect prefixes and
+    assignment/comma-return bodies are still ordinary callable-object local
+    calls, not a separate historical lowering island
+- 2026-06-01 returned closure forwarding family re-sync:
+  - the older returned-closure forwarding siblings are now also brought back
+    into the current callable-object contract instead of keeping pre-wrapper
+    expectation fragments around
+  - landed implementation effect:
+    `return apply(f, ...)` and the alias sibling `int g(int)=f; return apply(g, ...)`
+    for returned closures now explicitly expect the modern shape:
+    returned payload write into the destination closure local,
+    wrapper-backed `fn_make __fnwrap_closure_make__retclosure_*`,
+    and the final `call_indirect` / bridged `call __fnwrap_closure_*`
+  - practical meaning:
+    this is mostly a contract-closure step rather than a new semantics slice,
+    but it matters because it removes another pair of old returned-closure
+    expectations that were still describing an earlier lowering era. The live
+    tree is now more consistently documenting one callable-object story rather
+    than a mix of historical and current ones
+  - focused rechecks after this checkpoint:
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-01 returned-call ternary local-init callable-object follow-up:
+  - the same callable-object mainline now also covers one more honest
+    producer-side merge shape instead of requiring the two merged values to be
+    rebound into named locals before the merge
+  - landed implementation effect:
+    a function-valued local declaration whose initializer is a ternary over
+    direct returned function-value calls such as
+    `int h(int)= c ? id(pick(5,1)) : id(pick(7,0));`
+    no longer fails at `SEMA-EXT-018` / `IR-LOWER-055`. The new lowering path
+    keeps ternary branch evaluation honest: each branch now materializes its
+    returned callable payload only inside its own CFG arm, then writes into the
+    same destination `h$ftag` / `h$closurecap$*` transport before the final
+    wrapped callable-object dispatch
+  - current observed boundary:
+    the focused immediate-call sibling
+    `int main(){ int c=1; int h(int)= c ? id(pick(5,1)) : id(pick(7,0)); return h(3); }`
+    is now green through canonical IR, lower IR, and compiler-driver.
+    Canonical IR now explicitly keeps two branch-local `call pick(...)`
+    producers, `__retclosure_ternaryslot_*` payload materialization in each
+    arm, merge writes into `h$ftag` / `h$closurecap$0`, and the same final
+    `fn_make __fnwrap_closure_pick__closure_*` + `call_indirect` callable-object
+    spine. Lower IR and compiler preview agree on the same two `call pick`
+    contract with no fallback `call id`
+  - practical meaning:
+    this is a real core-model step, not edge cleanup. The live tree no longer
+    needs the returned callable values to stay in pre-merged local bindings
+    before ordinary transport resumes; one first direct
+    "returned producer A or returned producer B, chosen by local ternary,
+    stored in one function-valued local, then called" family now survives
+    end-to-end on the callable-object path
+  - adjacent remaining gaps:
+    the nearby `int g(int)=h;` local-bounce sibling and `return h;`
+    producer-side return sibling built on top of this new ternary-returned-call
+    initializer are not yet closed on the live tree; those are now more
+    honestly isolated as the next follow-up rather than being mixed into this
+    new initializer checkpoint
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-IMMEDIATE build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-IMMEDIATE build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-IMMEDIATE build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-01 returned-call ternary local-transport and re-return widening:
+  - the same newly opened returned-call ternary initializer family now also
+    survives one more ordinary local bounce and one producer-side re-return,
+    instead of stopping at the first direct local call
+  - landed implementation effect:
+    the nearby local-bounce sibling
+    `int g(int)=h; return g(3);`
+    built on top of
+    `int h(int)= c ? id(pick(5,1)) : id(pick(7,0));`
+    no longer fails at `SEMA-EXT-018`, because local function-value binding
+    resolution now accepts ternary branches whose family is described by
+    direct returned function-value calls, not only by plain identifier
+    bindings. The adjacent producer-side return sibling
+    `int wrap(int c)(int){ int h(int)= c ? id(pick(5,1)) : id(pick(7,0)); return h; }`
+    no longer fails at `IR-LOWER-020` / `IR-LOWER-061`, because closure-family
+    prediction, return-target recovery, and returned payload-slot counting now
+    continue through the same `ternary(call, call)` initializer family
+  - current observed boundary:
+    three focused siblings are now green through canonical IR, lower IR, and
+    compiler-driver:
+    `int main(){ ... int g(int)=h; return g(3); }`,
+    `int main(){ return wrap(1)(3); }`,
+    and
+    `int main(){ return apply(wrap(1), 3); }`.
+    Canonical IR now explicitly shows the same two branch-local `call pick(...)`
+    producers, merge writes into `h$ftag` / `h$closurecap$0`, optional
+    `g$ftag` / `g$closurecap$0` bounce transport, and either direct re-return
+    from `wrap` or outer wrapped callable-object dispatch through
+    `fn_make __fnwrap_closure_pick__closure_*` + `call_indirect`. Lower IR and
+    compiler preview agree on the same contract, with no fallback `call id`
+    or `call apply`
+  - practical meaning:
+    this is a stronger core-model checkpoint than the earlier direct
+    initializer-only version. The live tree now supports one honest
+    "returned producer A or B, chosen by ternary, stored in one function-value
+    local, optionally bounced through another local, optionally re-returned,
+    then consumed later" family on the same callable-object spine
+  - next believable mainline gap:
+    the most honest remaining debt on this sub-line is no longer the first
+    post-initializer bounce or re-return. The next follow-up should stay on
+    deeper ordinary transport families above this new base, such as longer
+    local chains or additional wrapper hops built on top of the same returned-
+    call ternary producer family, rather than reopening the just-closed first
+    bounce/return siblings
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-LOCAL-BOUNCE-IMMEDIATE build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BIND-RETURN-IMMEDIATE build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BIND-RETURN-ACTUAL build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-LOCAL-BOUNCE-IMMEDIATE build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BIND-RETURN-IMMEDIATE build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BIND-RETURN-ACTUAL build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-LOCAL-BOUNCE-IMMEDIATE build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BIND-RETURN-IMMEDIATE build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BIND-RETURN-ACTUAL build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-01 returned-call ternary deeper bounce+passthrough widening:
+  - the same returned-call ternary producer family now also survives one more
+    ordinary local hop plus one exact passthrough wrapper on top of that new
+    base, instead of stopping at `h -> g` or `return h`
+  - landed implementation effect:
+    the focused local chain
+    `int h(int)= c ? id(pick(5,1)) : id(pick(7,0)); int g(int)=h; int p(int)=id(g);`
+    is now green in all three nearby consumer siblings:
+    immediate local call `return p(3);`,
+    producer-side re-return `return p;`,
+    and outer actual-argument consumption `return apply(wrap(1), 3);`.
+    In practice this means the live tree now preserves the same closure-family
+    tag + capture payload not only across the first ternary merge and first
+    bounce, but also across one more passthrough-wrapper hop before the final
+    call/forward
+  - current observed boundary:
+    canonical IR now explicitly shows
+    `h$ftag / h$closurecap$0 -> g$ftag / g$closurecap$0 -> p$ftag / p$closurecap$0`
+    transport, with two branch-local `call pick(...)` producers at the front
+    and either direct re-return from `wrap` or outer wrapped callable-object
+    dispatch through `fn_make __fnwrap_closure_pick__closure_*` +
+    `call_indirect` at the back. Lower IR and compiler preview agree on the
+    same contract and keep rejecting fallback `call id`
+  - practical meaning:
+    this is another honest core-model move rather than a witness patch. The
+    callable-object spine now survives not only one returned-call ternary
+    merge plus one bounce/re-return, but also one extra ordinary local hop and
+    one passthrough wrapper layered on top of that same producer family
+  - next believable mainline gap:
+    the remaining debt on this sub-line is now more honestly about still
+    deeper ordinary value transport above this new chain length, or about
+    broadening from these local/wrapper chains toward richer escaping/storage
+    transport, rather than about the first few post-merge hops
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BOUNCE-PASSTHROUGH-IMMEDIATE build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BOUNCE-PASSTHROUGH-BIND-RETURN-IMMEDIATE build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BOUNCE-PASSTHROUGH-BIND-RETURN-ACTUAL build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BOUNCE-PASSTHROUGH-IMMEDIATE build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BOUNCE-PASSTHROUGH-BIND-RETURN-IMMEDIATE build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BOUNCE-PASSTHROUGH-BIND-RETURN-ACTUAL build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BOUNCE-PASSTHROUGH-IMMEDIATE build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BOUNCE-PASSTHROUGH-BIND-RETURN-IMMEDIATE build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BOUNCE-PASSTHROUGH-BIND-RETURN-ACTUAL build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-01 returned-call ternary deeper chain widening:
+  - the same producer family now also survives one more ordinary local chain
+    layer beyond the earlier `h -> g -> p` passthrough line, instead of
+    stopping at the first wrapper-backed re-return
+  - landed implementation effect:
+    the focused chain
+    `int h(int)= ...; int g(int)=h; int p(int)=id(g); int q(int)=p; q=h; return q;`
+    is now green through canonical IR, lower IR, and compiler-driver on the
+    bind-return immediate-call sibling `return wrap(1)(3);`
+  - current observed boundary:
+    canonical IR now explicitly locks the deeper transport path
+    `h$ftag / h$closurecap$0 -> g$ftag / g$closurecap$0 -> p$ftag / p$closurecap$0 -> q$ftag / q$closurecap$0`
+    followed by direct re-return from `wrap` and the same outer
+    `fn_make __fnwrap_closure_pick__closure_*` + `call_indirect` consumer.
+    Lower IR and compiler preview agree on the same contract with exactly two
+    `call pick`, one `call wrap`, and no fallback `call id`
+  - practical meaning:
+    this pushes the live callable-object mainline one more honest step toward
+    ordinary function-value transport. The returned-call ternary producer
+    family no longer stops after one or two obvious local hops; one deeper
+    chain with overwrite/re-selection now survives all the way to later
+    dispatch
+  - newly closed follow-up:
+    the adjacent producer-side wrapper-of-wrapper return sibling is now green
+    too. Both `return id(p);` and its actual-argument sibling
+    `return apply(wrap(1), 3);` now survive through the same returned-call
+    ternary producer family, preserving the deeper transport path
+    `h$ftag / h$closurecap$0 -> g$ftag / g$closurecap$0 -> p$ftag / p$closurecap$0`
+    before re-returning through `wrap` and reaching the same outer
+    `fn_make __fnwrap_closure_pick__closure_*` + `call_indirect` consumer
+    contract
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-DEEPER-CHAIN-BIND-RETURN-IMMEDIATE build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-DEEPER-CHAIN-BIND-RETURN-IMMEDIATE build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-DEEPER-CHAIN-BIND-RETURN-IMMEDIATE build/compiler_tests/compiler_driver_test` PASS,
+    `IR_REG_FILTER=IR-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BIND-RETURN-ACTUAL build/ir/ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BIND-RETURN-ACTUAL build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-02 passthrough-call ternary callable transport widening:
+  - the same callable-object mainline now also accepts one more ordinary
+    expression family where ternary branches are exact returned-parameter
+    passthrough calls such as `id(f)` / `id(g)`, instead of requiring the
+    ternary to mention plain identifiers directly
+  - landed implementation effect:
+    lowering-side ternary function-value normalization now unwraps exact
+    returned-parameter passthrough branches before binding / dispatch shape
+    classification, so local transport shapes such as
+    `int h(int)= c ? id(f) : id(g); return h(4);`
+    no longer fail at `IR-LOWER-055`. The same branch normalization now also
+    reaches closure-backed locals, actual-argument forwarding, and
+    statement-shaped reassignment built on the same `c ? id(f) : id(g)` form
+  - return-side follow-up closed in the same slice:
+    hidden return-slot prediction and return-target recovery now also treat
+    ternary branches that are passthrough calls as ordinary function-value
+    transport. Function-valued returns such as
+    `int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return c ? id(f) : id(g); }`
+    and the closure-backed sibling now lower through the same wrapped
+    callable-object return contract instead of failing earlier at
+    `IR-LOWER-020`
+  - current observed boundary:
+    the newly locked representative siblings are
+    closure local-init transport
+    `int h(int)= c ? id(f) : id(g); return h(4);`
+    and noncapturing function-valued return transport
+    `return pick(1)(40);`
+    where canonical IR, lower IR, and compiler-driver all keep rejecting
+    fallback `call id` / `id__fv_*` and stay on the wrapper-backed
+    `fn_make ... + call_indirect` / bridged `call __fnwrap_*` contract
+  - practical meaning:
+    this is a real mainline move toward more ordinary function-value
+    expressions. Exact passthrough-call wrappers are no longer confined to
+    one-off call/return helpers; they now participate in the same ternary
+    transport story as plain identifier branches across both local binding and
+    function-valued return paths
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-PASSTHROUGH-TERNARY-CLOSURE-LOCAL-INIT build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-PASSTHROUGH-TERNARY-NONCAPTURING-RETURN-IMMEDIATE build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PASSTHROUGH-TERNARY-CLOSURE-LOCAL-INIT build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PASSTHROUGH-TERNARY-NONCAPTURING-RETURN-IMMEDIATE build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PASSTHROUGH-TERNARY-CLOSURE-LOCAL-INIT build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PASSTHROUGH-TERNARY-NONCAPTURING-RETURN-IMMEDIATE build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-02 passthrough-call ternary function-argument widening:
+  - the same exact-passthrough normalization now also reaches the next nearby
+    consumer surface instead of stopping at local binding and function-valued
+    return transport: function-valued actual arguments may now be ternaries
+    whose branches are passthrough calls such as `id(f)` / `id(g)`
+  - landed implementation effect:
+    semantic argument-shape checks now unwrap exact returned-parameter
+    passthrough calls inside ternary branches before matching parameter
+    signatures and allowed local-function-value transport. This makes shapes
+    such as `return apply(c ? id(f) : id(g), 40);` and the closure-backed
+    sibling `return apply(c ? id(f) : id(g), 4);` pass through the same
+    ordinary callable-object argument bridge instead of failing at
+    `SEMA-EXT-018`
+  - current observed boundary:
+    canonical IR, lower IR, and compiler-driver now all lock the same
+    wrapper-backed ternary-argument contract on the representative
+    noncapturing and closure siblings. The new path keeps rejecting fallback
+    `call id`, `call apply`, and `id__fv_*`, and stays on the existing
+    `__ternary_fn_argtag` / optional `__ternary_fn_argcap_*` plus
+    `fn_make ... + call_indirect` / bridged `call __fnwrap_*` path
+  - practical meaning:
+    this is the next honest step toward ordinary first-class transport.
+    Exact passthrough wrappers are now no longer limited to local-init,
+    direct-callee, and return positions; they also survive the function-valued
+    actual-argument bridge on the same callable-object spine
+  - zero-arg family follow-up now also formally closed:
+    the same passthrough-ternary actual-argument bridge is now locked on the
+    zero-arg `int` and zero-arg `void` siblings too, including both ordinary
+    noncapturing targets (`apply0(c ? id0(f) : id0(g))`,
+    `apply0(c ? idv(f) : idv(g))`) and the closure-backed zero-arg `void`
+    sibling that had been blocked by the `IR-VERIFY-003` helper-temp metadata
+    bug
+  - closure-backed zero-arg dispatch follow-up tightened further:
+    the zero-arg closure and zero-arg `void` closure actual-argument siblings
+    are now also explicitly locked on the real runtime-selected callable-object
+    contract, instead of only being compile-green. The new regression surface
+    requires the `__ternary_fn_argtag` / `__ternary_fn_argcap_0` path plus the
+    two wrapper targets, which catches the old silent fallback where
+    `apply0(c ? idv(f) : idv(g))` incorrectly collapsed to a fixed
+    `apply0__fv_0_main__closure_f_*` call
+  - landed implementation effect:
+    builtin predeclaration now walks closure literal bodies too, and direct
+    builtin-call lowering refreshes the current function after builtin
+    signature materialization. This prevents helper-body `call putint(...)`
+    emission from appending instructions through a stale function pointer
+    while leaving `next_temp_id` behind
+  - current observed boundary:
+    canonical IR already locked the zero-arg and zero-arg-void actual-arg
+    siblings on the wrapper-backed `shape.0` + `fn_make` + `call_indirect`
+    path, and lower IR plus compiler-driver now record the matching bridged
+    `call __fnwrap_*` contract for both the noncapturing and zero-arg `void`
+    closure-backed shapes
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-PASSTHROUGH-TERNARY-NONCAPTURING-ACTUAL build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-PASSTHROUGH-TERNARY-CLOSURE-ACTUAL build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-PASSTHROUGH-TERNARY-ZERO-ACTUAL build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-PASSTHROUGH-TERNARY-ZERO-VOID-ACTUAL build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PASSTHROUGH-TERNARY-NONCAPTURING-ACTUAL build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PASSTHROUGH-TERNARY-CLOSURE-ACTUAL build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PASSTHROUGH-TERNARY-ZERO-ACTUAL build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PASSTHROUGH-TERNARY-ZERO-VOID-ACTUAL build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PASSTHROUGH-TERNARY-NONCAPTURING-ACTUAL build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PASSTHROUGH-TERNARY-CLOSURE-ACTUAL build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PASSTHROUGH-TERNARY-ZERO-ACTUAL build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PASSTHROUGH-TERNARY-ZERO-VOID-ACTUAL build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-02 returned-family callable-object skeleton follow-up:
+  - the returned callable-object mainline now also has one shared
+    returned-family analysis result instead of keeping the direct returned
+    descriptor builder and the returned-call ternary local-init consumer on
+    separate target/capture interpretation paths
+  - landed implementation effect:
+    [src/ir/ir_lower_stmt.inc](/workspaces/compiler_lab/src/ir/ir_lower_stmt.inc)
+    now centralizes returned-call family classification into one
+    `IrLowerReturnedFunctionValueFamilyInfo` path. The returned descriptor
+    builder uses that shared analysis to drive one common skeleton
+    (`analyze -> optional tag-local prep -> direct payload copy/materialize ->
+    finalize`), and the returned-call ternary local-init consumer now reuses
+    the same family result instead of re-deriving producer/target/capture
+    facts independently
+  - practical meaning:
+    this is internal convergence rather than a new witness family, but it is
+    directly on the generic-first-class-function-values mainline. Returned
+    noncapturing and returned closure lowering now agree more explicitly on
+    what the family metadata means before the later `fn_make + call_indirect`
+    transport steps, and static returned closure families no longer require a
+    synthetic target-array path just to pass through the shared analyzer
+  - focused rechecks after this checkpoint:
+    `make -j1 test-semantic-regression` PASS,
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-02 dynamic-binding callable-object consumer repair:
+  - the callable-object mainline now also closes one more real ordinary
+    value-transport gap instead of stopping at returned/local-init shaping:
+    reassigned function-value and closure bindings no longer get misread as
+    static single-target callees just because an older const-tag fact
+    survived on the binding metadata
+  - landed implementation effect:
+    [src/ir/ir_lower_expr.inc](/workspaces/compiler_lab/src/ir/ir_lower_expr.inc)
+    now treats a function-typed local with a runtime tag local and a
+    multi-target family as a dynamic callable-object consumer path even if the
+    binding still carries a stale/legacy const-tag hint, instead of rushing
+    into the older direct static-dispatch fast path. On the producer side,
+    [src/ir/ir_lower_stmt.inc](/workspaces/compiler_lab/src/ir/ir_lower_stmt.inc)
+    now also lets returned-call ternary reassignment rebuild the destination
+    target family explicitly before reusing the shared branch materializer
+  - current visible boundary:
+    the older dynamic reassignment surfaces such as
+    `if(c) f=add2; h=f; return h(40);` stay green again, and the new
+    returned-call ternary reassignment family such as
+    `h=((putint(0), c) ? pick(0) : pick(1)); return h(40);` plus the closure
+    sibling now both stay on the runtime-selected callable-object path
+    (`eq h$ftag ...` + wrapper-backed `fn_make` / `call_indirect` on
+    canonical IR, bridged `call __fnwrap_*` on lower IR / compiler) instead
+    of collapsing back to one fixed direct callee
+  - practical meaning:
+    this is the next honest step toward ordinary first-class function values.
+    Reassignment consumers now trust the callable-object family truth more
+    than incidental const-tag residue, which gives the live tree a firmer
+    base for broader return/argument/assignment transport instead of keeping
+    dynamic bindings fragile whenever they cross one more local value edge
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-DYNAMIC-FNVAL-ASSIGN-DIRECT build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-RETURNED-CALL-TERNARY-FNVAL-ASSIGN-DIRECT build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-RETURNED-CALL-TERNARY-CLOSURE-ASSIGN-DIRECT build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-RETURNED-CALL-TERNARY-FNVAL-ASSIGN-DIRECT build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-RETURNED-CALL-TERNARY-CLOSURE-ASSIGN-DIRECT build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-RETURNED-CALL-TERNARY-FNVAL-ASSIGN-DIRECT build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-RETURNED-CALL-TERNARY-CLOSURE-ASSIGN-DIRECT build/compiler_tests/compiler_driver_test` PASS,
+    `make -j1 test-semantic-regression` PASS,
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-02 callable-object actual-argument truth-model follow-up:
+  - the same dynamic-family truth rule now also reaches the nearby
+    function-valued actual-argument / forwarding consumers instead of staying
+    limited to direct-callee and reassignment-followed-by-call shapes
+  - landed implementation effect:
+    [src/ir/ir_lower_expr.inc](/workspaces/compiler_lab/src/ir/ir_lower_expr.inc)
+    now lets single function-valued actual-argument dispatch keep using the
+    callable-object path when the argument already resolves to a multi-target
+    family, even if a residual const-tag hint still exists on the bound local.
+    In practice this means the static-actual-argument probe no longer treats
+    “has const tag metadata” as stronger than “has runtime tag + multi-target
+    family” when deciding whether to stay on wrapper-backed dynamic dispatch
+  - practical meaning:
+    this is the next real step toward one ordinary function-value transport
+    model. Dynamic forwarding consumers such as `apply(g, 40)`, `apply0(g)`,
+    and the closely related comma/assignment-result wrapper families now sit
+    on firmer callable-object ground instead of depending on accidental
+    staticization when a local binding carried stale const-tag residue across
+    earlier control-flow
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-DYNAMIC-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-DYNAMIC-RUNTIME-CLOSURE-FORWARD build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-RUNTIME-CLOSURE-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-DYNAMIC-COMMA-WRAPPED-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-DYNAMIC-ASSIGNMENT-RESULT-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-COMMA-WRAPPED-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DYNAMIC-ASSIGNMENT-RESULT-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DYNAMIC-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DYNAMIC-CLOSURE-LOCAL-FORWARD build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-02 dynamic returned-local actual-argument follow-up:
+  - the nearby “returned local callable object used immediately as an actual
+    argument” line is now explicitly confirmed on the same callable-object
+    spine instead of remaining an inferred side effect of broader forwarding
+    notes
+  - current observed boundary:
+    the direct dynamic returned-local closure family
+    `apply(pick(5, 1), 3)` and the zero-arg sibling `apply0(pick(5, 1))`
+    remain on the wrapper-backed callable-object path across canonical IR,
+    lower IR, and compiler output. Those surfaces keep the expected
+    `__retclosure_argslot_*` materialization plus
+    `__fnwrap_closure_pick__closure_*` dispatch and do not regress back to
+    `apply__fv_0_pick__closure_*` / `apply0__fv_0_pick__closure_*` shells
+  - practical meaning:
+    this keeps moving real call traffic off witness-specific specialization
+    wrappers and onto the explicit callable-object transport model itself. The
+    “function value returns from one call and is immediately consumed by
+    another call” family is a particularly important stepping stone toward the
+    eventual generic first-class-function-value end state because it combines
+    return transport, local payload materialization, and actual-argument
+    dispatch in one short path
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-DIRECT-DYNAMIC-RETURNED-LOCAL-CLOSURE-ARG build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-DIRECT-DYNAMIC-RETURNED-LOCAL-ZERO-CLOSURE-ARG build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DIRECT-DYNAMIC-RETURNED-LOCAL-CLOSURE-ARG build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-DIRECT-DYNAMIC-RETURNED-LOCAL-ZERO-CLOSURE-ARG build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DIRECT-DYNAMIC-RETURNED-CLOSURE-ARGUMENT build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-DIRECT-DYNAMIC-RETURNED-ZERO-CLOSURE-ARGUMENT build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-02 passthrough decl-local forwarding shell follow-up:
+  - the callable-object mainline now also eats one more ordinary wrapper shell
+    instead of stopping at direct `return apply(f, x);` passthroughs
+  - landed implementation effect:
+    [src/ir/ir_lower_expr.inc](/workspaces/compiler_lab/src/ir/ir_lower_expr.inc)
+    now lets
+    `ir_try_emit_function_parameter_passthrough_callable_dispatch(...)`
+    recognize a narrow but real extra transport hop inside passthrough
+    wrappers: function-valued local declarations whose initializer is an
+    exact returned-parameter passthrough of an existing function-valued
+    parameter. In practice a wrapper like
+    `int wrapper(int f(int), int x){ int g(int)=id(f); return apply(g, x); }`
+    no longer falls back to `wrapper__fv_*`
+  - current observed boundary:
+    canonical IR and lower IR now both collapse that family directly onto the
+    existing wrapper-backed callable-object path:
+    `main` builds `fn_make __fnwrap_add1, 0, shape.0` plus `call_indirect`
+    on IR, and lower IR bridges it to direct `call __fnwrap_add1(0, 41)`,
+    with no remaining `wrapper__fv_0_add1` shell. Compiler output now agrees
+    on the same direct `call __fnwrap_add1` shape
+  - practical meaning:
+    this is a real mainline cleanup rather than another witness-only
+    assertion. The old specialization surface is now narrower again: one more
+    ordinary “parameter -> exact passthrough return -> local bind -> forward”
+    family has moved onto the shared callable-object transport model itself
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-PASSTHROUGH-DECL-LOCAL-FNVAL-NO-SHELL build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PASSTHROUGH-DECL-LOCAL-FNVAL-NO-SHELL build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PASSTHROUGH-DECL-LOCAL-FNVAL-NO-SHELL build/compiler_tests/compiler_driver_test` PASS,
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-02 parameter-local direct-call consumer follow-up:
+  - the same callable-object mainline now also covers the shortest
+    “function-valued parameter -> local alias -> direct call” family instead
+    of requiring an extra returned-parameter passthrough wrapper like `id(f)`
+    before the consumer becomes visible to the shared path
+  - landed implementation effect:
+    [src/ir/ir_global_init.inc](/workspaces/compiler_lab/src/ir/ir_global_init.inc)
+    now treats a local function-valued declaration initialized directly from a
+    function-valued parameter as part of the function-value-specialization /
+    callable-object family when later calls consume that alias. In practice
+    both
+    `int test(int f(int), int x){ int g(int)=f; return g(x); }`
+    and the zero-arg sibling
+    `int test(int f()){ int g()=f; return g(); }`
+    no longer fall back to the generic body-lowering path that used to stop at
+    `IR-INT-117`
+  - current observed boundary:
+    compiler output now skips `test__fv_*` shells on those two noncapturing
+    siblings and goes straight to `call __fnwrap_add1` / `call __fnwrap_next`;
+    canonical IR and lower IR agree on the same direct wrapper-backed
+    callable-object contract with no surviving specialized helper for `test`
+    itself
+  - practical meaning:
+    this is a real mainline move, not only a probe cleanup. The live tree now
+    handles one more ordinary value-transport step on the direct-consumer side
+    without needing an intermediate `id(f)`-style returned-parameter helper,
+    which brings local alias consumers a bit closer to the final “ordinary
+    first-class function value” model
+  - remaining nearby boundary:
+    the zero-arg `void` and closure-backed parameter-local alias siblings are
+    still not fully on this same direct path yet; those are now the clearest
+    next consumers to pull onto the callable-object spine
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-PARAM-LOCAL-FNVAL-DIRECT-NO-SHELL build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-PARAM-LOCAL-ZERO-FNVAL-DIRECT-NO-SHELL build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PARAM-LOCAL-FNVAL-DIRECT-NO-SHELL build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PARAM-LOCAL-ZERO-FNVAL-DIRECT-NO-SHELL build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PARAM-LOCAL-FNVAL-DIRECT-NO-SHELL build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PARAM-LOCAL-ZERO-FNVAL-DIRECT-NO-SHELL build/compiler_tests/compiler_driver_test` PASS,
+    `make -j1 test-semantic-regression` PASS,
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-02 parameter-local closure consumer widening:
+  - the same parameter-local consumer line now also clearly covers the
+    closure-backed siblings instead of only the noncapturing `int` family
+  - current observed boundary:
+    both
+    `int test(int f(int), int x){ int g(int)=f; return g(x); }`
+    and
+    `int test(int f(int), int x){ int g(int)=f; return apply(g, x); }`
+    now compile cleanly when `f` is a closure-backed local from the caller.
+    Canonical IR and lower IR both stay on the direct wrapper-backed
+    callable-object path with `fn_make __fnwrap_closure_main__closure_f_*`
+    plus `call_indirect` / bridged `call __fnwrap_closure_*`, and compiler
+    output no longer introduces `test__fv_0_main__closure_f_*` shells on this
+    family
+  - practical meaning:
+    this is another real mainline step: parameter-local alias consumers no
+    longer split into “noncapturing already on callable-object spine” versus
+    “closure still needs a function-specific outer shell”. The closure-backed
+    direct-call and forwarding siblings now agree with the same ordinary
+    caller-side callable-object model
+  - remaining nearby boundary:
+    the clearest residual hole in this neighborhood is now narrower and more
+    explicit: zero-arg `void` noncapturing parameter-local alias consumers
+    such as
+    `int test(void f()){ void g()=f; g(); return 0; }`
+    still keep `test__fv_0_ping`, so the next follow-up can focus directly on
+    that one surviving `void` shell family instead of reopening the broader
+    `int`/closure transport line
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-PARAM-LOCAL-CLOSURE-DIRECT-NO-SHELL build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-PARAM-LOCAL-CLOSURE-FORWARD-NO-SHELL build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PARAM-LOCAL-CLOSURE-DIRECT-NO-SHELL build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PARAM-LOCAL-CLOSURE-FORWARD-NO-SHELL build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PARAM-LOCAL-CLOSURE-DIRECT-NO-SHELL build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PARAM-LOCAL-CLOSURE-FORWARD-NO-SHELL build/compiler_tests/compiler_driver_test` PASS,
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+  - sharper residual note after probe sweep:
+    the surviving `void` shell really is isolated now. Manual compiler and
+    middle-stage probes confirm that
+    `int test(void f()){ void g()=f; g(); return 0; }`
+    and
+    `int test(void f()){ void g()=f; apply0(g); return 0; }`
+    still lower through `test__fv_0_ping`, while the analogous closure-backed
+    `int` siblings and the noncapturing `int` / zero-arg `int` siblings all
+    already collapse to direct `__fnwrap_*` / `__fnwrap_closure_*` calls.
+    So the next mainline cut can stay tightly focused on zero-arg `void`
+    noncapturing parameter-local alias consumers, without reopening the
+    already-green closure/int surfaces
+- 2026-06-02 parameter-local zero-arg void consumer shell closure:
+  - that last narrow residual shell on the parameter-local consumer line is
+    now gone too: zero-arg `void` noncapturing local aliases no longer fall
+    back to `test__fv_*`
+  - landed implementation effect:
+    [src/ir/ir_lower_expr.inc](/workspaces/compiler_lab/src/ir/ir_lower_expr.inc)
+    now preserves the outer wrapper's `return 0` semantics even when
+    `ir_try_emit_function_parameter_passthrough_callable_dispatch(...)`
+    succeeds through one recursive passthrough hop such as
+    `void g()=f; apply0(g); return 0;`. Before this fix, the recursive
+    branch could mark the callable dispatch as applied but leave the outer
+    result value as the nested `void` call temp, which then leaked into IR as
+    `ret tmp.*` and tripped lower-IR verification on `void` forwarding
+    families
+  - current observed boundary:
+    both
+    `int test(void f()){ void g()=f; g(); return 0; }`
+    and
+    `int test(void f()){ void g()=f; apply0(g); return 0; }`
+    now collapse onto the same wrapper-backed callable-object path as the
+    neighboring `int`/closure families. Canonical IR shows
+    `fn_make __fnwrap_ping, 0, shape.0` plus `call_indirect` and now
+    correctly ends in `ret 0`; lower IR bridges that to
+    `call __fnwrap_ping(0)` plus `ret 0`; compiler output no longer contains
+    `test__fv_0_ping`
+  - practical meaning:
+    this closes the most obvious ordinary local-alias hole on the callable-
+    object mainline and also fixes a real value-semantics bug in recursive
+    passthrough lowering instead of only changing shell selection. The live
+    tree now handles direct and one-hop-forward zero-arg `void`
+    parameter-local alias consumers on the same shared callable-object spine
+    as the neighboring noncapturing `int` and closure-backed families
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-PARAM-LOCAL-ZERO-VOID-FNVAL-DIRECT-NO-SHELL build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-PARAM-LOCAL-ZERO-VOID-FNVAL-FORWARD-NO-SHELL build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PARAM-LOCAL-ZERO-VOID-FNVAL-DIRECT-NO-SHELL build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-PARAM-LOCAL-ZERO-VOID-FNVAL-FORWARD-NO-SHELL build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PARAM-LOCAL-ZERO-VOID-FNVAL-DIRECT-NO-SHELL build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-PARAM-LOCAL-ZERO-VOID-FNVAL-FORWARD-NO-SHELL build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-02 second-order higher-order forwarding slice:
+  - the higher-order/self-passing mainline is now real on one first
+    second-order vertical slice instead of stopping at parser/semantic
+    rejection
+  - landed implementation effect:
+    [include/ast.h](/workspaces/compiler_lab/include/ast.h),
+    [src/parser/parser.c](/workspaces/compiler_lab/src/parser/parser.c),
+    [src/parser/parser_stmt_decl_tu.inc](/workspaces/compiler_lab/src/parser/parser_stmt_decl_tu.inc),
+    [src/semantic/semantic.c](/workspaces/compiler_lab/src/semantic/semantic.c),
+    and [src/semantic/semantic_entry.inc](/workspaces/compiler_lab/src/semantic/semantic_entry.inc)
+    now carry one richer second-order function-shape checkpoint: top-level
+    function parameters may themselves describe one nested function-valued
+    parameter layer, and the extension semantic slice no longer rejects
+    `h(f, x)` purely because `f` appears in value position under a
+    function-valued parameter callee
+  - the nearby lowering blocker on that same line is also fixed at the real
+    source instead of being worked around with another witness shell.
+    [src/ir/ir_lower_expr.inc](/workspaces/compiler_lab/src/ir/ir_lower_expr.inc)
+    now routes static direct-target calls whose target function itself has
+    function-valued parameters onto the existing specialization path before
+    they fall back to ordinary `__fnwrap_*` visible-arg lowering. Before this
+    fix, higher-order witnesses such as `pass(apply, add1, 41)` eventually
+    tried to lower a bound function-valued parameter through ordinary scalar
+    argument transport, leaked the sentinel `local_id == (size_t)-1`, and
+    failed IR verification as `local.18446744073709551615`
+  - current observed boundary:
+    the first non-void, zero-arg, and zero-arg-void second-order siblings now
+    all compile cleanly:
+    `int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }`,
+    `int pass0(int h(int f()), int f()){ return h(f); }`, and
+    `void pass0(void h(void f()), void f()){ h(f); return; }`
+    with callers such as `pass(apply, add1, 41)`, `pass0(apply0, next)`, and
+    `pass0(apply0, ping)`. Canonical IR now shows the expected two-stage
+    specialization ladder on this family:
+    `pass__fv_*` / `pass0__fv_*` for the outer higher-order callee binding,
+    then `apply__fv_*` / `apply0__fv_*` for the inner ordinary
+    function-valued-parameter consumer, and finally `fn_make __fnwrap_*` +
+    `call_indirect` at the leaf callable-object call itself
+  - practical meaning:
+    this is the first real second-order higher-order checkpoint on the live
+    tree. We still are not at fully generic first-class function values, but
+    the compiler now handles one ordinary “function-valued parameter consumed
+    by another function-valued parameter” family end-to-end instead of
+    rejecting it at parse/semantic time or crashing in IR lowering. That is a
+    direct move along the user-stated mainline rather than another local
+    wrapper cleanup
+  - current further mainline closure:
+    the same second-order line now also covers one first real local
+    value-position transport sibling plus one returned immediate-call
+    sibling, instead of stopping at top-level direct actual arguments only.
+    `int main(){ int h(int f(int), int x)=apply; return pass(h, add1, 41); }`
+    now compiles through the same `pass__fv_0_apply_1_add1 ->
+    apply__fv_0_add1 -> fn_make __fnwrap_add1 + call_indirect` spine, and
+    `int main(){ return idh(apply)(add1, 41); }` now also passes the
+    extension semantic gate and lowers to the same leaf callable-object call
+    shape. This is the first point where second-order function values are no
+    longer limited to direct top-level producer sites; one local alias
+    transport edge and one returned immediate-call consumer edge are both
+    real on the live tree
+  - current further dynamic actual-argument closure:
+    the same second-order line now also covers one first real dynamic ternary
+    actual-argument family instead of silently collapsing back to the first
+    branch target. A witness such as
+    `int c=getint(); return pass(c ? apply : apply_twice, add1, 41);`
+    now lowers through caller-side tag materialization plus two specialized
+    higher-order shells,
+    `pass__fv_0_apply_1_add1` and `pass__fv_0_apply_twice_1_add1`,
+    rather than being prematurely frozen to the `apply` arm. This is the
+    first checkpoint where a second-order function-valued actual argument can
+    remain genuinely dynamic while another function-valued parameter in the
+    same call stays statically bound
+  - focused rechecks after this checkpoint:
+    `IR_REG_FILTER=IR-SECOND-ORDER-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-SECOND-ORDER-ZERO-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-SECOND-ORDER-ZERO-VOID-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-SECOND-ORDER-DYNAMIC-TERNARY-FNVAL-ACTUAL build/ir/ir_regression_test` PASS,
+    `SEMANTIC_TEST_FILTER=SEMANTIC-SECOND-ORDER-LOCAL-FNVAL-FORWARD build/semantic/semantic_regression_test` PASS,
+    `SEMANTIC_TEST_FILTER=SEMANTIC-SECOND-ORDER-RETURNED-FNVAL-IMM-CALL build/semantic/semantic_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-SECOND-ORDER-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-SECOND-ORDER-ZERO-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-SECOND-ORDER-ZERO-VOID-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-SECOND-ORDER-DYNAMIC-TERNARY-FNVAL-ACTUAL build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-SECOND-ORDER-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-SECOND-ORDER-ZERO-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-SECOND-ORDER-ZERO-VOID-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS
+  - current further returned-dynamic second-order closure:
+    the adjacent returned dynamic immediate-call sibling is now also real on
+    the same caller-side specialization spine instead of failing during
+    ordinary expression lowering of a static function-valued actual argument.
+    A witness such as
+    `int main(){ return pick(getint())(add1, 41); }`
+    now lowers by branching on the returned tag directly in `main` and
+    calling `apply__fv_0_add1(41)` or `apply_twice__fv_0_add1(41)`, while the
+    specialized helpers themselves still expose the expected leaf
+    `fn_make __fnwrap_add1` + `call_indirect` path. The nearby local ternary
+    bind-and-forward sibling
+    `int h(int f(int), int x)= c ? apply : apply_twice; return pass(h, add1, 41);`
+    is now regression-locked on the same `pass__fv_0_apply_1_add1` /
+    `pass__fv_0_apply_twice_1_add1` caller-side branch shape
+  - focused rechecks after this follow-up:
+    `SEMANTIC-SECOND-ORDER-DYNAMIC-RETURNED-FNVAL-IMM-CALL` PASS,
+    `SEMANTIC-SECOND-ORDER-DYNAMIC-LOCAL-FNVAL-FORWARD` PASS,
+    `IR_REG_FILTER=IR-SECOND-ORDER-DYNAMIC-RETURNED-FNVAL-IMM-CALL build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-SECOND-ORDER-DYNAMIC-LOCAL-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-SECOND-ORDER-DYNAMIC-RETURNED-FNVAL-IMM-CALL build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-SECOND-ORDER-DYNAMIC-LOCAL-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-SECOND-ORDER-DYNAMIC-RETURNED-FNVAL-IMM-CALL build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-SECOND-ORDER-DYNAMIC-LOCAL-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-02 returned-actual-argument callable-object closure:
+  - the nearby returned-callable actual-argument line is now closed on the
+    shared callable-object mainline instead of splitting into “plain direct
+    function actual argument works” versus “returned-parameter /
+    returned-call / assignment-result wrapper variants still need witness
+    shells or fail old fast paths”
+  - landed implementation effect:
+    [src/ir/ir_lower_expr.inc](/workspaces/compiler_lab/src/ir/ir_lower_expr.inc)
+    now routes static function-valued actual arguments through
+    `ir_try_emit_function_parameter_passthrough_callable_dispatch(...)`
+    instead of wrongly direct-calling the consumer target, resolves exact
+    returned-parameter actual arguments before the older returned-call
+    fallback, lets ternary actual-argument materialization recover callable
+    targets/captures from returned-call branches too, and preserves
+    assignment-result/comma-wrapper side effects before consuming the
+    function-valued argument. The neighboring return-payload fix in
+    [src/ir/ir_global_init.inc](/workspaces/compiler_lab/src/ir/ir_global_init.inc)
+    also now counts noncapturing function-valued returns with the correct
+    lowered slot width, so returned callable objects materialize with the same
+    honest payload contract on both closure-backed and noncapturing siblings
+  - current observed boundary:
+    one-arg, zero-arg, and zero-arg-void higher-order actual-argument
+    consumers now stay on the expected callable-object path even when the
+    argument arrives through `id(f)`, `wrap()`, ternary returned-call
+    branches such as `c ? id(f) : id(g)`, or assignment-result wrappers such
+    as `(h=f)`. Canonical IR keeps the explicit `shape` + `fn_make` +
+    `call_indirect` contract, while lower IR and compiler output agree on the
+    bridged direct wrapper-call form such as `call __fnwrap_add1` /
+    `call __fnwrap_add2` instead of stale specialized-helper or misdirected
+    direct-call shapes
+  - practical meaning:
+    this is an important mainline closure rather than another isolated probe
+    repair. Returned-parameter passthrough, returned noncapturing producers,
+    and ordinary wrapper expressions now converge on the same actual-argument
+    transport model, which removes one of the last obvious splits between the
+    current extension tree and the eventual generic first-class
+    function-value target
+  - focused rechecks after this closure:
+    `make -j1 test-semantic-regression` PASS,
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-02 second-order closure-backed inner-argument closure:
+  - the higher-order/self-passing mainline now also explicitly covers the
+    closure-backed inner function-value family instead of leaving second-order
+    traffic regression-locked only on noncapturing `add1` / `next` / `ping`
+    style leaves
+  - current observed boundary:
+    the existing second-order transport spine already handles local
+    single-capture closures, zero-arg closures, zero-arg `void` closures,
+    dynamic local higher-order callee selection with a closure-backed inner
+    argument, returned immediate-call through `idh(apply)(f, 4)`, and returned
+    closure producers such as `pass(apply, make(3), 4)`. Canonical IR keeps
+    the expected `pass__fv_*` / `apply__fv_*` specialization shell plus leaf
+    `fn_make __fnwrap_closure_*` + `call_indirect`, while lower IR and the
+    compiler path agree on the bridged direct `call __fnwrap_closure_*` form
+  - practical meaning:
+    this is an important mainline checkpoint because higher-order transport is
+    no longer “second-order works only when the inner function value is still
+    plain noncapturing”. The same second-order consumer family now stays green
+    when the inner function-valued argument itself carries closure environment
+    payload, which is materially closer to the eventual generic first-class
+    callable target than the earlier noncapturing-only checkpoint
+  - deliberate boundary that remains:
+    the next sharper core blocker is now the deeper self-passing / recursive
+    signature line, not this inner-closure transport family. A probe like
+    `host(host, add1, 41)` still stops earlier in parser signature metadata
+    with the current “nested function-typed parameters currently support only
+    two levels of function signature” limit, so the next mainline cut can
+    focus directly on deeper signature nesting instead of reopening the now
+    green second-order closure transport surface
+  - focused rechecks after this closure:
+    `SEMANTIC_TEST_FILTER=SEMANTIC-SECOND-ORDER-CLOSURE-FNVAL-FORWARD build/semantic/semantic_regression_test` PASS,
+    `IR_REG_FILTER=IR-SECOND-ORDER-CLOSURE-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-SECOND-ORDER-CLOSURE-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-SECOND-ORDER-CLOSURE-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-SECOND-ORDER-RETURNED-CLOSURE-FNVAL-IMM-CALL build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_DRIVER_REG_FILTER=COMPILER-SECOND-ORDER-RETURNED-CLOSURE-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS,
+    `make -j1 test-semantic-regression` PASS,
+    `make -j1 test-ir-regression` PASS,
+    `make -j1 test-lower-ir-regression` PASS,
+    `make -j1 test-compiler-driver` PASS
+- 2026-06-03 third-order higher-order forwarding checkpoint:
+  - the deeper higher-order mainline now also closes one first true
+    third-order noncapturing forwarding family instead of stopping at the
+    earlier second-order `pass(apply, add1, 41)` boundary
+  - landed implementation effect:
+    [src/parser/parser_stmt_decl_tu.inc](/workspaces/compiler_lab/src/parser/parser_stmt_decl_tu.inc)
+    now keeps the third-layer nested function-parameter metadata alive on the
+    normal non-empty parameter-list return path, and
+    [src/semantic/semantic_scope_rules.inc](/workspaces/compiler_lab/src/semantic/semantic_scope_rules.inc)
+    now preserves that same third-layer signature metadata when recovering a
+    visible top-level function name into a `SemanticTypeDescriptor`
+  - current observed boundary:
+    witnesses such as
+    `relay(pass, apply, add1, 41)` now lower cleanly under `-extension`.
+    Canonical IR materializes the full specialization chain
+    `relay__fv_0_pass_1_apply_2_add1 -> pass__fv_0_apply_1_add1 -> apply__fv_0_add1`
+    and still ends on the honest leaf callable-object contract
+    `fn_make __fnwrap_add1, 0, shape.0` plus `call_indirect`
+  - practical meaning:
+    this is the first real “function taking a function that itself takes a
+    function” checkpoint on the live tree. The mainline no longer collapses
+    back to `SEMA-EXT-018` as soon as a higher-order function-valued
+    parameter is forwarded through another higher-order parameter layer
+  - focused rechecks after this closure:
+    `SEMANTIC_REG_FILTER=SEMANTIC-THIRD-ORDER-FNVAL-FORWARD build/semantic/semantic_regression_test` PASS,
+    `IR_REG_FILTER=IR-THIRD-ORDER-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-THIRD-ORDER-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_TEST_FILTER=COMPILER-THIRD-ORDER-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 third-order local/returned bind closure:
+  - the nearby third-order bind line is now also closed instead of stopping at
+    direct forwarding plus returned immediate-call only
+  - landed implementation effect:
+    [src/semantic/semantic_scope_rules.inc](/workspaces/compiler_lab/src/semantic/semantic_scope_rules.inc)
+    now preserves third-order function-signature metadata when declaration
+    names are pushed into semantic scope/shadow frames, and its
+    higher-order-call compatibility fallback now recovers from locally missing
+    deeper nested kind metadata by comparing the deepest available
+    return/count structure instead of falling back to `SEMA-EXT-018`
+    immediately;
+    [src/semantic/semantic_entry.inc](/workspaces/compiler_lab/src/semantic/semantic_entry.inc)
+    now reuses that same fallback when matching visible function names and
+    local function-value bindings against expected third-order local types
+  - current observed boundary:
+    both
+    `int g(int h(int f(int), int x), int f(int), int x)=id3(pass); return g(apply, add1, 41);`
+    and
+    `int g(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x)=relay; return g(pass, apply, add1, 41);`
+    now lower cleanly under `-extension`
+  - practical meaning:
+    third-order noncapturing function values no longer require “use
+    immediately” treatment. They can now survive a returned bind or a local
+    bind and still feed the existing specialization chain on later calls
+  - focused rechecks after this closure:
+    `build/semantic/semantic_regression_test` PASS,
+    `IR_REG_FILTER=IR-THIRD-ORDER-RETURNED-FNVAL-BIND build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-THIRD-ORDER-LOCAL-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-THIRD-ORDER-RETURNED-FNVAL-BIND build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-THIRD-ORDER-LOCAL-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `COMPILER_TEST_FILTER=COMPILER-THIRD-ORDER-RETURNED-FNVAL-BIND build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_TEST_FILTER=COMPILER-THIRD-ORDER-LOCAL-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 callable-object mainline stability repair:
+  - the current second-order no-shell mainline itself is still intact:
+    `pass(apply, add1, 41)` continues to lower to canonical
+    `fn_make __fnwrap_add1, 0, shape.0` plus `call_indirect`, and lower-IR
+    still reaches the direct bridged `call __fnwrap_add1(0, 41)` shape
+  - the immediate blocker turned out not to be parser ownership after all.
+    ASan on `build/compiler_tests/compiler_driver_test` showed a family of
+    IR-lowering use-after-free bugs where pointers into growable IR-side
+    tables were kept across helper paths that can append new functions or
+    grow function-value target sets
+  - landed repair effect:
+    [src/ir/ir_global_init.inc](/workspaces/compiler_lab/src/ir/ir_global_init.inc)
+    now refreshes `IrFunction *` handles after helper paths that may append
+    functions, including runtime-init finalization, signature lowering, and
+    specialized-function lowering; and
+    [src/ir/ir_lower_scope.inc](/workspaces/compiler_lab/src/ir/ir_lower_scope.inc)
+    now clones function-value target sets from a stable snapshot instead of
+    iterating a source set while the same registration path may `realloc`
+    that storage
+  - practical meaning:
+    the broad `compiler_driver_test` line is back to “functional mismatch”
+    territory instead of “heap corruption / abort” territory, which unblocks
+    the real mainline work again
+  - current follow-up still open:
+    some focused compiler-driver higher-order closure / third-order
+    expectations now need resynchronization or a smaller behavior repair, but
+    the tree is no longer dying in `free()` before those witnesses can be
+    evaluated
+- 2026-06-03 higher-order closure/third-order mainline resync:
+  - the remaining post-stability failures on the live tree were expectation
+    drift, not fresh semantic breakage. The active callable-object mainline
+    now normalizes several closure-backed and third-order forwarding families
+    onto the same more direct wrapper/leaf path as the earlier
+    second-order-noncapturing no-shell slice
+  - current observed boundary:
+    second-order closure forwarding, zero-arg closure forwarding, returned
+    closure forwarding, and the plain third-order noncapturing forwarding
+    witness all now keep the direct leaf wrapper contract instead of the
+    older intermediate shell names. In practice that means:
+    canonical IR emphasizes `fn_make __fnwrap_*` + `call_indirect`,
+    lower-IR emphasizes direct `call __fnwrap_*`,
+    and compiler text no longer guarantees the older
+    `pass__fv_* / apply__fv_* / relay__fv_*` symbol family on those
+    checkpoints
+  - landed maintenance effect:
+    [tests/compiler/compiler_driver_test.c](/workspaces/compiler_lab/tests/compiler/compiler_driver_test.c),
+    [tests/ir/ir_regression_test.c](/workspaces/compiler_lab/tests/ir/ir_regression_test.c),
+    and
+    [tests/lower_ir/lower_ir_regression_test.c](/workspaces/compiler_lab/tests/lower_ir/lower_ir_regression_test.c)
+    are now synchronized to the direct-wrapper checkpoint for the affected
+    higher-order closure / third-order witnesses
+  - focused and broad rechecks after this resync:
+    `COMPILER_TEST_FILTER=COMPILER-SECOND-ORDER-CLOSURE-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_TEST_FILTER=COMPILER-SECOND-ORDER-ZERO-CLOSURE-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_TEST_FILTER=COMPILER-THIRD-ORDER-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS,
+    `COMPILER_TEST_FILTER=COMPILER-SECOND-ORDER-RETURNED-CLOSURE-FNVAL-FORWARD build/compiler_tests/compiler_driver_test` PASS,
+    `IR_REG_FILTER=IR-SECOND-ORDER-CLOSURE-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-SECOND-ORDER-ZERO-CLOSURE-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-THIRD-ORDER-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `IR_REG_FILTER=IR-SECOND-ORDER-RETURNED-CLOSURE-FNVAL-FORWARD build/ir/ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-SECOND-ORDER-CLOSURE-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-SECOND-ORDER-ZERO-CLOSURE-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-THIRD-ORDER-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `LOWER_IR_REG_FILTER=LOWER-IR-SECOND-ORDER-RETURNED-CLOSURE-FNVAL-FORWARD build/lower_ir/lower_ir_regression_test` PASS,
+    `build/compiler_tests/compiler_driver_test` PASS,
+    `build/ir/ir_regression_test` PASS,
+    `build/lower_ir/lower_ir_regression_test` PASS
+- 2026-06-03 callable-object target-set ownership repair:
+  - the remaining higher-order instability after the earlier direct-wrapper
+    convergence was one more lifetime bug, not a new semantic gap. Several
+    function-object descriptors and callable-object views were still borrowing
+    `function_value_target_set->target_names` storage directly, so later
+    target-set growth inside the same lowering could invalidate those arrays
+    and surface as process-shape-dependent `IR-LOWER-028` failures
+  - landed repair effect:
+    [src/ir/ir.c](/workspaces/compiler_lab/src/ir/ir.c) now gives
+    descriptor/view-level callable-object target families their own stable
+    copied target-name arrays instead of borrowing growable target-set
+    storage, and
+    [src/ir/ir_lower_expr.inc](/workspaces/compiler_lab/src/ir/ir_lower_expr.inc)
+    now frees callable-object view-owned storage through one shared cleanup
+    path
+  - practical meaning:
+    “single witness in a fresh process passes, but broad regression runners
+    fail later with `IR-LOWER-028`” is no longer an active symptom on this
+    line. The callable-object mainline is back to deterministic behavior
+    across focused and broad front-half runners
+  - nearby checkpoint closure:
+    second-order zero-arg void closure forwarding, second-order returned
+    closure immediate-call, and second-order dynamic local closure forwarding
+    are now all synchronized to the newer direct callable-object path too:
+    canonical IR now exposes direct `fn_make __fnwrap_closure_*` +
+    `call_indirect`, lower-IR bridges that to direct `call __fnwrap_*`, and
+    compiler text follows the same direct wrapper path instead of preserving
+    the older `pass0__fv_* / apply0__fv_* / apply__fv_*` shell names
+  - focused rechecks after this repair/resync:
+    `build/ir/ir_regression_test` PASS,
+    `build/lower_ir/lower_ir_regression_test` PASS,
+    `build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 higher-order ternary direct-callee dispatch repair:
+  - closed one real mainline hole on the callable-object / higher-order
+    function-value line: a direct higher-order call such as
+    `pass(c ? apply : apply_twice, add1, 41)` could still be captured too
+    early by the plain static direct-target callable-dispatch path, which in
+    turn treated the ternary function-valued actual argument like an ordinary
+    value expression and crashed with
+    `IR-LOWER-002: unresolved identifier 'apply'`
+  - landed dispatch repair:
+    [src/ir/ir_lower_expr.inc](/workspaces/compiler_lab/src/ir/ir_lower_expr.inc)
+    now lets the intended higher-order dynamic-specialization spine keep
+    ownership of the narrower problematic family where the resolved direct
+    callee has multiple function-valued parameters and at least one matching
+    actual argument is itself a dynamic function-value family, instead of
+    collapsing too early into plain `__fnwrap_*` dispatch
+  - adjacent specialization-args repair:
+    the same higher-order dynamic-specialization path now also preserves
+    hidden closure-capture arguments for neighboring static closure-valued
+    parameters when building branch-selected `pass__fv_*` helper calls.
+    Without that, dynamic-noncapturing-plus-static-closure shapes such as
+    `pass(h, f, x)` could synthesize helpers that expected closure capture
+    args while the caller still passed only the visible scalar args
+  - current visible effect:
+    the direct ternary higher-order witness now lowers again through the
+    intended branch-selected helpers
+    `pass__fv_0_apply_1_add1` /
+    `pass__fv_0_apply_twice_1_add1`
+    on the real compiler and `dump_middle_stage` entrypoints instead of
+    failing before IR dump
+  - focused rechecks after this repair:
+    `./build/tools/dump_middle_stage --extension ir /tmp/dyn_ternary_pass_41.sy` PASS,
+    `./build/compiler -extension /tmp/dyn_ternary_pass_41.sy -o /tmp/dyn_ternary_pass_41.s` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 higher-order wrapper-shell convergence follow-up:
+  - the neighboring returned/local higher-order noncapturing families are now
+    also explicitly synchronized to the newer callable-object mainline shape
+    instead of preserving older `pass__fv_* / apply__fv_* / relay__fv_*`
+    expectations
+  - current visible checkpoint:
+    the focused siblings
+    `idh(apply)(add1, 41)`,
+    `int g(...)=id3(pass); return g(apply, add1, 41);`,
+    and
+    `int g(...)=relay; return g(pass, apply, add1, 41);`
+    now all collapse directly to the leaf wrapped callable-object call
+    (`fn_make __fnwrap_add1` + `call_indirect` on canonical IR,
+    `call __fnwrap_add1(0, 41)` on lower-IR,
+    and direct `call __fnwrap_add1` on compiler text)
+    with no remaining `apply__fv_*`, `pass__fv_*`, or `relay__fv_*` shell
+    names on those checkpoints
+  - practical meaning:
+    the same callable-object spine now survives not only second-order direct
+    forwarding and the repaired dynamic ternary family, but also these
+    returned/local third-order noncapturing wrappers, so the remaining shell
+    surface is narrower and easier to isolate in future turns
+  - focused and broad rechecks after this sync:
+    `./build/ir/ir_regression_test IR-THIRD-ORDER-RETURNED-FNVAL-BIND` PASS,
+    `./build/ir/ir_regression_test IR-THIRD-ORDER-LOCAL-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-RETURNED-FNVAL-IMM-CALL` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-THIRD-ORDER-RETURNED-FNVAL-BIND` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-THIRD-ORDER-LOCAL-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-RETURNED-FNVAL-IMM-CALL` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-THIRD-ORDER-RETURNED-FNVAL-BIND` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-THIRD-ORDER-LOCAL-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-RETURNED-FNVAL-IMM-CALL` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 zero-arg noncapturing shell convergence follow-up:
+  - the same “already on the real callable-object spine” cleanup now also
+    reaches the plain zero-arg noncapturing higher-order family instead of
+    leaving older `pass0__fv_* / apply0__fv_*` expectations in place
+  - current visible checkpoint:
+    focused siblings such as
+    `pass0(apply0, next)` and `pass0(apply0, ping)` now lower directly to the
+    leaf wrapped callable-object call too:
+    canonical IR uses `fn_make __fnwrap_next/__fnwrap_ping` +
+    `call_indirect`, lower-IR bridges that to
+    `call __fnwrap_next(0)` / `call __fnwrap_ping(0)`, and compiler text now
+    exposes the same direct wrapper calls with no surviving
+    `pass0__fv_*` or `apply0__fv_*` shell names on those checkpoints
+  - practical meaning:
+    the remaining zero-arg helper-shell surface is now more clearly limited to
+    dynamic returned/passthrough families that still really need branch-selected
+    helper structure, rather than being mixed together with local/static
+    noncapturing forwarding cases that had already converged
+  - focused and broad rechecks after this sync:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-ZERO-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-ZERO-VOID-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-ZERO-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-ZERO-VOID-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-ZERO-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-ZERO-VOID-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 returned dynamic noncapturing shell convergence follow-up:
+  - the remaining returned noncapturing immediate-call family is now also
+    pulled onto the leaf wrapped callable-object path instead of preserving
+    `apply__fv_* / apply0__fv_* / applyv__fv_*` helper shells between the
+    returned tag dispatch and the final wrapper call
+  - landed effect:
+    [src/ir/ir_lower_expr.inc](/workspaces/compiler_lab/src/ir/ir_lower_expr.inc)
+    now lets the returned dynamic noncapturing path fast-forward directly into
+    static passthrough callable dispatch when the branch-selected family is
+    already known and the forwarded function-valued actual argument itself is
+    statically recoverable as a callable object
+  - current visible checkpoint:
+    focused siblings such as
+    `pick(getint())(add1, 41)`,
+    `idh0(pickh0(getint()))(next)`,
+    and
+    `idhv(pickhv(getint()))(ping)`
+    now all collapse directly to the leaf wrapped callable-object call:
+    canonical IR records one `call pick/pickh0/pickhv(...)` followed by direct
+    `fn_make __fnwrap_* + call_indirect`, lower-IR bridges that to
+    `call __fnwrap_*`, and compiler text no longer contains
+    `apply__fv_*`, `apply0__fv_*`, or `applyv__fv_*` shell names on those
+    checkpoints
+  - practical meaning:
+    the callable-object mainline now survives not only static/local higher-order
+    families and the repaired direct dynamic ternary line, but also the
+    returned dynamic noncapturing immediate-call family across one-arg,
+    zero-arg, and zero-arg-void siblings
+  - focused and broad rechecks after this repair:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-DYNAMIC-RETURNED-FNVAL-IMM-CALL` PASS,
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-VOID-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-DYNAMIC-RETURNED-FNVAL-IMM-CALL` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-VOID-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-DYNAMIC-RETURNED-FNVAL-IMM-CALL` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-VOID-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 returned dynamic noncapturing zero-arg closure point-closure:
+  - the same returned dynamic noncapturing convergence now also stands as a
+    full across-arity checkpoint rather than only the one-argument sibling:
+    the focused zero-arg and zero-arg-void returned passthrough families
+    `idh0(pickh0(getint()))(next)` and `idhv(pickhv(getint()))(ping)` are now
+    locked on the same leaf wrapped callable-object contract instead of the
+    older `apply0__fv_* / applyv__fv_*` helper shells
+  - current visible checkpoint:
+    canonical IR records one `call pickh0/pickhv(...)` followed directly by
+    `fn_make __fnwrap_next/__fnwrap_ping` + `call_indirect`, lower-IR bridges
+    that to direct `call __fnwrap_next(0)` / `call __fnwrap_ping(0)`, and
+    compiler text no longer contains `apply0__fv_*`, `apply0_twice__fv_*`,
+    `applyv__fv_*`, or `applyv_twice__fv_*` on those families
+  - practical meaning:
+    the returned dynamic noncapturing mainline is now converged across the
+    one-arg, zero-arg, and zero-arg-void siblings, so the remaining work is
+    more cleanly concentrated on closure-backed families and truly necessary
+    specialization shells
+  - focused and broad rechecks after this closure:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-VOID-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-VOID-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-VOID-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 closure-backed residual shell boundary audit:
+  - the remaining helper-shell surface is now sharply narrower and more
+    clearly architectural rather than accidental. Focused closure-backed
+    higher-order families such as
+    `pass(h, f, 4)` with dynamic `h = apply/apply_twice` plus static closure
+    `f`, and
+    `int g(int f(int), int x)=idh(pickh(...)); return g(add1, 41);`
+    still keep shells like
+    `pass__fv_0_apply_1_main__closure_f_*` or
+    `pickh__closure_h_*__fv_1_add1`
+  - audit conclusion:
+    those shells are not just stale regression expectations anymore. They are
+    the current honest boundary of this lowering strategy because the
+    callable-object line still does not transport a function-valued argument
+    as an ordinary first-class callable-object value through another
+    function's source-level function-typed parameter without specializing
+    that callee body
+  - practical meaning:
+    noncapturing returned dynamic immediate-call families are now converged on
+    leaf wrapped callable-object dispatch, and closure-backed direct dynamic
+    returned consumers are also already on direct wrapper dispatch. The
+    remaining shells are concentrated on the harder “higher-order callee body
+    itself still consumes a function-valued argument” cases, where the next
+    real step is explicit callable-object argument transport / call ABI
+    expansion rather than more local shell-pruning tweaks
+  - current evidence surface:
+    `pass(c ? apply : apply_twice, f, 4)` still lowers through
+    `pass__fv_0_apply_1_main__closure_f_*`,
+    while
+    `int g(int f(int), int x)=idh(pickh(5, getint())); return g(add1, 41);`
+    still lowers through `pickh__closure_h_*__fv_1_add1` /
+    `pickh__closure_k_*__fv_1_add1`,
+    and both shapes are still stable across canonical IR, lower-IR, and
+    compiler text
+  - focused rechecks after this audit:
+    `./build/tools/dump_middle_stage --extension ir /tmp/dyn_local_closure_forward.sy` PASS,
+    `./build/tools/dump_middle_stage --extension ir /tmp/returned_passthrough_dyn_local.sy` PASS,
+    `./build/tools/dump_middle_stage --extension lower-ir /tmp/dyn_local_closure_forward.sy` PASS,
+    `./build/tools/dump_middle_stage --extension lower-ir /tmp/returned_passthrough_dyn_local.sy` PASS,
+    `./build/compiler -extension /tmp/dyn_local_closure_forward.sy -o /tmp/dyn_local_closure_forward.s` PASS,
+    `./build/compiler -extension /tmp/returned_passthrough_dyn_local.sy -o /tmp/returned_passthrough_dyn_local.s` PASS
+- 2026-06-03 dynamic higher-order closure passthrough recursive dispatch:
+  - the caller-side passthrough callable dispatcher now handles one more real
+    higher-order shape instead of immediately falling back to a fresh
+    specialization shell whenever a dynamic function-valued parameter forwards
+    another static function-valued argument through a trivial wrapper layer
+  - current visible checkpoint:
+    `int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }`
+    with dynamic `h = apply/apply_twice` plus static closure `f` no longer
+    lowers through `pass__fv_0_apply_1_main__closure_f_*`
+  - canonical / lower-IR meaning:
+    canonical IR now keeps the dynamic `h$ftag` branch in `main` and then
+    dispatches directly to the leaf closure wrapper via
+    `fn_make __fnwrap_closure_* + call_indirect`, while lower-IR bridges that
+    to direct `call __fnwrap_closure_*` without synthesizing a `pass__fv_*`
+    helper function
+  - practical meaning:
+    this is a real mainline move, not just a naming cleanup. The compiler now
+    performs one more recursive caller-side higher-order collapse before it
+    gives up and specializes a new helper, which narrows the residual shell
+    boundary to the harder cases where the runtime-selected callee body is
+    itself a closure helper that still consumes a function-valued argument
+  - updated remaining hard boundary:
+    the returned closure helper family
+    `int g(int f(int), int x)=idh(pickh(...)); return g(add1, 41);`
+    still lowers through `pickh__closure_h_*__fv_1_add1` /
+    `pickh__closure_k_*__fv_1_add1`, so the next honest core step is still
+    explicit callable-object argument transport / ABI expansion for
+    function-valued parameters rather than pretending every residual shell is
+    now accidental
+  - focused and broad rechecks after this step:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-DYNAMIC-LOCAL-CLOSURE-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-DYNAMIC-LOCAL-CLOSURE-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-DYNAMIC-LOCAL-CLOSURE-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 returned dynamic closure helper body-eval collapse:
+  - the same higher-order callable-object convergence now also reaches the
+    previously-stubborn returned dynamic closure helper family instead of
+    stopping at passthrough-only wrappers
+  - current visible checkpoint:
+    `int g(int f(int), int x)=idh(pickh(5, getint())); return g(add1, 41);`
+    no longer lowers through
+    `pickh__closure_h_*__fv_1_add1` /
+    `pickh__closure_k_*__fv_1_add1`
+  - implementation meaning:
+    lowering now has one first caller-side evaluator for a narrow but real
+    class of helper bodies with one function-valued parameter and a single
+    scalar return expression. It can directly evaluate shapes such as
+    `return f(x);`, `return f(f(x));`, and `return f(x) +/- base;` in the
+    caller by binding ordinary scalar parameters/captures plus one static
+    callable-object view for the function-valued parameter
+  - canonical / lower-IR consequence:
+    canonical IR now branches on `g$ftag` in `main`, emits direct
+    `fn_make __fnwrap_add1 + call_indirect`, and finishes the surrounding
+    scalar `add` in place; lower-IR bridges the same shape to direct
+    `call __fnwrap_add1(0, ...)` without synthesizing a helper shell
+  - practical meaning:
+    the residual shell boundary moved again. We are no longer blocked on the
+    two flagship “dynamic callee + static function actual” closure families,
+    and the next real mainline work is to generalize beyond this first
+    single-return helper-body evaluator toward broader callable-object
+    argument transport rather than open-coding more witness shells
+  - focused and broad rechecks after this step:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 dynamic noncapturing helper-body collapse follow-up:
+  - the same simple helper-body evaluator now also closes the adjacent
+    noncapturing higher-order families instead of leaving them split across
+    canonical IR versus lower/compiler helper shells
+  - current visible checkpoints:
+    `return pick(getint())(add1, 41);`,
+    `return idh(pickh(...))(add1, 41);`, and
+    `int h(...)=c ? apply : apply_twice; return pass(h, add1, 41);`
+    now all converge on the same caller-side wrapper-object dispatch story
+  - canonical / lower-IR / compiler consequence:
+    these families no longer require `apply__fv_0_add1`,
+    `apply_twice__fv_0_add1`,
+    `pass__fv_0_apply_1_add1`,
+    `pass__fv_0_apply_twice_1_add1`, or
+    `pickh__closure_*__fv_1_add1` on the observed surfaces; instead they
+    branch on the dynamic tag in the caller and emit direct
+    `__fnwrap_add1`-backed callable-object calls plus the surrounding scalar
+    operations in place
+  - practical meaning:
+    the current caller-side evaluator is now doing real work on both closure
+    and noncapturing higher-order helper families. The next honest step is no
+    longer “find another `add1` witness to despecialize”, but to widen the
+    evaluator/transport model beyond single-return helper bodies and toward a
+    more explicit general callable-object argument ABI
+  - focused and broad rechecks after this follow-up:
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+  - regression coverage follow-up:
+    the converged second-order noncapturing siblings that had previously only
+    lived behind name-filtered targeted entrypoints are now also included in
+    the default IR / lower-IR / compiler aggregates:
+    `pick(getint())(add1, 41)`,
+    `idh(pickh(...))(add1, 41)`,
+    `int h(...)=apply; return pass(h, add1, 41);`,
+    and
+    `return pass(c ? apply : apply_twice, add1, 41);`
+    all now count toward the normal broad green bar instead of being easy to
+    miss when the mainline shifts again
+- 2026-06-03 simple helper-body declaration broadening:
+  - the caller-side helper-body evaluator now also accepts a small
+    declaration prefix instead of requiring the body to be exactly one
+    `return expr;`
+  - current supported new shapes:
+    one or two single-name local declarations before the final return,
+    specifically:
+    - scalar rebinding such as `int y = x; return f(y);`
+    - function aliasing from an already-bound callable parameter such as
+      `int g(int) = f; return g(x);`
+    - the combined shape `int y = x; int g(int) = f; return g(y);`
+  - practical effect:
+    small helper bodies that used to fall back to `scalar_apply__fv_*` or
+    `wrap2__fv_*`-style shells can now collapse directly in the caller to the
+    same `fn_make __fnwrap_* + call_indirect` skeleton as the simpler
+    one-statement family
+  - regression follow-up:
+    new focused IR / lower-IR / compiler witnesses now lock both the scalar
+    rebinding and scalar+function-alias variants, and these new witnesses are
+    also included in the default broad aggregates
+- 2026-06-03 higher-order passthrough alias-reassign broadening:
+  - the function-parameter passthrough dispatcher now also accepts a small
+    straight-line function-alias reassignment prefix instead of requiring the
+    higher-order helper body to stay at pure declaration-only alias setup
+  - current newly supported shape:
+    second-order helpers like
+    `int k(int f(int), int x)=h; k=h; return k(f, x);`
+    now collapse directly in the caller instead of falling back to
+    `pass__fv_*` specialization shells
+  - practical effect:
+    the higher-order mainline moved one step closer to a generic callable
+    transport model; simple local function alias rebinding inside passthrough
+    wrappers is no longer a shell boundary on the IR / lower-IR / compiler
+    surfaces
+  - focused and broad rechecks after this step:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-LOCAL-REASSIGNED-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-LOCAL-REASSIGNED-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-LOCAL-REASSIGNED-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 higher-order passthrough scalar-alias broadening:
+  - the same passthrough dispatcher now also accepts one first scalar-local
+    prefix inside higher-order wrappers instead of requiring every forwarded
+    scalar actual to remain spelled as the original parameter name
+  - current newly supported shape:
+    wrappers like
+    `int y=x; int k(...)=h; k=h; return k(f, y);`
+    now collapse directly in the caller instead of falling back to
+    `pass__fv_*` shells
+  - practical effect:
+    second-order passthrough wrappers no longer need to choose between
+    “function aliasing works” and “scalar local bounce works”; the direct
+    scalar bounce and function-alias-reassign pieces now compose on the live
+    callable-object mainline
+  - updated remaining honest boundary:
+    scalar *computed* local updates inside higher-order wrappers such as
+    `int y=x; y=y+1; return h(f, y);`
+    still fall back to a specialization shell today, so the next useful core
+    step is to generalize scalar local evaluation inside the passthrough
+    recursion/transport path rather than pretending the higher-order line is
+    fully transport-generic already
+  - focused and broad rechecks after this step:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-LOCAL-SCALAR-REASSIGNED-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-LOCAL-SCALAR-REASSIGNED-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-LOCAL-SCALAR-REASSIGNED-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 higher-order local-wrapper scalar-update follow-up:
+  - the same callable-object passthrough line now also covers one tighter
+    family where the higher-order wrapper itself performs straight-line scalar
+    updates before forwarding into a local static noncapturing helper target
+  - current newly supported shapes:
+    `int h(...)=apply; int y=x; y=y+1; return pass(h, add1, 41);`
+    and the repeated-update sibling
+    `int h(...)=apply; int y=x; y=y+1; y=y+1; return pass(h, add1, 41);`
+  - current observed boundary:
+    canonical IR and lower-IR now keep the wrapper-local `h$ftag` setup in
+    `main`, fold the scalar update(s) there, and then dispatch directly
+    through `fn_make __fnwrap_add1 + call_indirect` / lower-IR
+    `call __fnwrap_add1(0, tmp.*)` with no remaining `pass__fv_*` shell on
+    those two surfaces
+  - honest compiler-stage note:
+    the final compiler preview text still only has a weaker checkpoint here:
+    it reliably reaches `__fnwrap_add1`, but may still preserve an outer
+    `pass__fv_*` helper shell in the emitted assembly
+  - practical meaning:
+    the mainline no longer stops at “scalar alias + function alias reassign”;
+    it now also handles a narrow but real “local static helper + scalar
+    update chain” family without widening into the unstable generic
+    helper-body re-evaluation path that had started to hit closure / ternary
+    consumers
+  - focused and broad rechecks after this step:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-LOCAL-WRAPPER-SCALAR-UPDATE-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-LOCAL-WRAPPER-REPEATED-SCALAR-UPDATE-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-LOCAL-WRAPPER-SCALAR-UPDATE-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-LOCAL-WRAPPER-REPEATED-SCALAR-UPDATE-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-LOCAL-WRAPPER-SCALAR-UPDATE-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-LOCAL-WRAPPER-REPEATED-SCALAR-UPDATE-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 third-order static-noncapturing scalar-update follow-up:
+  - the same narrow static-noncapturing helper-eval channel now also reaches
+    the adjacent third-order family instead of stopping at `pass(...)`
+    wrappers alone
+  - current newly supported shapes:
+    `relay(pass, apply, add1, 41)` already folds through the same channel, and
+    the scalar-update siblings
+    `int y=x; y=y+1; return q(h, f, y);`
+    plus the repeated-update variant
+    `int y=x; y=y+1; y=y+1; return q(h, f, y);`
+    now also collapse on canonical IR / lower-IR instead of needing
+    `relay__fv_*`
+  - current observed boundary:
+    on canonical IR and lower-IR, these third-order static noncapturing
+    families now fold all the way through `relay -> pass -> apply -> add1`
+    into a plain scalar `add` chain in `main`, with no remaining
+    `relay__fv_*`, `pass__fv_*`, or `apply__fv_*` shells on those two
+    surfaces
+  - honest compiler-stage note:
+    as with the neighboring second-order static noncapturing family, the
+    compiler preview checkpoint here is intentionally weaker; the compiler
+    regression only requires successful compilation, not a fully shell-free
+    final text shape
+  - practical meaning:
+    the mainline has now moved from “one local static helper call can absorb a
+    scalar update chain” to “that same scalar update chain can survive one
+    more higher-order forwarding layer” without reopening the unstable generic
+    helper-body re-evaluation path on closure / returned-call families
+  - focused and broad rechecks after this step:
+    `./build/ir/ir_regression_test IR-THIRD-ORDER-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test IR-THIRD-ORDER-WRAPPER-SCALAR-UPDATE-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test IR-THIRD-ORDER-WRAPPER-REPEATED-SCALAR-UPDATE-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-THIRD-ORDER-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-THIRD-ORDER-WRAPPER-SCALAR-UPDATE-FNVAL-FORWARD` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-THIRD-ORDER-WRAPPER-REPEATED-SCALAR-UPDATE-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-THIRD-ORDER-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-THIRD-ORDER-WRAPPER-SCALAR-UPDATE-FNVAL-FORWARD` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-THIRD-ORDER-WRAPPER-REPEATED-SCALAR-UPDATE-FNVAL-FORWARD` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 returned dynamic noncapturing higher-order dispatch repair:
+  - one unsound fast path has now been removed from the callable-object
+    mainline because it was breaking true dynamic semantics instead of only
+    missing a cleanup opportunity
+  - root cause:
+    `ir_try_emit_returned_dynamic_function_value_specialized_call(...)` used
+    to try a static-actual-argument passthrough shortcut before honoring the
+    returned two-target callable family. On witnesses such as
+    `pick(getint())(add1, 41)` and the nearby
+    `idh(pickh(getint()))(add1, 41)` line, that shortcut reused only the
+    first target branch (`apply`) and silently dropped the dynamic
+    `apply_twice` branch
+  - landed fix:
+    the returned-dynamic specialization path no longer takes that shortcut, so
+    the returned function tag is consumed first and the call lowers through
+    the real branch-selected dynamic path
+  - current visible effect:
+    the first repaired checkpoint reintroduced the missing dynamic branch:
+    canonical IR now branches on the returned hidden tag
+    (`__retfn_immediate_0` / `__retfn_argcap_0`) instead of collapsing to one
+    unconditional `__fnwrap_add1` call, and lower-IR / compiler preview text
+    preserve that same dynamic split
+  - direct-dispatch follow-up:
+    the same one-arg noncapturing family has now also moved one layer closer
+    to the shared callable-object mainline instead of stopping at
+    `apply__fv_0_add1` / `apply_twice__fv_0_add1` helper shells. When the
+    returned dynamic targets themselves are simple passthrough higher-order
+    wrappers with one static noncapturing function-valued actual argument,
+    the returned-dynamic path now emits branch-local direct callable-object
+    dispatch in `main`
+  - newly locked siblings:
+    both `pick(getint())(add1, 41)` and the returned-passthrough noncapturing
+    sibling `idh(pickh_nc(getint()))(add1, 41)` now lower through a tag test
+    plus branch-local `fn_make __fnwrap_add1 + call_indirect` on canonical IR,
+    branch-local direct `call __fnwrap_add1(0, ...)` on lower-IR, and matching
+    branch-local `call __fnwrap_add1` sequences on compiler preview text,
+    with no remaining `apply__fv_*` / `apply_twice__fv_*` helper calls on
+    those surfaces
+  - regression repair:
+    the old IR/lower-IR/compiler expectations for
+    `pick(getint())(add1, 41)` had accidentally locked the buggy collapsed
+    result and are now updated to require the real dynamic behavior; focused
+    new regression coverage now also locks the neighboring noncapturing
+    returned-passthrough sibling
+  - practical meaning:
+    this is a direct semantic correctness repair on the generic
+    callable-object mainline, not merely another shell cleanup; returned
+    higher-order noncapturing families can no longer be “optimized” into one
+    branch just because the function-valued actual argument is static, and the
+    repaired one-arg family now also sheds one more specialization-helper
+    layer on the way back to the shared callable-object dispatch model
+  - focused rechecks after this repair:
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+  - one-arg direct-dispatch follow-up:
+    the repaired one-argument noncapturing returned-dynamic family now also
+    skips one more helper layer instead of stopping at
+    `apply__fv_0_add1` / `apply_twice__fv_0_add1`. When the returned dynamic
+    targets themselves are simple passthrough higher-order wrappers with one
+    static noncapturing function-valued actual argument, the branch-selected
+    path now emits direct callable-object dispatch inside `main`
+  - newly locked siblings:
+    both `pick(getint())(add1, 41)` and the returned-passthrough
+    noncapturing sibling `idh(pickh_nc(getint()))(add1, 41)` now lower through
+    a tag test plus branch-local `fn_make __fnwrap_add1 + call_indirect` on
+    canonical IR, branch-local direct `call __fnwrap_add1(0, ...)` on
+    lower-IR, and matching branch-local `call __fnwrap_add1` sequences on the
+    compiler preview path, with no remaining
+    `apply__fv_*` / `apply_twice__fv_*` helper calls on those surfaces
+  - current adjacent boundary:
+    the analogous zero-argument returned dynamic noncapturing family
+    (`pickh0/pickhv`) still remains on the older
+    `apply0__fv_*` / `applyv__fv_*` helper layer for now, so the next useful
+    core step is to extend the same direct branch-local callable-object
+    dispatch idea to zero-arg targets without reopening ownership/cleanup
+    instability on that path
+  - current implementation note on that boundary:
+    the zero-arg family already satisfies the same static-actual-argument and
+    passthrough-shape preconditions in focused harness probes, but a first
+    attempt to widen the branch-local direct-dispatch path there exposed an
+    ownership/cleanup instability outside the kept one-arg checkpoint. That
+    widening was deliberately backed out for now so the one-arg returned
+    dynamic closure stays green while the zero-arg path remains the next
+    explicit mainline target instead of a half-landed hazard
+- 2026-06-03 unary helper-body evaluator follow-up:
+  - the caller-side helper-body evaluator now also accepts one first unary
+    scalar transport family instead of bailing out on otherwise-simple
+    returned dynamic closure helper bodies
+  - root cause before the fix:
+    returned-dynamic closure consumers such as
+    `return idh(pickh(5, getint()))(add1, 41);`
+    with helper bodies
+    `return -g(y) + base;`
+    and
+    `return -g(g(y)) + base;`
+    were still falling out of the evaluator and then surfacing as
+    `IR-INT-130` from the outer call site
+  - landed fix:
+    both the general simple helper-body evaluator and the narrower static
+    helper evaluator now understand direct unary scalar forms on already
+    evaluable operands (`+`, `-`, `~`, `!`), so the surrounding closure /
+    passthrough machinery can keep collapsing in the caller instead of
+    treating that unary node as a hard stop
+  - current visible checkpoint:
+    the unary returned-dynamic closure witness now lowers through one
+    `call pickh(...)`, three branch-local `__fnwrap_add1` calls, and two
+    caller-side `sub 0, ...` rows on canonical IR / lower-IR, with no
+    remaining `pickh__closure_*` or `__fv_*` helper-shell names on the
+    observed surfaces
+  - practical meaning:
+    this is another real broadening of the helper-body evaluator rather than
+    another witness-specific shell cleanup. The mainline can now absorb one
+    more natural helper-body expression shape on the road toward broader
+    callable-object transport
+  - focused and broad rechecks after this step:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-UNARY-EVAL` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-UNARY-EVAL` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-UNARY-EVAL` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 straight-line scalar-update helper-body follow-up:
+  - the same caller-side helper-body evaluator now also absorbs one more real
+    family of straight-line scalar mutation instead of stopping at
+    declaration-only setup plus the newly landed unary transport forms
+  - landed evaluator broadening:
+    helper-body statement evaluation now updates tracked scalar bindings across
+    direct assignment, compound assignment, and prefix/postfix `++` / `--`
+    when those statements target an already-bound local scalar in the helper
+    body
+  - current visible checkpoint:
+    returned-dynamic closure helpers such as
+    `int z=y; z+=1; return g(z) + base;`
+    and the nearby `z++` sibling now stay on the caller-side evaluator path
+    instead of failing with `IR-INT-148`. Canonical IR and lower-IR keep the
+    expected branch-local `__fnwrap_add1` dispatch shape, with the scalar
+    update folded into caller-side arithmetic (`add 41, 1`) before the wrapped
+    indirect call
+  - practical meaning:
+    the mainline moved from “declaration prefix + unary transport” to a more
+    useful straight-line scalar-update subset for helper bodies. That is a
+    direct step toward the broader goal of evaluating more higher-order callee
+    bodies in the caller instead of synthesizing fresh specialization shells
+  - focused and broad rechecks after this step:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-COMPOUND-UPDATE-EVAL` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-COMPOUND-UPDATE-EVAL` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-COMPOUND-UPDATE-EVAL` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 comma-and-ternary helper-body evaluator follow-up:
+  - the same caller-side helper-body evaluator now also accepts two more real
+    expression families that show up naturally in higher-order closure helper
+    bodies: comma expressions and scalar ternary results
+  - landed evaluator broadening:
+    both the general simple helper-body evaluator and the narrower static
+    helper evaluator now recognize
+    `return (expr1, expr2);`
+    and
+    `return cond ? then_expr : else_expr;`
+    when their subexpressions are already evaluable under the current helper
+    binding model
+  - current visible checkpoint:
+    returned-dynamic closure helpers such as
+    `return (g(y), g(y) + base);`
+    and
+    `return g(y) ? g(y) + base : base;`
+    no longer fail with `IR-INT-148`. The comma family keeps both wrapped call
+    side effects visible in caller-side canonical IR / lower-IR, while the
+    ternary family now lowers through caller-side branch blocks plus the
+    wrapped `__fnwrap_add1` dispatches instead of falling back to
+    `pickh__closure_*` helper shells
+  - practical meaning:
+    the helper-body evaluator is no longer limited to “straight-line scalar
+    arithmetic around calls”; it now covers one more slice of ordinary
+    expression control structure. That moves the remaining mainline gap more
+    honestly toward broader statement/control-flow transport rather than small
+    expression syntax holes
+  - focused and broad rechecks after this step:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-COMMA-EVAL` PASS,
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-TERNARY-EVAL` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-COMMA-EVAL` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-TERNARY-EVAL` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-COMMA-EVAL` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-TERNARY-EVAL` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS
+- 2026-06-03 statement-call-prefix helper-body follow-up:
+  - the helper-body evaluator now also accepts one first straight-line
+    statement-level side-effect shape instead of requiring every non-mutating
+    expression to be embedded inside the final return expression itself
+  - landed evaluator broadening:
+    when a helper body contains an expression statement whose expression is
+    itself evaluable under the current binding model, the evaluator now emits
+    it for side effects and discards the result before continuing to the final
+    return
+  - current visible checkpoint:
+    returned-dynamic closure helpers such as
+    `g(y); return g(y) + base;`
+    and the nearby repeated-call sibling
+    `g(g(y)); return g(g(y)) + base;`
+    no longer fail with `IR-INT-148`. Canonical IR / lower-IR / compiler
+    output now keep the expected extra wrapped call side effects visible in
+    caller-side code while still avoiding `pickh__closure_*` / `__fv_*` shell
+    fallback
+  - practical meaning:
+    the mainline has now moved beyond “single return expression with richer
+    syntax” into one first honest straight-line statement-body slice. The next
+    remaining gap is therefore more cleanly about small control-flow
+    statements such as simple `if` bodies, not about whether every helper-side
+    side-effect call must be hidden inside a comma expression
+  - focused and broad rechecks after this step:
+    `./build/ir/ir_regression_test IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-STMT-CALL-PREFIX` PASS,
+    `./build/lower_ir/lower_ir_regression_test LOWER-IR-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-STMT-CALL-PREFIX` PASS,
+    `./build/compiler_tests/compiler_driver_test COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-STMT-CALL-PREFIX` PASS,
+    `./build/ir/ir_regression_test` PASS,
+    `./build/lower_ir/lower_ir_regression_test` PASS,
+    `./build/compiler_tests/compiler_driver_test` PASS

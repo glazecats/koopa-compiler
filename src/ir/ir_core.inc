@@ -92,6 +92,10 @@ void ir_program_init(IrProgram *program) {
     program->function_shapes = NULL;
     program->function_shape_count = 0;
     program->function_shape_capacity = 0;
+    program->function_external_refs = NULL;
+    program->function_external_ref_owned = NULL;
+    program->function_external_ref_count = 0;
+    program->function_external_ref_capacity = 0;
     program->globals = NULL;
     program->global_count = 0;
     program->global_capacity = 0;
@@ -114,6 +118,32 @@ void ir_program_free(IrProgram *program) {
     program->function_shapes = NULL;
     program->function_shape_count = 0;
     program->function_shape_capacity = 0;
+
+    if (program->function_external_refs && program->function_external_ref_owned) {
+        for (i = 0; i < program->function_external_ref_count; ++i) {
+            if (program->function_external_ref_owned[i] &&
+                program->function_external_refs[i]) {
+                AstExternal *owned_external =
+                    (AstExternal *)program->function_external_refs[i];
+                free(owned_external->parameter_names);
+                free(owned_external->parameter_value_kinds);
+                free(owned_external->parameter_function_return_types);
+                free(owned_external->parameter_function_parameter_counts);
+                free(owned_external->parameter_function_parameter_value_kinds);
+                free(owned_external->parameter_function_parameter_return_types);
+                free(owned_external->parameter_function_parameter_parameter_counts);
+                free(owned_external->parameter_name_lines);
+                free(owned_external->parameter_name_columns);
+                free(owned_external);
+            }
+        }
+    }
+    free(program->function_external_refs);
+    free(program->function_external_ref_owned);
+    program->function_external_refs = NULL;
+    program->function_external_ref_owned = NULL;
+    program->function_external_ref_count = 0;
+    program->function_external_ref_capacity = 0;
 
     for (i = 0; i < program->global_count; ++i) {
         ir_global_free(&program->globals[i]);
@@ -289,6 +319,88 @@ static int ir_program_append_function_shape(IrProgram *program,
         *out_shape_id = shape->id;
     }
     return 1;
+}
+
+static int ir_program_bind_function_external_ref(IrProgram *program,
+    const char *function_name,
+    const AstExternal *external,
+    int external_is_owned,
+    IrError *error) {
+    size_t function_index;
+
+    if (!program || !function_name || function_name[0] == '\0') {
+        ir_set_error(error, 0, 0, "IR-INT-141: invalid function external-ref bind contract");
+        return 0;
+    }
+
+    for (function_index = 0u; function_index < program->function_count; ++function_index) {
+        if (program->functions &&
+            program->functions[function_index].name &&
+            strcmp(program->functions[function_index].name, function_name) == 0) {
+            if (program->function_external_ref_capacity < program->function_count) {
+                const AstExternal **new_refs =
+                    (const AstExternal **)realloc(
+                        program->function_external_refs,
+                        program->function_count * sizeof(const AstExternal *));
+                int *new_owned =
+                    (int *)realloc(
+                        program->function_external_ref_owned,
+                        program->function_count * sizeof(int));
+                size_t fill_index;
+
+                if (!new_refs || !new_owned) {
+                    if (new_refs && !program->function_external_refs) {
+                        free((void *)new_refs);
+                    }
+                    if (new_owned && !program->function_external_ref_owned) {
+                        free(new_owned);
+                    }
+                    ir_set_error(error, 0, 0, "IR-INT-142: out of memory while growing function external-ref table");
+                    return 0;
+                }
+                for (fill_index = program->function_external_ref_capacity;
+                        fill_index < program->function_count;
+                        ++fill_index) {
+                    new_refs[fill_index] = NULL;
+                    new_owned[fill_index] = 0;
+                }
+                program->function_external_refs = new_refs;
+                program->function_external_ref_owned = new_owned;
+                program->function_external_ref_capacity = program->function_count;
+            }
+            program->function_external_refs[function_index] = external;
+            program->function_external_ref_owned[function_index] = external_is_owned ? 1 : 0;
+            if (program->function_external_ref_count < function_index + 1u) {
+                program->function_external_ref_count = function_index + 1u;
+            }
+            return 1;
+        }
+    }
+
+    ir_set_error(error, 0, 0, "IR-INT-143: failed to bind function external ref for unknown function '%s'", function_name);
+    return 0;
+}
+
+static const AstExternal *ir_program_find_function_external_ref(const IrProgram *program,
+    const char *function_name) {
+    size_t function_index;
+
+    if (!program || !function_name || function_name[0] == '\0' ||
+        !program->functions || !program->function_external_refs) {
+        return NULL;
+    }
+
+    for (function_index = 0u;
+            function_index < program->function_count &&
+            function_index < program->function_external_ref_count;
+            ++function_index) {
+        if (program->functions[function_index].name &&
+            strcmp(program->functions[function_index].name, function_name) == 0) {
+            return program->function_external_refs[function_index];
+        }
+    }
+
+    return NULL;
 }
 
 

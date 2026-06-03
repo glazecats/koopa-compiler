@@ -74,6 +74,23 @@ static int compiler_test_contains_putint_imm_sequence(const char *text,
     return 1;
 }
 
+static size_t compiler_test_count_fragment_occurrences(const char *text, const char *fragment) {
+    const char *cursor;
+    size_t count = 0u;
+
+    if (!text || !fragment || fragment[0] == '\0') {
+        return 0u;
+    }
+
+    cursor = text;
+    while ((cursor = strstr(cursor, fragment)) != NULL) {
+        ++count;
+        cursor += strlen(fragment);
+    }
+
+    return count;
+}
+
 
 
 
@@ -4823,7 +4840,7 @@ static int test_compiler_accepts_dynamic_local_closure_function_valued_return_fo
         !output ||
         strstr(output, ".globl pick__closure_f_") == NULL ||
         strstr(output, ".globl pick__closure_g_") == NULL ||
-        strstr(output, "  call pick\n") == NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
         strstr(output, "  call pick__closure_f_") == NULL ||
         strstr(output, "  call pick__closure_g_") == NULL ||
         strstr(output, "beq") == NULL) {
@@ -4848,10 +4865,10 @@ static int test_compiler_accepts_multi_capture_closure_forward_into_parameter_un
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply__fv_0_main__closure_f_") == NULL ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "__fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "call __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "call main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: multi-capture closure forwarding into function-valued parameter should compile under extension: %s\n",
             error.message);
@@ -4888,6 +4905,33 @@ static int test_compiler_accepts_returned_multi_capture_local_closure_bind_and_c
     return ok;
 }
 
+static int test_compiler_accepts_returned_multi_capture_closure_forward_into_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int,int), int a, int b){ return f(a,b); }\n"
+        "int make(int x,int y)(int,int) { return closure [x,y] int (int a, int b) { return x + y + a + b; }; }\n"
+        "int main(){ return apply(make(3,4), 5, 6); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl __fnwrap_closure_make__retclosure_") == NULL ||
+        strstr(output, ".globl make__retclosure_") == NULL ||
+        strstr(output, "  call make\n") == NULL ||
+        strstr(output, "call __fnwrap_closure_make__retclosure_") == NULL ||
+        strstr(output, "call make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned multi-capture closure forwarding into parameter should compile through callable-object path under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_accepts_dynamic_returned_multi_capture_local_closure_forward_into_parameter_under_extension(void) {
     static const char *source =
         "int apply(int f(int,int), int a, int b){ return f(a,b); }\n"
@@ -4900,17 +4944,17 @@ static int test_compiler_accepts_dynamic_returned_multi_capture_local_closure_fo
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply__fv_0_pick__closure_f_") == NULL ||
-        strstr(output, ".globl apply__fv_0_pick__closure_g_") == NULL ||
         strstr(output, ".globl pick__closure_f_") == NULL ||
         strstr(output, ".globl pick__closure_g_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
         strstr(output, "  call pick\n") == NULL ||
-        strstr(output, "  call apply__fv_0_pick__closure_f_") == NULL ||
-        strstr(output, "  call apply__fv_0_pick__closure_g_") == NULL ||
-        strstr(output, "beq") == NULL) {
+        strstr(output, "call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "call __fnwrap_closure_pick__closure_g_") == NULL) {
         fprintf(stderr,
-            "[compiler] FAIL: dynamic returned multi-capture local closure forwarding into parameter should compile under extension: %s\n",
-            error.message);
+            "[compiler] FAIL: dynamic returned multi-capture local closure forwarding into parameter should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
         ok = 0;
     }
 
@@ -5152,6 +5196,36 @@ static int test_compiler_accepts_dynamic_noncapturing_function_valued_return_imm
     return ok;
 }
 
+static int test_compiler_accepts_dynamic_noncapturing_two_arg_function_valued_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int add(int x,int y){ return x+y; }\n"
+        "int sub(int x,int y){ return x-y; }\n"
+        "int pick(int c)(int,int) { int f(int,int)=add; if(c) f=sub; return f; }\n"
+        "int main(){ return pick(1)(9, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, ".globl __fnwrap_add\n.type __fnwrap_add, @function\n__fnwrap_add:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_sub\n.type __fnwrap_sub, @function\n__fnwrap_sub:\n") == NULL ||
+        strstr(output, "  call __fnwrap_add\n") == NULL ||
+        strstr(output, "  call __fnwrap_sub\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic noncapturing two-arg function-valued return immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_accepts_dynamic_noncapturing_function_valued_return_bind_and_call_under_extension(void) {
     static const char *source =
         "int add1(int x){ return x+1; }\n"
@@ -5245,7 +5319,7 @@ static int test_compiler_accepts_ternary_closure_function_value_return_immediate
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, "  call pick\n") == NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
         strstr(output, "  call putint\n") == NULL ||
         strstr(output, "pick__closure_f_") == NULL ||
         strstr(output, "pick__closure_g_") == NULL) {
@@ -5345,8 +5419,8 @@ static int test_compiler_accepts_direct_call_of_function_valued_parameter_with_s
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply__fv_0_add1\n.type apply__fv_0_add1, @function\napply__fv_0_add1:\n") == NULL ||
-        strstr(output, "  call apply__fv_0_add1\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add1\n.type __fnwrap_add1, @function\n__fnwrap_add1:\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
         strstr(output, "  call add1\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: direct call of function-valued parameter should compile via specialization lowering: %s\n",
@@ -5371,10 +5445,10 @@ static int test_compiler_accepts_direct_call_of_function_valued_parameter_with_m
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply__fv_0_add1\n.type apply__fv_0_add1, @function\napply__fv_0_add1:\n") == NULL ||
-        strstr(output, ".globl apply__fv_0_double1\n.type apply__fv_0_double1, @function\napply__fv_0_double1:\n") == NULL ||
-        strstr(output, "  call apply__fv_0_add1\n") == NULL ||
-        strstr(output, "  call apply__fv_0_double1\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add1\n.type __fnwrap_add1, @function\n__fnwrap_add1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_double1\n.type __fnwrap_double1, @function\n__fnwrap_double1:\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_double1\n") == NULL ||
         strstr(output, "  call add1\n") == NULL ||
         strstr(output, "  call double1\n") == NULL) {
         fprintf(stderr,
@@ -5444,10 +5518,7 @@ static int test_compiler_accepts_forwarding_function_valued_parameter_with_speci
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl wrapper__fv_0_add1\n.type wrapper__fv_0_add1, @function\nwrapper__fv_0_add1:\n") == NULL ||
-        strstr(output, ".globl apply__fv_0_add1\n.type apply__fv_0_add1, @function\napply__fv_0_add1:\n") == NULL ||
-        strstr(output, "  call wrapper__fv_0_add1\n") == NULL ||
-        strstr(output, "  call apply__fv_0_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
         strstr(output, "  call add1\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: function-valued parameter forwarding should compile via chained specialization lowering: %s\n",
@@ -5472,13 +5543,1260 @@ static int test_compiler_accepts_multiple_function_valued_parameters_with_specia
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output,
-            ".globl compose__fv_0_add1_1_double1\n.type compose__fv_0_add1_1_double1, @function\ncompose__fv_0_add1_1_double1:\n") == NULL ||
-        strstr(output, "  call compose__fv_0_add1_1_double1\n") == NULL ||
+        strstr(output, "compose__fv_0_add1_1_double1") != NULL ||
+        strstr(output, "  call __fnwrap_double1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
         strstr(output, "  call double1\n") == NULL ||
         strstr(output, "  call add1\n") == NULL) {
         fprintf(stderr,
-            "[compiler] FAIL: multiple function-valued parameters should compile via specialization lowering: %s\n",
+            "[compiler] FAIL: multiple function-valued parameters should compile via callable-object passthrough lowering: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return pass(apply, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "pass__fv_0_apply_1_add1") != NULL ||
+        strstr(output, "apply__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_closure_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z){ return y+z; }; return pass(apply, f, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL ||
+        strstr(output, "pass__fv_0_apply_1_main__closure_f_") != NULL ||
+        strstr(output, "apply__fv_0_main__closure_f_") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order closure function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_zero_arg_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int pass0(int h(int f()), int f()){ return h(f); }\n"
+        "int next(){ return 7; }\n"
+        "int main(){ return pass0(apply0, next); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        (strstr(output, "  li a0, 1\n") == NULL &&
+            (strstr(output, "  call __fnwrap_next\n") == NULL ||
+                strstr(output, "  call next\n") == NULL)) ||
+        strstr(output, "pass0__fv_0_apply0_1_next") != NULL ||
+        strstr(output, "apply0__fv_0_next") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order zero-arg function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_zero_arg_wrapper_scalar_update_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int next(){ return 1; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int pass0(int h(int f()), int f()){ int x=0; x=x+1; return h(f); }\n"
+        "int main(){ return pass0(apply0, next); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        (strstr(output, "  li a0, 1\n") == NULL &&
+            (strstr(output, "  call __fnwrap_next\n") == NULL ||
+                strstr(output, "  call next\n") == NULL)) ||
+        strstr(output, "pass0__fv_0_apply0_1_next") != NULL ||
+        strstr(output, "apply0__fv_0_next") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order zero-arg wrapper scalar-update function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_zero_arg_wrapper_scalar_update_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "int next(){ return 1; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int pass0(int h(int f()), int f()){ int x=0; x=x+1; return h(f); }\n"
+        "int idh0(int q(int h(int f()), int f()))(int h(int f()), int f()){ return q; }\n"
+        "int main(){ return idh0(pass0)(apply0, next); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call idh0\n") != NULL ||
+        strstr(output, "pass0__fv_0_apply0_1_next") != NULL ||
+        strstr(output, "apply0__fv_0_next") != NULL ||
+        strstr(output, "  li a0, 1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned zero-arg wrapper scalar-update immediate-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_zero_arg_wrapper_scalar_update_function_value_parameter_bind_call_under_extension(void) {
+    static const char *source =
+        "int next(){ return 1; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int pass0(int h(int f()), int f()){ int x=0; x=x+1; return h(f); }\n"
+        "int idh0(int q(int h(int f()), int f()))(int h(int f()), int f()){ return q; }\n"
+        "int main(){ int g(int h(int f()), int f())=idh0(pass0); return g(apply0, next); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call idh0\n") != NULL ||
+        strstr(output, "pass0__fv_0_apply0_1_next") != NULL ||
+        strstr(output, "apply0__fv_0_next") != NULL ||
+        strstr(output, "  li a0, 1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned zero-arg wrapper scalar-update bind-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_zero_arg_closure_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int pass0(int h(int f()), int f()){ return h(f); }\n"
+        "int main(){ int y=3; int f()=closure [y] int (){ return y; }; return pass0(apply0, f); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL ||
+        strstr(output, "pass0__fv_0_apply0_1_main__closure_f_") != NULL ||
+        strstr(output, "apply0__fv_0_main__closure_f_") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order zero-arg closure function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_zero_arg_void_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void pass0(void h(void f()), void f()){ h(f); return; }\n"
+        "void ping(){ putint(7); return; }\n"
+        "int main(){ pass0(apply0, ping); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_ping\n") == NULL ||
+        strstr(output, "  call ping\n") == NULL ||
+        strstr(output, "pass0__fv_0_apply0_1_ping") != NULL ||
+        strstr(output, "apply0__fv_0_ping") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order zero-arg void function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_zero_arg_void_wrapper_scalar_update_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "void ping(){ putint(1); return; }\n"
+        "void apply0(void f()){ f(); }\n"
+        "void pass0(void h(void f()), void f()){ int x=0; x=x+1; h(f); return; }\n"
+        "int main(){ pass0(apply0, ping); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_ping\n") == NULL ||
+        strstr(output, "  call ping\n") == NULL ||
+        strstr(output, "pass0__fv_0_apply0_1_ping") != NULL ||
+        strstr(output, "apply0__fv_0_ping") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order zero-arg void wrapper scalar-update function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_zero_arg_void_wrapper_scalar_update_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "void ping(){ putint(1); return; }\n"
+        "void apply0(void f()){ f(); }\n"
+        "void pass0(void h(void f()), void f()){ int x=0; x=x+1; h(f); return; }\n"
+        "void idv0(void q(void h(void f()), void f()))(void h(void f()), void f()){ return q; }\n"
+        "int main(){ idv0(pass0)(apply0, ping); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call idv0\n") != NULL ||
+        strstr(output, "pass0__fv_0_apply0_1_ping") != NULL ||
+        strstr(output, "apply0__fv_0_ping") != NULL ||
+        strstr(output, "  call __fnwrap_ping\n") == NULL ||
+        strstr(output, "  call ping\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned zero-arg void wrapper scalar-update immediate-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_zero_arg_void_wrapper_scalar_update_function_value_parameter_bind_call_under_extension(void) {
+    static const char *source =
+        "void ping(){ putint(1); return; }\n"
+        "void apply0(void f()){ f(); }\n"
+        "void pass0(void h(void f()), void f()){ int x=0; x=x+1; h(f); return; }\n"
+        "void idv0(void q(void h(void f()), void f()))(void h(void f()), void f()){ return q; }\n"
+        "int main(){ void g(void h(void f()), void f())=idv0(pass0); g(apply0, ping); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call idv0\n") != NULL ||
+        strstr(output, "pass0__fv_0_apply0_1_ping") != NULL ||
+        strstr(output, "apply0__fv_0_ping") != NULL ||
+        strstr(output, "  call __fnwrap_ping\n") == NULL ||
+        strstr(output, "  call ping\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned zero-arg void wrapper scalar-update bind-call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_third_order_zero_arg_wrapper_scalar_update_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int next(){ return 1; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int pass0(int h(int f()), int f()){ int x=0; x=x+1; return h(f); }\n"
+        "int relay0(int q(int h(int f()), int f()), int h(int f()), int f()){ return q(h, f); }\n"
+        "int main(){ return relay0(pass0, apply0, next); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        (strstr(output, "  li a0, 1\n") == NULL &&
+            (strstr(output, "  call __fnwrap_next\n") == NULL ||
+                strstr(output, "  call next\n") == NULL)) ||
+        strstr(output, "relay0__fv_0_pass0_1_apply0_2_next") != NULL ||
+        strstr(output, "pass0__fv_0_apply0_1_next") != NULL ||
+        strstr(output, "apply0__fv_0_next") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: third-order zero-arg wrapper scalar-update function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_third_order_zero_arg_void_wrapper_scalar_update_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "void ping(){ putint(1); return; }\n"
+        "void apply0(void f()){ f(); }\n"
+        "void pass0(void h(void f()), void f()){ int x=0; x=x+1; h(f); return; }\n"
+        "void relay0(void q(void h(void f()), void f()), void h(void f()), void f()){ q(h, f); return; }\n"
+        "int main(){ relay0(pass0, apply0, ping); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_ping\n") == NULL ||
+        strstr(output, "  call ping\n") == NULL ||
+        strstr(output, "relay0__fv_0_pass0_1_apply0_2_ping") != NULL ||
+        strstr(output, "pass0__fv_0_apply0_1_ping") != NULL ||
+        strstr(output, "apply0__fv_0_ping") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: third-order zero-arg void wrapper scalar-update function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_zero_arg_void_closure_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void pass0(void h(void f()), void f()){ h(f); return; }\n"
+        "int main(){ int y=3; void f()=closure [y] void (){ putint(y); return; }; pass0(apply0, f); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL ||
+        strstr(output, "pass0__fv_0_apply0_1_main__closure_f_") != NULL ||
+        strstr(output, "apply0__fv_0_main__closure_f_") != NULL ||
+        strstr(output, "  call pass0\n") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order zero-arg void closure function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_passthrough_dynamic_zero_arg_void_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "void applyv(void f()){ f(); return; }\n"
+        "void applyv_twice(void f()){ f(); f(); return; }\n"
+        "void ping(){ putint(7); return; }\n"
+        "void idhv(void h(void f()))(void f()){ return h; }\n"
+        "void pickhv(int c)(void f()){ return c ? applyv : applyv_twice; }\n"
+        "int main(){ idhv(pickhv(getint()))(ping); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call pickhv") == NULL ||
+        strstr(output, "  call __fnwrap_ping\n") == NULL ||
+        strstr(output, "  call ping\n") == NULL ||
+        strstr(output, "applyv__fv_0_ping") != NULL ||
+        strstr(output, "applyv_twice__fv_0_ping") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned passthrough dynamic zero-arg void function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_passthrough_dynamic_zero_arg_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int apply0_twice(int f()){ return f() + f(); }\n"
+        "int next(){ return 7; }\n"
+        "int idh0(int h(int f()))(int f()){ return h; }\n"
+        "int pickh0(int c)(int f()){ return c ? apply0 : apply0_twice; }\n"
+        "int main(){ return idh0(pickh0(getint()))(next); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call pickh0") == NULL ||
+        strstr(output, "  call __fnwrap_next\n") == NULL ||
+        strstr(output, "  call next\n") == NULL ||
+        strstr(output, "apply0__fv_0_next") != NULL ||
+        strstr(output, "apply0_twice__fv_0_next") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned passthrough dynamic zero-arg function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_local_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int h(int f(int), int x)=apply; return pass(h, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order local function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_local_reassigned_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ int k(int f(int), int x)=h; k=h; return k(f, x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int h(int f(int), int x)=apply; return pass(h, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order local reassigned function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_local_scalar_and_reassigned_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ int y=x; int k(int f(int), int x)=h; k=h; return k(f, y); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return pass(apply, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order local scalar+reassigned function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_local_wrapper_scalar_update_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ int y=x; y=y+1; return h(f, y); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int h(int f(int), int x)=apply; return pass(h, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order local wrapper scalar-update function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_local_wrapper_repeated_scalar_update_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ int y=x; y=y+1; y=y+1; return h(f, y); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int h(int f(int), int x)=apply; return pass(h, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order local wrapper repeated scalar-update function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_third_order_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int relay(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return q(h, f, x); }\n"
+        "int main(){ return relay(pass, apply, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: third-order function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_third_order_wrapper_scalar_update_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int relay(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ int y=x; y=y+1; return q(h, f, y); }\n"
+        "int main(){ return relay(pass, apply, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: third-order wrapper scalar-update function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_third_order_wrapper_repeated_scalar_update_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ int y=x; y=y+1; y=y+1; return h(f, y); }\n"
+        "int relay(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return q(h, f, x); }\n"
+        "int main(){ return relay(pass, apply, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: third-order wrapper repeated scalar-update function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_third_order_returned_function_value_parameter_bind_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int id3(int q(int h(int f(int), int x), int f(int), int x))(int h(int f(int), int x), int f(int), int x){ return q; }\n"
+        "int main(){ int g(int h(int f(int), int x), int f(int), int x)=id3(pass); return g(apply, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "pass__fv_0_apply_1_add1") != NULL ||
+        strstr(output, "apply__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: third-order returned function-value parameter bind should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_third_order_local_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int relay(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return q(h, f, x); }\n"
+        "int main(){ int g(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x)=relay; return g(pass, apply, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "relay__fv_0_pass_1_apply_2_add1") != NULL ||
+        strstr(output, "pass__fv_0_apply_1_add1") != NULL ||
+        strstr(output, "apply__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: third-order local function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(apply)(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "apply__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned function-value parameter immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_closure_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z){ return y+z; }; return idh(apply)(f, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL ||
+        strstr(output, "  call idh\n") != NULL ||
+        strstr(output, "  call apply\n") != NULL ||
+        strstr(output, "apply__fv_0_main__closure_f_") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned closure function-value parameter immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_dynamic_returned_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int apply_twice(int f(int), int x){ return f(f(x)); }\n"
+        "int pick(int c)(int f(int), int x){ return c ? apply : apply_twice; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return pick(getint())(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call pick") == NULL ||
+        strstr(output, "call apply__fv_0_add1") != NULL ||
+        strstr(output, "call apply_twice__fv_0_add1") != NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 3u ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order dynamic returned function-value parameter immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_passthrough_dynamic_noncapturing_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int apply_twice(int f(int), int x){ return f(f(x)); }\n"
+        "int pickh_nc(int c)(int f(int), int x){ return c ? apply : apply_twice; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(pickh_nc(getint()))(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call pickh_nc") == NULL ||
+        strstr(output, "  call idh\n") != NULL ||
+        strstr(output, "call apply__fv_0_add1") != NULL ||
+        strstr(output, "call apply_twice__fv_0_add1") != NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 3u ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned passthrough dynamic noncapturing function-value parameter immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_passthrough_dynamic_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int pickh(int base, int c)(int f(int), int x){ int h(int f(int), int x)=closure [base] int (int g(int), int y){ return g(y) + base; }; int k(int f(int), int x)=closure [base] int (int g(int), int y){ return g(g(y)) + base; }; if(c) h=k; return h; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(pickh(5, getint()))(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call pickh") == NULL ||
+        strstr(output, "pickh__closure_h_") != NULL ||
+        strstr(output, "pickh__closure_k_") != NULL ||
+        strstr(output, "__fv_1_add1") != NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 3u ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned passthrough dynamic function-value parameter immediate call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_dynamic_local_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int apply_twice(int f(int), int x){ return f(f(x)); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int c=getint(); int h(int f(int), int x)= c ? apply : apply_twice; return pass(h, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "pass__fv_0_apply_1_add1") != NULL ||
+        strstr(output, "pass__fv_0_apply_twice_1_add1") != NULL ||
+        strstr(output, "apply_twice__fv_0_add1") != NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 3u) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order dynamic local function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_dynamic_local_closure_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int apply_twice(int f(int), int x){ return f(f(x)); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int main(){ int c=getint(); int y=3; int f(int)=closure [y] int (int z){ return y+z; }; int h(int f(int), int x)= c ? apply : apply_twice; return pass(h, f, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "pass__fv_0_apply_1_main__closure_f_") != NULL ||
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "  call main__closure_f_") == NULL ||
+        strstr(output, "apply__fv_0_main__closure_f_") != NULL ||
+        strstr(output, "  call pass\n") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order dynamic local closure function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int id(int f(int))(int){ return f; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int wrapper(int f(int), int x){ int g(int)=id(f); return apply(g, x); }\n"
+        "int main(){ return wrapper(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "wrapper__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: passthrough decl-local function-value forwarding should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_function_value_direct_call_without_specialization_shell(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int test(int f(int), int x){ int g(int)=f; return g(x); }\n"
+        "int main(){ return test(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "test__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local function-value direct call should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_scalar_rebind_function_value_direct_call_without_specialization_shell(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int test(int f(int), int x){ int y=x; return f(y); }\n"
+        "int main(){ return test(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "test__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local scalar rebind function-value direct call should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_scalar_and_alias_function_value_direct_call_without_specialization_shell(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int test(int f(int), int x){ int y=x; int g(int)=f; return g(y); }\n"
+        "int main(){ return test(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "test__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local scalar+alias function-value direct call should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_scalar_update_function_value_direct_call_without_specialization_shell(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int test(int f(int), int x){ int y=x; y=y+1; return f(y); }\n"
+        "int main(){ return test(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "test__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local scalar update function-value direct call should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_scalar_update_and_alias_function_value_direct_call_without_specialization_shell(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int test(int f(int), int x){ int y=x; y=y+1; int g(int)=f; g=f; return g(y); }\n"
+        "int main(){ return test(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "test__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local scalar update+alias function-value direct call should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_call_update_function_value_direct_call_without_specialization_shell(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int test(int f(int), int x){ int y=x; y=f(y); return y; }\n"
+        "int main(){ return test(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "test__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local call update function-value direct call should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_repeated_call_update_function_value_direct_call_without_specialization_shell(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int test(int f(int), int x){ int y=x; y=f(y); y=f(y); return y; }\n"
+        "int main(){ return test(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 2u ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "test__fv_0_add1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local repeated call update function-value direct call should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_two_callable_update_without_specialization_shell(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int double1(int x){ return x*2; }\n"
+        "int test(int f(int), int g(int), int x){ int y=x; y=g(y); y=f(y); return y; }\n"
+        "int main(){ return test(add1, double1, 20); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_double1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call double1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "compose__fv_0_add1_1_double1") != NULL ||
+        strstr(output, "test__fv_0_add1_1_double1") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local two-callable update should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_zero_arg_function_value_direct_call_without_specialization_shell(void) {
+    static const char *source =
+        "int next(){ return 7; }\n"
+        "int test(int f()){ int g()=f; return g(); }\n"
+        "int main(){ return test(next); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_next\n") == NULL ||
+        strstr(output, "  call next\n") == NULL ||
+        strstr(output, "test__fv_0_next") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local zero-arg function-value direct call should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_zero_arg_void_function_value_direct_call_without_specialization_shell(void) {
+    static const char *source =
+        "void ping(){ putint(7); return; }\n"
+        "int test(void f()){ void g()=f; g(); return 0; }\n"
+        "int main(){ return test(ping); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_ping\n") == NULL ||
+        strstr(output, "  call ping\n") == NULL ||
+        strstr(output, "test__fv_0_ping") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local zero-arg void function-value direct call should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_closure_direct_call_without_specialization_shell(void) {
+    static const char *source =
+        "int test(int f(int), int x){ int g(int)=f; return g(x); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z){ return y+z; }; return test(f, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "call main__closure_f_") == NULL ||
+        strstr(output, "test__fv_0_main__closure_f_") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local closure direct call should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_closure_forward_without_specialization_shell(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int test(int f(int), int x){ int g(int)=f; return apply(g, x); }\n"
+        "int main(){ int y=3; int f(int)=closure [y] int (int z){ return y+z; }; return test(f, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "call main__closure_f_") == NULL ||
+        strstr(output, "test__fv_0_main__closure_f_") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local closure forwarding should compile without specialization shell: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_parameter_local_zero_arg_void_function_value_forward_without_specialization_shell(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void ping(){ putint(7); return; }\n"
+        "int test(void f()){ void g()=f; apply0(g); return 0; }\n"
+        "int main(){ return test(ping); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_ping\n") == NULL ||
+        strstr(output, "  call ping\n") == NULL ||
+        strstr(output, "test__fv_0_ping") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: parameter-local zero-arg void function-value forwarding should compile without specialization shell: %s\n",
             error.message);
         ok = 0;
     }
@@ -5498,8 +6816,8 @@ static int test_compiler_accepts_void_function_valued_parameter_with_builtin_bin
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply__fv_0_putint\n.type apply__fv_0_putint, @function\napply__fv_0_putint:\n") == NULL ||
-        strstr(output, "  call apply__fv_0_putint\n") == NULL ||
+        strstr(output, ".globl __fnwrap_putint\n.type __fnwrap_putint, @function\n__fnwrap_putint:\n") == NULL ||
+        strstr(output, "  call __fnwrap_putint\n") == NULL ||
         strstr(output, "  call putint\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: void function-valued parameter should compile with builtin binding: %s\n",
@@ -5523,8 +6841,8 @@ static int test_compiler_accepts_zero_arg_function_valued_parameter_with_special
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply0__fv_0_next\n.type apply0__fv_0_next, @function\napply0__fv_0_next:\n") == NULL ||
-        strstr(output, "  call apply0__fv_0_next\n") == NULL ||
+        strstr(output, ".globl __fnwrap_next\n.type __fnwrap_next, @function\n__fnwrap_next:\n") == NULL ||
+        strstr(output, "  call __fnwrap_next\n") == NULL ||
         strstr(output, "  call next\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: zero-arg function-valued parameter should compile with specialization lowering: %s\n",
@@ -5548,8 +6866,8 @@ static int test_compiler_accepts_zero_arg_void_function_valued_parameter_with_sp
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply0__fv_0_ping\n.type apply0__fv_0_ping, @function\napply0__fv_0_ping:\n") == NULL ||
-        strstr(output, "  call apply0__fv_0_ping\n") == NULL ||
+        strstr(output, ".globl __fnwrap_ping\n.type __fnwrap_ping, @function\n__fnwrap_ping:\n") == NULL ||
+        strstr(output, "  call __fnwrap_ping\n") == NULL ||
         strstr(output, "  call ping\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: zero-arg void function-valued parameter should compile with specialization lowering: %s\n",
@@ -5906,6 +7224,201 @@ static int test_compiler_accepts_local_function_value_reassignment_under_extensi
     return ok;
 }
 
+static int test_compiler_accepts_returned_function_value_reassignment_under_extension(void);
+static int test_compiler_accepts_returned_zero_arg_function_value_reassignment_under_extension(void);
+static int test_compiler_accepts_returned_closure_reassignment_under_extension(void);
+static int test_compiler_accepts_returned_zero_arg_void_closure_reassignment_under_extension(void);
+
+static int test_compiler_accepts_returned_function_value_reassignment_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; if(c) f=g; return f; }\n"
+        "int main(){ int h(int)=add1; h=pick(1); return h(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned function-value reassignment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_zero_arg_function_value_reassignment_under_extension(void) {
+    static const char *source =
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; if(c) f=g; return f; }\n"
+        "int main(){ int h()=next1; h=pick(1); return h(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call next2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned zero-arg function-value reassignment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_closure_reassignment_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int main(){ int h(int)=make(3); h=make(4); return h(5); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call make\n") != 2u ||
+        strstr(output, "make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned closure reassignment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_zero_arg_void_closure_reassignment_under_extension(void) {
+    static const char *source =
+        "void make(int x)(){ return closure [x] void (){ putint(x); return; }; }\n"
+        "int main(){ void h()=make(3); h=make(4); h(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call make\n") != 2u ||
+        strstr(output, "make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned zero-arg void closure reassignment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_function_value_reassignment_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int f(int)=add1; int g(int)=add2; f=(0, g); return f(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped function-value reassignment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_assignment_result_function_value_reassignment_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int f(int)=add1; int g(int)=add2; int h(int)=add1; f=(h=g); return f(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: assignment-result function-value reassignment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_function_value_reassignment_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; if(c) f=g; return f; }\n"
+        "int main(){ int h(int)=add1; h=(0, pick(1)); return h(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned function-value reassignment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_assignment_result_returned_closure_reassignment_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int main(){ int h(int)=make(3); int g(int)=make(5); h=(g=make(4)); return h(5); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call make\n") != 3u ||
+        strstr(output, "make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: assignment-result returned closure reassignment should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_accepts_dynamic_local_function_value_dispatch_under_extension(void) {
     static const char *source =
         "int add1(int x){ return x+1; }\n"
@@ -6015,8 +7528,8 @@ static int test_compiler_accepts_local_function_value_forwarding_into_function_p
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, "apply__fv_0_add1") == NULL ||
-        strstr(output, "  call apply__fv_0_add1\n") == NULL ||
+        strstr(output, "__fnwrap_add1") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
         strstr(output, "  call add1\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: local function value forwarding into function-valued parameter should compile under extension: %s\n",
@@ -6248,6 +7761,62 @@ static int test_compiler_accepts_ternary_closure_assignment_then_direct_call_und
     return ok;
 }
 
+static int test_compiler_accepts_returned_call_ternary_function_value_assignment_then_direct_call_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return c ? f : g; }\n"
+        "int main(){ int c=getint(); int h(int)=add1; h=((putint(0), c) ? pick(0) : pick(1)); return h(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        strstr(output, "  call getint\n") == NULL ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned-call ternary function-value assignment then direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_returned_call_ternary_closure_assignment_then_direct_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int c)(int){ int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [x] int (int z){ return x-z; }; return c ? f : g; }\n"
+        "int main(){ int c=getint(); int y=9; int h(int)=closure [y] int (int z){ return y+z; }; h=((putint(0), c) ? pick(5,0) : pick(7,1)); return h(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        strstr(output, "  call getint\n") == NULL ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "pick__closure_f_") == NULL ||
+        strstr(output, "pick__closure_g_") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned-call ternary closure assignment then direct call should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_accepts_dynamic_function_value_assignment_then_forward_into_function_parameter_under_extension(void) {
     static const char *source =
         "int add1(int x){ return x+1; }\n"
@@ -6407,6 +7976,1265 @@ static int test_compiler_accepts_wrapped_function_value_local_initializer_under_
         strstr(output, "  call add1\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: wrapped function-value local initializer should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_function_value_local_initializer_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; if(c) f=g; return f; }\n"
+        "int main(){ int h(int)=(0, pick(1)); return h(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned function-value local initializer should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_zero_arg_function_value_local_initializer_under_extension(void) {
+    static const char *source =
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; if(c) f=g; return f; }\n"
+        "int main(){ int h()=(0, pick(1)); return h(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call next2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned zero-arg function-value local initializer should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_assignment_result_returned_closure_local_initializer_under_extension(void) {
+    static const char *source =
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int main(){ int g(int)=make(5); int h(int)=(g=make(4)); return h(5); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call make\n") != 2u ||
+        strstr(output, "__fnwrap_closure_make__retclosure_") == NULL ||
+        strstr(output, "make__retclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: assignment-result returned closure local initializer should compile on wrapped closure local-call path under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_assignment_result_returned_zero_arg_void_closure_local_initializer_under_extension(void) {
+    static const char *source =
+        "void make(int x)(){ return closure [x] void (){ putint(x); return; }; }\n"
+        "int main(){ void g()=make(5); void h()=(g=make(4)); h(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call make\n") != 2u ||
+        strstr(output, "__fnwrap_closure_make__retclosure_") == NULL ||
+        strstr(output, "make__retclosure_") == NULL ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: assignment-result returned zero-arg void closure local initializer should compile on wrapped closure local-call path under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_function_value_local_initializer_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=(0, pick(1)); return h(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary function-value local initializer should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_closure_local_initializer_under_extension(void) {
+    static const char *source =
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=(0, pick(1)); return h(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary closure local initializer should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_function_value_local_bounce_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=(0, pick(1)); int g(int)=h; return g(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary function-value local bounce should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_function_value_forward_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=(0, pick(1)); return apply(h, 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary function-value forward should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_closure_local_bounce_under_extension(void) {
+    static const char *source =
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=(0, pick(1)); int g(int)=h; return g(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary closure local bounce should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_closure_forward_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int main(){ int h(int)=(0, pick(1)); return apply(h, 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary closure forward should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_function_value_bind_return_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); return h; }\n"
+        "int main(){ return wrap()(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary function-value bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_function_value_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); return h; }\n"
+        "int main(){ return apply(wrap(), 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary function-value bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_closure_bind_return_under_extension(void) {
+    static const char *source =
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); return h; }\n"
+        "int main(){ return wrap()(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary closure bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_closure_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); return h; }\n"
+        "int main(){ return apply(wrap(), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary closure bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bind_return_under_extension(void) {
+    static const char *source =
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); return h; }\n"
+        "int main(){ return wrap()(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_next1\n") == NULL ||
+        strstr(output, "  call __fnwrap_next2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg function-value bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); return h; }\n"
+        "int main(){ return apply0(wrap()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_next1\n") == NULL ||
+        strstr(output, "  call __fnwrap_next2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg function-value bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bind_return_under_extension(void) {
+    static const char *source =
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "void pick(int c)(){ void f()=ping1; void g()=ping2; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); return h; }\n"
+        "int main(){ wrap()(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_ping1\n") == NULL ||
+        strstr(output, "  call __fnwrap_ping2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg void function-value bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "void pick(int c)(){ void f()=ping1; void g()=ping2; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); return h; }\n"
+        "int main(){ apply0(wrap()); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_ping1\n") == NULL ||
+        strstr(output, "  call __fnwrap_ping2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg void function-value bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_bind_return_under_extension(void) {
+    static const char *source =
+        "int pick(int c)(){ int x=3; int y=5; int f()=closure [x] int (){ return x; }; int g()=closure [y] int (){ return y; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); return h; }\n"
+        "int main(){ return wrap()(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg closure bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int pick(int c)(){ int x=3; int y=5; int f()=closure [x] int (){ return x; }; int g()=closure [y] int (){ return y; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); return h; }\n"
+        "int main(){ return apply0(wrap()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg closure bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bind_return_under_extension(void) {
+    static const char *source =
+        "void pick(int c)(){ int x=3; int y=5; void f()=closure [x] void (){ putint(x); return; }; void g()=closure [y] void (){ putint(y); return; }; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); return h; }\n"
+        "int main(){ wrap()(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg void closure bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void pick(int c)(){ int x=3; int y=5; void f()=closure [x] void (){ putint(x); return; }; void g()=closure [y] void (){ putint(y); return; }; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); return h; }\n"
+        "int main(){ apply0(wrap()); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg void closure bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_function_value_bounce_passthrough_bind_return_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=id(g); return p; }\n"
+        "int main(){ return wrap()(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary function-value bounce passthrough bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_function_value_bounce_passthrough_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=id(g); return p; }\n"
+        "int main(){ return apply(wrap(), 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary function-value bounce passthrough bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_closure_bounce_passthrough_bind_return_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=id(g); return p; }\n"
+        "int main(){ return wrap()(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary closure bounce passthrough bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_closure_bounce_passthrough_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=id(g); return p; }\n"
+        "int main(){ return apply(wrap(), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary closure bounce passthrough bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bounce_passthrough_bind_return_under_extension(void) {
+    static const char *source =
+        "int id0(int f())(){ return f; }\n"
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=id0(g); return p; }\n"
+        "int main(){ return wrap()(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_next1\n") == NULL ||
+        strstr(output, "  call __fnwrap_next2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg function-value bounce passthrough bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bounce_passthrough_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "int id0(int f())(){ return f; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=id0(g); return p; }\n"
+        "int main(){ return apply0(wrap()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_next1\n") == NULL ||
+        strstr(output, "  call __fnwrap_next2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg function-value bounce passthrough bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bounce_passthrough_bind_return_under_extension(void) {
+    static const char *source =
+        "void idv(void f())(){ return f; }\n"
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "void pick(int c)(){ void f()=ping1; void g()=ping2; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=idv(g); return p; }\n"
+        "int main(){ wrap()(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_ping1\n") == NULL ||
+        strstr(output, "  call __fnwrap_ping2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg void function-value bounce passthrough bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bounce_passthrough_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "void idv(void f())(){ return f; }\n"
+        "void apply0(void f()){ f(); }\n"
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "void pick(int c)(){ void f()=ping1; void g()=ping2; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=idv(g); return p; }\n"
+        "int main(){ apply0(wrap()); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_ping1\n") == NULL ||
+        strstr(output, "  call __fnwrap_ping2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg void function-value bounce passthrough bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_bounce_passthrough_bind_return_under_extension(void) {
+    static const char *source =
+        "int id0(int f())(){ return f; }\n"
+        "int pick(int c)(){ int x=3; int y=5; int f()=closure [x] int (){ return x; }; int g()=closure [y] int (){ return y; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=id0(g); return p; }\n"
+        "int main(){ return wrap()(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg closure bounce passthrough bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_bounce_passthrough_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "int id0(int f())(){ return f; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int pick(int c)(){ int x=3; int y=5; int f()=closure [x] int (){ return x; }; int g()=closure [y] int (){ return y; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=id0(g); return p; }\n"
+        "int main(){ return apply0(wrap()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg closure bounce passthrough bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bounce_passthrough_bind_return_under_extension(void) {
+    static const char *source =
+        "void idv(void f())(){ return f; }\n"
+        "void pick(int c)(){ int x=3; int y=5; void f()=closure [x] void (){ putint(x); return; }; void g()=closure [y] void (){ putint(y); return; }; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=idv(g); return p; }\n"
+        "int main(){ wrap()(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg void closure bounce passthrough bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bounce_passthrough_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "void idv(void f())(){ return f; }\n"
+        "void apply0(void f()){ f(); }\n"
+        "void pick(int c)(){ int x=3; int y=5; void f()=closure [x] void (){ putint(x); return; }; void g()=closure [y] void (){ putint(y); return; }; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=idv(g); return p; }\n"
+        "int main(){ apply0(wrap()); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg void closure bounce passthrough bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_function_value_statement_reassign_bind_return_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=g; p=h; return p; }\n"
+        "int main(){ return wrap()(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary function-value statement reassign bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_function_value_statement_reassign_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=g; p=h; return p; }\n"
+        "int main(){ return apply(wrap(), 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary function-value statement reassign bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_closure_statement_reassign_bind_return_under_extension(void) {
+    static const char *source =
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=g; p=h; return p; }\n"
+        "int main(){ return wrap()(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary closure statement reassign bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_closure_statement_reassign_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int c)(int){ int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(int){ int h(int)=(0, pick(1)); int g(int)=h; int p(int)=g; p=h; return p; }\n"
+        "int main(){ return apply(wrap(), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary closure statement reassign bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_statement_reassign_bind_return_under_extension(void) {
+    static const char *source =
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=g; p=h; return p; }\n"
+        "int main(){ return wrap()(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_next1\n") == NULL ||
+        strstr(output, "  call __fnwrap_next2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg function-value statement reassign bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_statement_reassign_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int pick(int c)(){ int f()=next1; int g()=next2; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=g; p=h; return p; }\n"
+        "int main(){ return apply0(wrap()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_next1\n") == NULL ||
+        strstr(output, "  call __fnwrap_next2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg function-value statement reassign bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_statement_reassign_bind_return_under_extension(void) {
+    static const char *source =
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "void pick(int c)(){ void f()=ping1; void g()=ping2; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=g; p=h; return p; }\n"
+        "int main(){ wrap()(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_ping1\n") == NULL ||
+        strstr(output, "  call __fnwrap_ping2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg void function-value statement reassign bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_statement_reassign_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "void pick(int c)(){ void f()=ping1; void g()=ping2; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=g; p=h; return p; }\n"
+        "int main(){ apply0(wrap()); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call __fnwrap_ping1\n") == NULL ||
+        strstr(output, "  call __fnwrap_ping2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg void function-value statement reassign bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_statement_reassign_bind_return_under_extension(void) {
+    static const char *source =
+        "int pick(int c)(){ int x=3; int y=5; int f()=closure [x] int (){ return x; }; int g()=closure [y] int (){ return y; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=g; p=h; return p; }\n"
+        "int main(){ return wrap()(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg closure statement reassign bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_statement_reassign_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int pick(int c)(){ int x=3; int y=5; int f()=closure [x] int (){ return x; }; int g()=closure [y] int (){ return y; }; return ((putint(0), c) ? f : g); }\n"
+        "int wrap()(){ int h()=(0, pick(1)); int g()=h; int p()=g; p=h; return p; }\n"
+        "int main(){ return apply0(wrap()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg closure statement reassign bind-return actual should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_statement_reassign_bind_return_under_extension(void) {
+    static const char *source =
+        "void pick(int c)(){ int x=3; int y=5; void f()=closure [x] void (){ putint(x); return; }; void g()=closure [y] void (){ putint(y); return; }; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=g; p=h; return p; }\n"
+        "int main(){ wrap()(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg void closure statement reassign bind-return should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_statement_reassign_bind_return_actual_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void pick(int c)(){ int x=3; int y=5; void f()=closure [x] void (){ putint(x); return; }; void g()=closure [y] void (){ putint(y); return; }; return ((putint(0), c) ? f : g); }\n"
+        "void wrap()(){ void h()=(0, pick(1)); void g()=h; void p()=g; p=h; return p; }\n"
+        "int main(){ apply0(wrap()); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "__fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: wrapped returned-call ternary zero-arg void closure statement reassign bind-return actual should compile under extension: %s\n",
             error.message);
         ok = 0;
     }
@@ -6652,11 +9480,9 @@ static int test_compiler_accepts_returned_closure_forwarding_into_function_param
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, ".globl make__retclosure_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_make__retclosure_") == NULL ||
         strstr(output, "  call make\n") == NULL ||
-        strstr(output, "  lw a0, 4(sp)\n") == NULL ||
-        strstr(output, "  sw a0, 0(sp)\n") == NULL ||
-        strstr(output, "  sw t6, 8(sp)\n") == NULL ||
-        strstr(output, "  call make__retclosure_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_make__retclosure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: returned closure forwarding into function-valued parameter should compile under extension: %s\noutput:\n%s\n",
             error.message,
@@ -6681,11 +9507,9 @@ static int test_compiler_accepts_zero_arg_returned_closure_forwarding_into_funct
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, ".globl make__retclosure_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_make__retclosure_") == NULL ||
         strstr(output, "  call make\n") == NULL ||
-        strstr(output, "  lw a0, 4(sp)\n") == NULL ||
-        strstr(output, "  sw a0, 0(sp)\n") == NULL ||
-        strstr(output, "  sw t6, 8(sp)\n") == NULL ||
-        strstr(output, "  call make__retclosure_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_make__retclosure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: zero-arg returned closure forwarding into function-valued parameter should compile under extension: %s\noutput:\n%s\n",
             error.message,
@@ -6710,11 +9534,9 @@ static int test_compiler_accepts_void_returned_closure_forwarding_into_function_
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, ".globl make__retclosure_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_make__retclosure_") == NULL ||
         strstr(output, "  call make\n") == NULL ||
-        strstr(output, "  lw a0, 4(sp)\n") == NULL ||
-        strstr(output, "  sw a0, 0(sp)\n") == NULL ||
-        strstr(output, "  sw t6, 8(sp)\n") == NULL ||
-        strstr(output, "  call make__retclosure_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_make__retclosure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: void returned closure forwarding into function-valued parameter should compile under extension: %s\noutput:\n%s\n",
             error.message,
@@ -6739,8 +9561,8 @@ static int test_compiler_accepts_direct_returned_noncapturing_function_value_arg
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply__fv_0_add1") == NULL ||
-        strstr(output, "  call apply__fv_0_add1\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add1") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
         strstr(output, "  call add1\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: direct returned noncapturing function-value argument should compile under extension: %s\n",
@@ -7042,11 +9864,95 @@ static int test_compiler_accepts_dynamic_returned_closure_backed_function_value_
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_main__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_main__closure_g_") == NULL ||
         strstr(output, ".globl main__closure_g_") == NULL ||
         strstr(output, "  call main__closure_g_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: dynamic returned closure-backed function-value parameter immediate call should compile under extension: %s\n",
             error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_two_arg_closure_backed_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int,int))(int,int) { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int,int)=closure [x] int (int a, int b) { return x + a + b; }; int g(int,int)=closure [y] int (int a, int b) { return y + a + b; }; if(c) f=g; return id(f)(3, 2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_main__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_main__closure_g_") == NULL ||
+        strstr(output, ".globl main__closure_g_") == NULL ||
+        strstr(output, "  call main__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned two-arg closure-backed function-value parameter immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_closure_backed_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f())() { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f()=closure [x] int () { return x; }; int g()=closure [y] int () { return y; }; if(c) f=g; return id(f)(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_main__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_main__closure_g_") == NULL ||
+        strstr(output, ".globl main__closure_g_") == NULL ||
+        strstr(output, "  call main__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg closure-backed function-value parameter immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_backed_function_value_parameter_immediate_call_under_extension(void) {
+    static const char *source =
+        "void id(void f())() { return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; void f()=closure [x] void () { putint(x); return; }; void g()=closure [y] void () { putint(y); return; }; if(c) f=g; id(f)(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_main__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_main__closure_g_") == NULL ||
+        strstr(output, ".globl main__closure_g_") == NULL ||
+        strstr(output, "  call main__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure-backed function-value parameter immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
         ok = 0;
     }
 
@@ -7133,8 +10039,8 @@ static int test_compiler_accepts_direct_returned_noncapturing_zero_arg_function_
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply0__fv_0_next") == NULL ||
-        strstr(output, "  call apply0__fv_0_next\n") == NULL ||
+        strstr(output, ".globl __fnwrap_next") == NULL ||
+        strstr(output, "  call __fnwrap_next\n") == NULL ||
         strstr(output, "  call next\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: direct returned noncapturing zero-arg function-value argument should compile under extension: %s\n",
@@ -7159,8 +10065,8 @@ static int test_compiler_accepts_direct_returned_noncapturing_zero_arg_void_func
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply0__fv_0_ping") == NULL ||
-        strstr(output, "  call apply0__fv_0_ping\n") == NULL ||
+        strstr(output, ".globl __fnwrap_ping") == NULL ||
+        strstr(output, "  call __fnwrap_ping\n") == NULL ||
         strstr(output, "  call ping\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: direct returned noncapturing zero-arg void function-value argument should compile under extension: %s\n",
@@ -7184,9 +10090,9 @@ static int test_compiler_accepts_direct_returned_closure_function_value_argument
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply__fv_0_make__retclosure_") == NULL ||
-        strstr(output, "  call apply__fv_0_make__retclosure_") == NULL ||
-        strstr(output, "  call make__retclosure_") == NULL) {
+        compiler_test_count_fragment_occurrences(output, "  call make\n") != 1u ||
+        strstr(output, "  call make__retclosure_") == NULL ||
+        strstr(output, "apply__fv_0_make__retclosure_") != NULL) {
         fprintf(stderr,
             "[compiler] FAIL: direct returned closure function-value argument should compile under extension: %s\n",
             error.message);
@@ -7209,9 +10115,9 @@ static int test_compiler_accepts_direct_returned_closure_zero_arg_function_value
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply0__fv_0_make__retclosure_") == NULL ||
-        strstr(output, "  call apply0__fv_0_make__retclosure_") == NULL ||
-        strstr(output, "  call make__retclosure_") == NULL) {
+        compiler_test_count_fragment_occurrences(output, "  call make\n") != 1u ||
+        strstr(output, "  call make__retclosure_") == NULL ||
+        strstr(output, "apply0__fv_0_make__retclosure_") != NULL) {
         fprintf(stderr,
             "[compiler] FAIL: direct returned closure zero-arg function-value argument should compile under extension: %s\n",
             error.message);
@@ -7256,9 +10162,9 @@ static int test_compiler_accepts_direct_returned_closure_zero_arg_void_function_
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, ".globl apply0__fv_0_make__retclosure_") == NULL ||
-        strstr(output, "  call apply0__fv_0_make__retclosure_") == NULL ||
-        strstr(output, "  call make__retclosure_") == NULL) {
+        compiler_test_count_fragment_occurrences(output, "  call make\n") != 1u ||
+        strstr(output, "  call make__retclosure_") == NULL ||
+        strstr(output, "apply0__fv_0_make__retclosure_") != NULL) {
         fprintf(stderr,
             "[compiler] FAIL: direct returned closure zero-arg void function-value argument should compile under extension: %s\n",
             error.message);
@@ -7407,6 +10313,115 @@ static int test_compiler_accepts_direct_dynamic_returned_noncapturing_zero_arg_v
     return ok;
 }
 
+static int test_compiler_accepts_direct_dynamic_returned_closure_function_value_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ return apply(pick(5, 1), 3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "apply__fv_0_pick__closure_") != NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct dynamic returned closure function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_dynamic_returned_multi_capture_closure_immediate_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int y, int c)(int,int) { int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; int g(int,int)=closure [x,y] int (int a, int b) { return x + y - a - b; }; if(c) f=g; return f; }\n"
+        "int main(){ return pick(5, 7, 1)(3, 2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct dynamic returned multi-capture closure immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_dynamic_returned_zero_arg_closure_function_value_argument_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int pick(int x, int c)(){ int f()=closure [x] int () { return x; }; int g()=closure [x] int () { return x + 1; }; if(c) f=g; return f; }\n"
+        "int main(){ return apply0(pick(5, 1)); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "apply0__fv_0_pick__closure_") != NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct dynamic returned zero-arg closure function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_dynamic_returned_zero_arg_void_closure_function_value_argument_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void pick(int x, int c)(){ void f()=closure [x] void () { putint(x); return; }; void g()=closure [x] void () { putint(x + 1); return; }; if(c) f=g; return f; }\n"
+        "int main(){ apply0(pick(5, 1)); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "apply0__fv_0_pick__closure_") != NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct dynamic returned zero-arg void closure function-value argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_accepts_returned_closure_alias_forwarding_into_function_parameter_under_extension(void) {
     static const char *source =
         "int apply(int f(int), int x){ return f(x); }\n"
@@ -7420,12 +10435,9 @@ static int test_compiler_accepts_returned_closure_alias_forwarding_into_function
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, ".globl make__retclosure_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_make__retclosure_") == NULL ||
         strstr(output, "  call make\n") == NULL ||
-        strstr(output, "  lw a0, 4(sp)\n") == NULL ||
-        strstr(output, "  sw a0, 0(sp)\n") == NULL ||
-        strstr(output, "  sw t6, 8(sp)\n") == NULL ||
-        strstr(output, "  lw a0, 8(sp)\n  sw a0, 12(sp)\n") == NULL ||
-        strstr(output, "  call make__retclosure_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_make__retclosure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: returned closure alias forwarding into function-valued parameter should compile under extension: %s\noutput:\n%s\n",
             error.message,
@@ -7502,6 +10514,35 @@ static int test_compiler_rejects_ternary_function_value_actual_argument_arity_mi
         strstr(error.message, "SEMA-CALL-004") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: ternary function value actual argument arity mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_dynamic_ternary_function_value_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int apply_twice(int f(int), int x){ return f(f(x)); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int c=getint(); return pass(c ? apply : apply_twice, add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "pass__fv_0_apply_1_add1") != NULL ||
+        strstr(output, "pass__fv_0_apply_twice_1_add1") != NULL ||
+        strstr(output, "apply_twice__fv_0_add1") != NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 3u ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order dynamic ternary function value actual argument should compile under extension: %s\n",
             error.message);
         ok = 0;
     }
@@ -7591,8 +10632,10 @@ static int test_compiler_accepts_ternary_function_value_callee_under_extension(v
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, "  call add1\n") == NULL ||
-        strstr(output, "  call add2\n") == NULL) {
+        strstr(output, ".globl __fnwrap_add1") == NULL ||
+        strstr(output, ".globl __fnwrap_add2") == NULL ||
+        strstr(output, "call __fnwrap_add1") == NULL ||
+        strstr(output, "call __fnwrap_add2") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: ternary function value callee should compile under extension: %s\n",
             error.message);
@@ -7615,8 +10658,10 @@ static int test_compiler_accepts_ternary_two_arg_function_value_callee_under_ext
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, "  call add\n") == NULL ||
-        strstr(output, "  call sub\n") == NULL) {
+        strstr(output, ".globl __fnwrap_add") == NULL ||
+        strstr(output, ".globl __fnwrap_sub") == NULL ||
+        strstr(output, "call __fnwrap_add") == NULL ||
+        strstr(output, "call __fnwrap_sub") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: ternary two-arg function value callee should compile under extension: %s\n",
             error.message);
@@ -7685,6 +10730,32 @@ static int test_compiler_accepts_ternary_closure_callee_under_extension(void) {
         strstr(output, "main__closure_g_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: ternary closure callee should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_ternary_multi_capture_closure_callee_under_extension(void) {
+    static const char *source =
+        "int main(){ int c=1; int x=3; int y=5; int f(int,int)=closure [x,y] int (int a, int b) { return x + y + a + b; }; int g(int,int)=closure [x,y] int (int a, int b) { return x + y - a - b; }; return (((putint(0), c) ? f : g))(4, 2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl main__closure_f_") == NULL ||
+        strstr(output, ".globl main__closure_g_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_main__closure_g_") == NULL ||
+        strstr(output, "call __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "call __fnwrap_closure_main__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: ternary multi-capture closure callee should compile through callable-object path under extension: %s\n",
             error.message);
         ok = 0;
     }
@@ -7767,9 +10838,8 @@ static int test_compiler_accepts_closure_assignment_then_forward_into_function_p
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "apply__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "apply__fv_0_main__closure_f_") != NULL ||
+        strstr(output, "call main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: closure assignment then forward into function-valued parameter should compile under extension: %s\n",
             error.message);
@@ -7821,6 +10891,1851 @@ static int test_compiler_accepts_returned_closure_assignment_then_return_under_e
         fprintf(stderr,
             "[compiler] FAIL: returned closure assignment then return should compile under extension: %s\n",
             error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_rebind_then_return_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c)(int) { int h(int)=pick(5, c); return h; }\n"
+        "int main(){ return wrap(1)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call wrap\n") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure rebind then return should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_multi_capture_closure_rebind_then_return_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int y, int c)(int,int) { int f(int,int)=closure [x,y] int (int a,int b){ return x+y+a+b; }; int g(int,int)=closure [x,y] int (int a,int b){ return x+y-a-b; }; if(c) f=g; return f; }\n"
+        "int wrap(int c)(int,int) { int h(int,int)=pick(5,7,c); return h; }\n"
+        "int main(){ return wrap(1)(3,2); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call wrap\n") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned multi-capture closure rebind then return should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_rebind_then_return_under_extension(void) {
+    static const char *source =
+        "void pick(int x, int c)() { void f()=closure [x] void (){ putint(x); return; }; void g()=closure [x] void (){ putint(x+1); return; }; if(c) f=g; return f; }\n"
+        "void wrap(int c)() { void h()=pick(5,c); return h; }\n"
+        "int main(){ wrap(1)(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  call wrap\n") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure rebind then return should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_passthrough_bind_then_return_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c)(int) { int h(int)=id(pick(5, c)); return h; }\n"
+        "int main(){ return wrap(1)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure passthrough bind then return should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_two_hop_passthrough_bind_then_return_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int id2(int f(int))(int) { return id(f); }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c)(int) { int h(int)=id2(pick(5, c)); return h; }\n"
+        "int main(){ return wrap(1)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, "  call id2\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure two-hop passthrough bind then return should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_two_hop_passthrough_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int id2(int f(int))(int) { return id(f); }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ return id2(pick(5, 1))(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, "  call id2\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure two-hop passthrough immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_three_hop_passthrough_bind_then_return_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int id2(int f(int))(int) { return id(f); }\n"
+        "int id3(int f(int))(int) { int g(int)=id2(f); return g; }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c)(int) { int h(int)=id3(pick(5, c)); return h; }\n"
+        "int main(){ return wrap(1)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, "  call id2\n") != NULL ||
+        strstr(output, "  call id3\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure three-hop passthrough bind then return should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_three_hop_passthrough_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int) { return f; }\n"
+        "int id2(int f(int))(int) { return id(f); }\n"
+        "int id3(int f(int))(int) { int g(int)=id2(f); return g; }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ return id3(pick(5, 1))(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, "  call id2\n") != NULL ||
+        strstr(output, "  call id3\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure three-hop passthrough immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_three_hop_passthrough_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int id(int f(int))(int) { return f; }\n"
+        "int id2(int f(int))(int) { return id(f); }\n"
+        "int id3(int f(int))(int) { int g(int)=id2(f); return g; }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ return apply(id3(pick(5, 1)), 3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call apply\n") != NULL ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, "  call id2\n") != NULL ||
+        strstr(output, "  call id3\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure three-hop passthrough actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_bind_and_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)(int) { int h(int)=pick(5, c); int k(int)=pick(7, c); int m(int)=d ? h : k; return m; }\n"
+        "int main(){ int f(int)=wrap(1,0); return f(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure producer ternary merge bind-and-call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_immediate_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)(int) { int h(int)=pick(5, c); int k(int)=pick(7, c); int m(int)=d ? h : k; return m; }\n"
+        "int main(){ return wrap(1,0)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure producer ternary merge immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int){ int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ int c=1; int h(int)= c ? id(pick(5,1)) : id(pick(7,0)); return h(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure returned-call ternary merge immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_local_bounce_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int){ int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ int c=1; int h(int)= c ? id(pick(5,1)) : id(pick(7,0)); int g(int)=h; return g(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure returned-call ternary merge local bounce immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bind_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int){ int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c)(int){ int h(int)= c ? id(pick(5,1)) : id(pick(7,0)); return h; }\n"
+        "int main(){ return wrap(1)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure returned-call ternary merge bind return immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bind_return_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int){ int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c)(int){ int h(int)= c ? id(pick(5,1)) : id(pick(7,0)); return h; }\n"
+        "int main(){ return apply(wrap(1), 3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply\n") != NULL ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure returned-call ternary merge bind return actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bounce_passthrough_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int){ int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int main(){ int c=1; int h(int)= c ? id(pick(5,1)) : id(pick(7,0)); int g(int)=h; int p(int)=id(g); return p(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure returned-call ternary merge bounce passthrough immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bounce_passthrough_bind_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int){ int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c)(int){ int h(int)= c ? id(pick(5,1)) : id(pick(7,0)); int g(int)=h; int p(int)=id(g); return p; }\n"
+        "int main(){ return wrap(1)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure returned-call ternary merge bounce passthrough bind return immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bounce_passthrough_bind_return_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int){ int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c)(int){ int h(int)= c ? id(pick(5,1)) : id(pick(7,0)); int g(int)=h; int p(int)=id(g); return p; }\n"
+        "int main(){ return apply(wrap(1), 3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply\n") != NULL ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure returned-call ternary merge bounce passthrough bind return actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_deeper_chain_bind_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int){ int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c)(int){ int h(int)= c ? id(pick(5,1)) : id(pick(7,0)); int g(int)=h; int p(int)=id(g); int q(int)=p; q=h; return q; }\n"
+        "int main(){ return wrap(1)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure returned-call ternary merge deeper chain bind return immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)(int) { int h(int)=pick(5, c); int k(int)=pick(7, c); int m(int)=d ? h : k; return m; }\n"
+        "int main(){ return apply(wrap(1,0), 3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure producer ternary merge actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_bounce_immediate_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)(int) { int h(int)=pick(5,c); int k(int)=pick(7,c); int m(int)=d ? h : k; int n(int)=m; return n; }\n"
+        "int main(){ return wrap(1,0)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure producer ternary merge local bounce immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_bounce_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)(int) { int h(int)=pick(5,c); int k(int)=pick(7,c); int m(int)=d ? h : k; int n(int)=m; return n; }\n"
+        "int main(){ return apply(wrap(1,0), 3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure producer ternary merge local bounce actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_bounce_passthrough_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)(int) { int h(int)=pick(5,c); int k(int)=pick(7,c); int m(int)=d ? h : k; int n(int)=m; int p(int)=id(n); return p; }\n"
+        "int main(){ return wrap(1,0)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure producer ternary merge local bounce passthrough immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_bounce_passthrough_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)(int) { int h(int)=pick(5,c); int k(int)=pick(7,c); int m(int)=d ? h : k; int n(int)=m; int p(int)=id(n); return p; }\n"
+        "int main(){ return apply(wrap(1,0), 3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure producer ternary merge local bounce passthrough actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_reassign_immediate_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y){ return x+y; }; int g(int)=closure [x] int (int y){ return x-y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)(int) { int h(int)=pick(5,c); int k(int)=pick(7,c); int m(int)=d ? h : k; int n(int)=m; int p(int)=n; p=m; return p; }\n"
+        "int main(){ return wrap(1,0)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure producer ternary merge local reassign immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_reassign_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y){ return x+y; }; int g(int)=closure [x] int (int y){ return x-y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)(int) { int h(int)=pick(5,c); int k(int)=pick(7,c); int m(int)=d ? h : k; int n(int)=m; int p(int)=n; p=m; return p; }\n"
+        "int main(){ return apply(wrap(1,0), 3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure producer ternary merge local reassign actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_returned_call_reassign_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y){ return x+y; }; int g(int)=closure [x] int (int y){ return x-y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)(int) { int h(int)=pick(5,c); int k(int)=pick(7,c); int m(int)=d ? h : k; m = id(m); return m; }\n"
+        "int main(){ return wrap(1,0)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, "id__fv_0_") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure producer ternary merge returned-call reassign immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_returned_call_reassign_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y){ return x+y; }; int g(int)=closure [x] int (int y){ return x-y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)(int) { int h(int)=pick(5,c); int k(int)=pick(7,c); int m(int)=d ? h : k; m = id(m); return m; }\n"
+        "int main(){ return apply(wrap(1,0), 3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply\n") != NULL ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, "id__fv_0_") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure producer ternary merge returned-call reassign actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_immediate_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int c)() { int f()=closure [x] int () { return x; }; int g()=closure [x] int () { return x + 1; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)() { int h()=pick(5,c); int k()=pick(7,c); int m()=d ? h : k; return m; }\n"
+        "int main(){ return wrap(1,0)(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg closure producer ternary merge immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int pick(int x, int c)() { int f()=closure [x] int () { return x; }; int g()=closure [x] int () { return x + 1; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)() { int h()=pick(5,c); int k()=pick(7,c); int m()=d ? h : k; return m; }\n"
+        "int main(){ return apply0(wrap(1,0)); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply0\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg closure producer ternary merge actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_immediate_call_under_extension(void) {
+    static const char *source =
+        "void pick(int x, int c)() { void f()=closure [x] void () { putint(x); return; }; void g()=closure [x] void () { putint(x + 1); return; }; if(c) f=g; return f; }\n"
+        "void wrap(int c, int d)() { void h()=pick(5,c); void k()=pick(7,c); void m()=d ? h : k; return m; }\n"
+        "int main(){ wrap(1,0)(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure producer ternary merge immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_actual_argument_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void pick(int x, int c)() { void f()=closure [x] void () { putint(x); return; }; void g()=closure [x] void () { putint(x + 1); return; }; if(c) f=g; return f; }\n"
+        "void wrap(int c, int d)() { void h()=pick(5,c); void k()=pick(7,c); void m()=d ? h : k; return m; }\n"
+        "int main(){ apply0(wrap(1,0)); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply0\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure producer ternary merge actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_bounce_immediate_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int c)() { int f()=closure [x] int () { return x; }; int g()=closure [x] int () { return x + 1; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)() { int h()=pick(5,c); int k()=pick(7,c); int m()=d ? h : k; int n()=m; return n; }\n"
+        "int main(){ return wrap(1,0)(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg closure producer ternary merge local bounce immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_bounce_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int pick(int x, int c)() { int f()=closure [x] int () { return x; }; int g()=closure [x] int () { return x + 1; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)() { int h()=pick(5,c); int k()=pick(7,c); int m()=d ? h : k; int n()=m; return n; }\n"
+        "int main(){ return apply0(wrap(1,0)); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply0\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg closure producer ternary merge local bounce actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_bounce_passthrough_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id0(int f())(){ return f; }\n"
+        "int pick(int x, int c)() { int f()=closure [x] int () { return x; }; int g()=closure [x] int () { return x + 1; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)() { int h()=pick(5,c); int k()=pick(7,c); int m()=d ? h : k; int n()=m; int p()=id0(n); return p; }\n"
+        "int main(){ return wrap(1,0)(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call id0\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg closure producer ternary merge local bounce passthrough immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_bounce_passthrough_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int id0(int f())(){ return f; }\n"
+        "int pick(int x, int c)() { int f()=closure [x] int () { return x; }; int g()=closure [x] int () { return x + 1; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)() { int h()=pick(5,c); int k()=pick(7,c); int m()=d ? h : k; int n()=m; int p()=id0(n); return p; }\n"
+        "int main(){ return apply0(wrap(1,0)); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply0\n") != NULL ||
+        strstr(output, "  call id0\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg closure producer ternary merge local bounce passthrough actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_reassign_immediate_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int c)() { int f()=closure [x] int () { return x; }; int g()=closure [x] int () { return x + 1; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)() { int h()=pick(5,c); int k()=pick(7,c); int m()=d ? h : k; int n()=m; int p()=n; p=m; return p; }\n"
+        "int main(){ return wrap(1,0)(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg closure producer ternary merge local reassign immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_reassign_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int pick(int x, int c)() { int f()=closure [x] int () { return x; }; int g()=closure [x] int () { return x + 1; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)() { int h()=pick(5,c); int k()=pick(7,c); int m()=d ? h : k; int n()=m; int p()=n; p=m; return p; }\n"
+        "int main(){ return apply0(wrap(1,0)); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply0\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg closure producer ternary merge local reassign actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_bounce_immediate_call_under_extension(void) {
+    static const char *source =
+        "void pick(int x, int c)() { void f()=closure [x] void () { putint(x); return; }; void g()=closure [x] void () { putint(x + 1); return; }; if(c) f=g; return f; }\n"
+        "void wrap(int c, int d)() { void h()=pick(5,c); void k()=pick(7,c); void m()=d ? h : k; void n()=m; return n; }\n"
+        "int main(){ wrap(1,0)(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure producer ternary merge local bounce immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_bounce_actual_argument_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void pick(int x, int c)() { void f()=closure [x] void () { putint(x); return; }; void g()=closure [x] void () { putint(x + 1); return; }; if(c) f=g; return f; }\n"
+        "void wrap(int c, int d)() { void h()=pick(5,c); void k()=pick(7,c); void m()=d ? h : k; void n()=m; return n; }\n"
+        "int main(){ apply0(wrap(1,0)); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply0\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure producer ternary merge local bounce actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_bounce_passthrough_immediate_call_under_extension(void) {
+    static const char *source =
+        "void idv(void f())(){ return f; }\n"
+        "void pick(int x, int c)() { void f()=closure [x] void () { putint(x); return; }; void g()=closure [x] void () { putint(x + 1); return; }; if(c) f=g; return f; }\n"
+        "void wrap(int c, int d)() { void h()=pick(5,c); void k()=pick(7,c); void m()=d ? h : k; void n()=m; void p()=idv(n); return p; }\n"
+        "int main(){ wrap(1,0)(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call idv\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure producer ternary merge local bounce passthrough immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_bounce_passthrough_actual_argument_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void idv(void f())(){ return f; }\n"
+        "void pick(int x, int c)() { void f()=closure [x] void () { putint(x); return; }; void g()=closure [x] void () { putint(x + 1); return; }; if(c) f=g; return f; }\n"
+        "void wrap(int c, int d)() { void h()=pick(5,c); void k()=pick(7,c); void m()=d ? h : k; void n()=m; void p()=idv(n); return p; }\n"
+        "int main(){ apply0(wrap(1,0)); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply0\n") != NULL ||
+        strstr(output, "  call idv\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure producer ternary merge local bounce passthrough actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_reassign_immediate_call_under_extension(void) {
+    static const char *source =
+        "void pick(int x, int c)() { void f()=closure [x] void () { putint(x); return; }; void g()=closure [x] void () { putint(x + 1); return; }; if(c) f=g; return f; }\n"
+        "void wrap(int c, int d)() { void h()=pick(5,c); void k()=pick(7,c); void m()=d ? h : k; void n()=m; void p()=n; p=m; return p; }\n"
+        "int main(){ wrap(1,0)(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure producer ternary merge local reassign immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_reassign_actual_argument_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void pick(int x, int c)() { void f()=closure [x] void () { putint(x); return; }; void g()=closure [x] void () { putint(x + 1); return; }; if(c) f=g; return f; }\n"
+        "void wrap(int c, int d)() { void h()=pick(5,c); void k()=pick(7,c); void m()=d ? h : k; void n()=m; void p()=n; p=m; return p; }\n"
+        "int main(){ apply0(wrap(1,0)); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply0\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure producer ternary merge local reassign actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_returned_call_reassign_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id0(int f())(){ return f; }\n"
+        "int pick(int x, int c)() { int f()=closure [x] int () { return x; }; int g()=closure [x] int () { return x + 1; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)() { int h()=pick(5,c); int k()=pick(7,c); int m()=d ? h : k; m = id0(m); return m; }\n"
+        "int main(){ return wrap(1,0)(); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call id0\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg closure producer ternary merge returned-call reassign immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_returned_call_reassign_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply0(int f()){ return f(); }\n"
+        "int id0(int f())(){ return f; }\n"
+        "int pick(int x, int c)() { int f()=closure [x] int () { return x; }; int g()=closure [x] int () { return x + 1; }; if(c) f=g; return f; }\n"
+        "int wrap(int c, int d)() { int h()=pick(5,c); int k()=pick(7,c); int m()=d ? h : k; m = id0(m); return m; }\n"
+        "int main(){ return apply0(wrap(1,0)); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply0\n") != NULL ||
+        strstr(output, "  call id0\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg closure producer ternary merge returned-call reassign actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_returned_call_reassign_immediate_call_under_extension(void) {
+    static const char *source =
+        "void idv(void f())(){ return f; }\n"
+        "void pick(int x, int c)() { void f()=closure [x] void () { putint(x); return; }; void g()=closure [x] void () { putint(x + 1); return; }; if(c) f=g; return f; }\n"
+        "void wrap(int c, int d)() { void h()=pick(5,c); void k()=pick(7,c); void m()=d ? h : k; m = idv(m); return m; }\n"
+        "int main(){ wrap(1,0)(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call idv\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure producer ternary merge returned-call reassign immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_returned_call_reassign_actual_argument_under_extension(void) {
+    static const char *source =
+        "void apply0(void f()){ f(); }\n"
+        "void idv(void f())(){ return f; }\n"
+        "void pick(int x, int c)() { void f()=closure [x] void () { putint(x); return; }; void g()=closure [x] void () { putint(x + 1); return; }; if(c) f=g; return f; }\n"
+        "void wrap(int c, int d)() { void h()=pick(5,c); void k()=pick(7,c); void m()=d ? h : k; m = idv(m); return m; }\n"
+        "int main(){ apply0(wrap(1,0)); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply0\n") != NULL ||
+        strstr(output, "  call idv\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure producer ternary merge returned-call reassign actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_closure_statement_passthrough_call_under_extension(void) {
+    static const char *source =
+        "int id0(int f())(){ return f; }\n"
+        "int pick(int x, int c)() { int f()=closure [x] int () { return x; }; int g()=closure [x] int () { return x + 1; }; if(c) f=g; return f; }\n"
+        "int main(){ int m()=pick(5,1); id0(m); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call id0\n") != NULL ||
+        strstr(output, "id0__fv_0_") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg closure statement passthrough call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_zero_arg_void_closure_statement_passthrough_call_under_extension(void) {
+    static const char *source =
+        "void idv(void f())(){ return f; }\n"
+        "void pick(int x, int c)() { void f()=closure [x] void () { putint(x); return; }; void g()=closure [x] void () { putint(x + 1); return; }; if(c) f=g; return f; }\n"
+        "int main(){ void m()=pick(5,1); idv(m); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call idv\n") != NULL ||
+        strstr(output, "idv__fv_0_") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned zero-arg void closure statement passthrough call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_statement_passthrough_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int pick(int x, int c)(int){ int f(int)=closure [x] int (int y){ return x+y; }; int g(int)=closure [x] int (int y){ return x-y; }; if(c) f=g; return f; }\n"
+        "int main(){ int m(int)=pick(5,1); id(m); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, "id__fv_0_") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure statement passthrough call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_passthrough_ternary_closure_local_initializer_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; int h(int)= c ? id(f) : id(g); return h(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, "id__fv_0_") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_main__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_main__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: passthrough ternary closure local initializer should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_passthrough_ternary_noncapturing_function_value_return_immediate_call_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int pick(int c)(int){ int f(int)=add1; int g(int)=add2; return c ? id(f) : id(g); }\n"
+        "int main(){ return pick(1)(40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, "id__fv_0_") != NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: passthrough ternary noncapturing function-value return immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_passthrough_ternary_noncapturing_function_value_actual_argument_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=1; int f(int)=add1; int g(int)=add2; return apply(c ? id(f) : id(g), 40); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, "  call apply\n") != NULL ||
+        strstr(output, "id__fv_0_") != NULL ||
+        strstr(output, ".globl __fnwrap_add1\n.type __fnwrap_add1, @function\n__fnwrap_add1:\n") == NULL ||
+        strstr(output, ".globl __fnwrap_add2\n.type __fnwrap_add2, @function\n__fnwrap_add2:\n") == NULL ||
+        strstr(output, "  call __fnwrap_add1\n") == NULL ||
+        strstr(output, "  call __fnwrap_add2\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: passthrough ternary noncapturing function-value actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_passthrough_ternary_closure_function_value_actual_argument_under_extension(void) {
+    static const char *source =
+        "int id(int f(int))(int){ return f; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [y] int (int z){ return y+z; }; return apply(c ? id(f) : id(g), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call id\n") != NULL ||
+        strstr(output, "  call apply\n") != NULL ||
+        strstr(output, "id__fv_0_") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_main__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_main__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: passthrough ternary closure function-value actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_passthrough_ternary_zero_arg_function_value_actual_argument_under_extension(void) {
+    static const char *source =
+        "int id0(int f())(){ return f; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int next1(){ return 1; }\n"
+        "int next2(){ return 2; }\n"
+        "int main(){ int c=1; int f()=next1; int g()=next2; return apply0(c ? id0(f) : id0(g)); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__fnwrap_next1") == NULL ||
+        strstr(output, "__fnwrap_next2") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: passthrough ternary zero-arg function-value actual argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_passthrough_ternary_zero_arg_void_function_value_actual_argument_under_extension(void) {
+    static const char *source =
+        "void idv(void f())(){ return f; }\n"
+        "void apply0(void f()){ f(); }\n"
+        "void ping1(){ putint(1); return; }\n"
+        "void ping2(){ putint(2); return; }\n"
+        "int main(){ int c=1; void f()=ping1; void g()=ping2; apply0(c ? idv(f) : idv(g)); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__fnwrap_ping1") == NULL ||
+        strstr(output, "__fnwrap_ping2") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: passthrough ternary zero-arg void function-value actual argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_passthrough_ternary_zero_arg_closure_function_value_actual_argument_under_extension(void) {
+    static const char *source =
+        "int id0(int f())(){ return f; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int main(){ int c=1; int x=3; int y=5; int f()=closure [x] int () { return x; }; int g()=closure [y] int () { return y; }; return apply0(c ? id0(f) : id0(g)); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_main__closure_g_") == NULL ||
+        strstr(output, "apply0__fv_0_") != NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: passthrough ternary zero-arg closure function-value actual argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_passthrough_ternary_zero_arg_void_closure_function_value_actual_argument_under_extension(void) {
+    static const char *source =
+        "void idv(void f())(){ return f; }\n"
+        "void apply0(void f()){ f(); }\n"
+        "int main(){ int c=1; int x=3; int y=5; void f()=closure [x] void () { putint(x); return; }; void g()=closure [y] void () { putint(y); return; }; apply0(c ? idv(f) : idv(g)); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__fnwrap_closure_main__closure_f_") == NULL ||
+        strstr(output, "__fnwrap_closure_main__closure_g_") == NULL ||
+        strstr(output, "beq") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: passthrough ternary zero-arg void closure function-value actual argument should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_local_bounce_immediate_call_under_extension(void) {
+    static const char *source =
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c)(int) { int h(int)=pick(5,c); int k(int)=h; return k; }\n"
+        "int main(){ return wrap(1)(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure local bounce immediate call should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_dynamic_returned_closure_local_bounce_actual_argument_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pick(int x, int c)(int) { int f(int)=closure [x] int (int y) { return x + y; }; int g(int)=closure [x] int (int y) { return x - y; }; if(c) f=g; return f; }\n"
+        "int wrap(int c)(int) { int h(int)=pick(5,c); int k(int)=h; return k; }\n"
+        "int main(){ return apply(wrap(1), 3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call wrap\n") != 1u ||
+        strstr(output, "  call apply\n") != NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, ".globl __fnwrap_closure_pick__closure_g_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_f_") == NULL ||
+        strstr(output, "  call __fnwrap_closure_pick__closure_g_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned closure local bounce actual argument should compile under extension: %s\noutput:\n%s\n",
+            error.message,
+            output ? output : "<null>");
         ok = 0;
     }
 
@@ -7885,10 +12800,203 @@ static int test_compiler_accepts_dynamic_closure_local_forward_into_parameter_un
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
         strstr(output, "main__closure_g_") == NULL ||
-        strstr(output, "apply__fv_0_main__closure_") == NULL ||
-        strstr(output, "  call apply__fv_0_main__closure_") == NULL) {
+        strstr(output, "apply__fv_0_main__closure_g_") != NULL ||
+        strstr(output, "call main__closure_g_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: dynamic closure local forwarding into function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int pickh(int base, int c)(int f(int), int x){ int h(int f(int), int x)=closure [base] int (int g(int), int y){ return g(y) + base; }; int k(int f(int), int x)=closure [base] int (int g(int), int y){ return g(g(y)) + base; }; if(c) h=k; return h; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int g(int f(int), int x)=idh(pickh(5, getint())); return g(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call pickh") == NULL ||
+        strstr(output, "pickh__closure_h_") != NULL ||
+        strstr(output, "pickh__closure_k_") != NULL ||
+        strstr(output, "__fv_1_add1") != NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 3u) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned passthrough dynamic local function-value parameter forwarding should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_unary_helper_eval_under_extension(void) {
+    static const char *source =
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int pickh(int base, int c)(int f(int), int x){ int h(int f(int), int x)=closure [base] int (int g(int), int y){ return -g(y) + base; }; int k(int f(int), int x)=closure [base] int (int g(int), int y){ return -g(g(y)) + base; }; if(c) h=k; return h; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(pickh(5, getint()))(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call pickh") == NULL ||
+        strstr(output, "pickh__closure_h_") != NULL ||
+        strstr(output, "pickh__closure_k_") != NULL ||
+        strstr(output, "__fv_1_add1") != NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 3u) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned passthrough dynamic local function-value unary helper-eval should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_compound_update_helper_eval_under_extension(void) {
+    static const char *source =
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int pickh(int base, int c)(int f(int), int x){ int h(int f(int), int x)=closure [base] int (int g(int), int y){ int z=y; z+=1; return g(z) + base; }; int k(int f(int), int x)=closure [base] int (int g(int), int y){ int z=y; z+=1; return g(g(z)) + base; }; if(c) h=k; return h; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(pickh(5, getint()))(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call pickh") == NULL ||
+        strstr(output, "pickh__closure_h_") != NULL ||
+        strstr(output, "pickh__closure_k_") != NULL ||
+        strstr(output, "__fv_1_add1") != NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 3u) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned passthrough dynamic local function-value compound-update helper-eval should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_comma_helper_eval_under_extension(void) {
+    static const char *source =
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int pickh(int base, int c)(int f(int), int x){ int h(int f(int), int x)=closure [base] int (int g(int), int y){ return (g(y), g(y) + base); }; int k(int f(int), int x)=closure [base] int (int g(int), int y){ return (g(g(y)), g(g(y)) + base); }; if(c) h=k; return h; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(pickh(5, getint()))(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "pickh__closure_h_") != NULL ||
+        strstr(output, "pickh__closure_k_") != NULL ||
+        strstr(output, "__fv_1_add1") != NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 6u) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned passthrough dynamic local function-value comma helper-eval should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_ternary_helper_eval_under_extension(void) {
+    static const char *source =
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int pickh(int base, int c)(int f(int), int x){ int h(int f(int), int x)=closure [base] int (int g(int), int y){ return g(y) ? g(y) + base : base; }; int k(int f(int), int x)=closure [base] int (int g(int), int y){ return g(g(y)) ? g(g(y)) + base : base; }; if(c) h=k; return h; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(pickh(5, getint()))(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "pickh__closure_h_") != NULL ||
+        strstr(output, "pickh__closure_k_") != NULL ||
+        strstr(output, "__fv_1_add1") != NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 6u) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned passthrough dynamic local function-value ternary helper-eval should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_statement_call_prefix_under_extension(void) {
+    static const char *source =
+        "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
+        "int pickh(int base, int c)(int f(int), int x){ int h(int f(int), int x)=closure [base] int (int g(int), int y){ g(y); return g(y) + base; }; int k(int f(int), int x)=closure [base] int (int g(int), int y){ g(g(y)); return g(g(y)) + base; }; if(c) h=k; return h; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(pickh(5, getint()))(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "pickh__closure_h_") != NULL ||
+        strstr(output, "pickh__closure_k_") != NULL ||
+        strstr(output, "__fv_1_add1") != NULL ||
+        compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 6u) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned passthrough dynamic local function-value statement-call-prefix helper-eval should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_second_order_returned_closure_function_value_parameter_forwarding_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int make(int y)(int){ return closure [y] int (int z){ return y+z; }; }\n"
+        "int main(){ return pass(apply, make(3), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call make\n") != 1u ||
+        strstr(output, "  call __fnwrap_closure_make__retclosure_") == NULL ||
+        strstr(output, "  call make__retclosure_") == NULL ||
+        strstr(output, "pass__fv_0_apply_1_make__retclosure_") != NULL ||
+        strstr(output, "apply__fv_0_make__retclosure_") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: second-order returned closure function-value parameter forwarding should compile under extension: %s\n",
             error.message);
         ok = 0;
     }
@@ -7910,9 +13018,10 @@ static int test_compiler_accepts_dynamic_runtime_closure_local_forward_into_para
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
         strstr(output, "main__closure_g_") == NULL ||
-        strstr(output, "apply__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call putint\n") == NULL ||
-        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL) {
+        strstr(output, "call putint") == NULL ||
+        strstr(output, "beq") == NULL ||
+        strstr(output, "call main__closure_f_") == NULL ||
+        strstr(output, "call main__closure_g_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: dynamic runtime closure local forwarding into function-valued parameter should compile under extension: %s\n",
             error.message);
@@ -7936,13 +13045,14 @@ static int test_compiler_accepts_dynamic_runtime_zero_arg_void_closure_local_for
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
         strstr(output, "main__closure_g_") == NULL ||
-        strstr(output, "apply0__fv_0_main__closure_f_") == NULL ||
         strstr(output, "  call putint\n") == NULL ||
-        strstr(output, "  call apply0__fv_0_main__closure_f_") == NULL) {
+        strstr(output, "beq") == NULL ||
+        strstr(output, "call main__closure_f_") == NULL ||
+        strstr(output, "call main__closure_g_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: dynamic runtime zero-arg void closure local forwarding into function-valued parameter should compile under extension: %s\n",
             error.message);
-        ok = 0;
+            ok = 0;
     }
 
     free(output);
@@ -8002,7 +13112,7 @@ static int test_compiler_accepts_closure_literal_direct_local_call_under_extensi
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: closure literal direct local call should compile under extension: %s\n",
             error.message);
@@ -8024,7 +13134,7 @@ static int test_compiler_accepts_closure_literal_alias_chain_under_extension(voi
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: closure literal alias chain should compile under extension: %s\n",
             error.message);
@@ -8046,7 +13156,7 @@ static int test_compiler_accepts_closure_literal_alias_chain_two_hops_under_exte
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: two-hop closure literal alias chain should compile under extension: %s\n",
             error.message);
@@ -8068,7 +13178,7 @@ static int test_compiler_accepts_zero_arg_closure_alias_chain_under_extension(vo
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: zero-arg closure alias chain should compile under extension: %s\n",
             error.message);
@@ -8090,7 +13200,7 @@ static int test_compiler_accepts_void_closure_alias_chain_under_extension(void) 
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: void closure alias chain should compile under extension: %s\n",
             error.message);
@@ -8113,9 +13223,7 @@ static int test_compiler_accepts_closure_literal_forward_into_function_value_par
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "apply__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: closure literal forwarding into function-valued parameter should compile under extension: %s\n",
             error.message);
@@ -8138,9 +13246,7 @@ static int test_compiler_accepts_zero_arg_closure_forward_into_function_value_pa
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "apply0__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call apply0__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: zero-arg closure forwarding into function-valued parameter should compile under extension: %s\n",
             error.message);
@@ -8184,9 +13290,7 @@ static int test_compiler_accepts_void_closure_forward_into_function_value_parame
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "apply0__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call apply0__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: void closure forwarding into function-valued parameter should compile under extension: %s\n",
             error.message);
@@ -8230,9 +13334,7 @@ static int test_compiler_accepts_two_hop_closure_forward_into_function_value_par
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "apply__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: two-hop closure forwarding into function-valued parameter should compile under extension: %s\n",
             error.message);
@@ -8255,9 +13357,7 @@ static int test_compiler_accepts_zero_arg_alias_closure_forward_into_function_va
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "apply0__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call apply0__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: zero-arg alias closure forwarding into function-valued parameter should compile under extension: %s\n",
             error.message);
@@ -8280,9 +13380,7 @@ static int test_compiler_accepts_void_alias_closure_forward_into_function_value_
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "apply0__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call apply0__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: void alias closure forwarding into function-valued parameter should compile under extension: %s\n",
             error.message);
@@ -8304,9 +13402,7 @@ static int test_compiler_accepts_direct_closure_literal_argument_to_function_val
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, "apply__fv_0_main__closure___argclosure_") == NULL ||
-        strstr(output, "  call apply__fv_0_main__closure___argclosure_") == NULL ||
-        strstr(output, "  call main__closure___argclosure_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure___argclosure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: direct closure literal argument to function-valued parameter should compile under extension: %s\n",
             error.message);
@@ -8349,9 +13445,7 @@ static int test_compiler_accepts_zero_arg_direct_closure_literal_argument_to_fun
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, "apply0__fv_0_main__closure___argclosure_") == NULL ||
-        strstr(output, "  call apply0__fv_0_main__closure___argclosure_") == NULL ||
-        strstr(output, "  call main__closure___argclosure_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure___argclosure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: zero-arg direct closure literal argument to function-valued parameter should compile under extension: %s\n",
             error.message);
@@ -8394,11 +13488,31 @@ static int test_compiler_accepts_void_direct_closure_literal_argument_to_functio
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, "apply0__fv_0_main__closure___argclosure_") == NULL ||
-        strstr(output, "  call apply0__fv_0_main__closure___argclosure_") == NULL ||
-        strstr(output, "  call main__closure___argclosure_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure___argclosure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: void direct closure literal argument to function-valued parameter should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_multi_capture_direct_closure_literal_argument_to_function_value_parameter_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int,int), int a, int b){ return f(a,b); }\n"
+        "int main(){ int x=3; int y=4; return apply(closure [x,y] int (int a, int b) { return x + y + a + b; }, 5, 6); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call __fnwrap_closure_main__closure___argclosure_") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: multi-capture direct closure literal argument to function-valued parameter should compile under extension: %s\n",
             error.message);
         ok = 0;
     }
@@ -8439,8 +13553,6 @@ static int test_compiler_accepts_comma_wrapped_closure_forward_into_function_val
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, "apply__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
         strstr(output, "  call main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: comma-wrapped closure forwarding into function-valued parameter should compile under extension: %s\n",
@@ -8484,8 +13596,6 @@ static int test_compiler_accepts_assignment_result_closure_forward_into_function
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, "apply__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
         strstr(output, "  call main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: assignment-result closure forwarding into function-valued parameter should compile under extension: %s\n",
@@ -8508,13 +13618,12 @@ static int test_compiler_accepts_dynamic_comma_wrapped_closure_forward_into_func
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, "  call putint\n") == NULL ||
-        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "call putint") == NULL ||
+        strstr(output, "call main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: dynamic comma-wrapped closure forwarding into function-valued parameter should compile under extension: %s\n",
             error.message);
-        ok = 0;
+            ok = 0;
     }
 
     free(output);
@@ -8532,9 +13641,10 @@ static int test_compiler_accepts_dynamic_assignment_result_closure_forward_into_
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, "  call putint\n") == NULL ||
-        strstr(output, "  call apply__fv_0_main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL ||
+        strstr(output, "call putint") == NULL ||
+        strstr(output, "beq") == NULL ||
+        strstr(output, "call main__closure_f_") == NULL ||
+        strstr(output, "call main__closure_g_") == NULL ||
         strstr(output, "beq") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: dynamic assignment-result closure forwarding into function-valued parameter should compile under extension: %s\n",
@@ -8555,7 +13665,7 @@ static int test_compiler_rejects_assignment_of_closure_literal_after_function_lo
 
     memset(&error, 0, sizeof(error));
     if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
-        strstr(error.message, "SEMA-EXT-040") == NULL) {
+        strstr(error.message, "SEMA-EXT-019") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: assigning closure literal after function local declaration should still be rejected under extension: %s\n",
             error.message);
@@ -8577,7 +13687,7 @@ static int test_compiler_accepts_zero_arg_closure_direct_local_call_under_extens
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: zero-arg closure direct local call should compile under extension: %s\n",
             error.message);
@@ -8619,7 +13729,7 @@ static int test_compiler_accepts_multi_capture_closure_direct_local_call_under_e
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: multi-capture closure direct local call should compile under extension: %s\n",
             error.message);
@@ -8664,7 +13774,7 @@ static int test_compiler_accepts_void_closure_direct_local_call_under_extension(
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: void closure direct local call should compile under extension: %s\n",
             error.message);
@@ -8687,7 +13797,7 @@ static int test_compiler_accepts_int_closure_expression_statement_prefix_under_e
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
         strstr(output, "  call putint\n") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with expression-statement prefix should compile under extension: %s\n",
             error.message);
@@ -8709,7 +13819,7 @@ static int test_compiler_accepts_int_closure_local_decl_prefix_under_extension(v
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with local decl prefix should compile under extension: %s\n",
             error.message);
@@ -8731,7 +13841,7 @@ static int test_compiler_accepts_int_closure_parameter_assignment_prefix_under_e
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with parameter assignment prefix should compile under extension: %s\n",
             error.message);
@@ -8753,7 +13863,7 @@ static int test_compiler_accepts_int_closure_local_assignment_prefix_under_exten
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with local assignment prefix should compile under extension: %s\n",
             error.message);
@@ -8775,7 +13885,7 @@ static int test_compiler_accepts_int_closure_uninitialized_local_prefix_under_ex
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with uninitialized local prefix should compile under extension: %s\n",
             error.message);
@@ -8797,7 +13907,7 @@ static int test_compiler_accepts_int_closure_multi_declarator_local_prefix_under
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with multi-declarator local prefix should compile under extension: %s\n",
             error.message);
@@ -8819,7 +13929,7 @@ static int test_compiler_accepts_int_closure_parameter_compound_assignment_under
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with parameter compound assignment should compile under extension: %s\n",
             error.message);
@@ -8841,7 +13951,7 @@ static int test_compiler_accepts_int_closure_local_compound_assignment_under_ext
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with local compound assignment should compile under extension: %s\n",
             error.message);
@@ -8863,7 +13973,7 @@ static int test_compiler_accepts_int_closure_parameter_prefix_increment_under_ex
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with parameter prefix increment should compile under extension: %s\n",
             error.message);
@@ -8885,7 +13995,7 @@ static int test_compiler_accepts_int_closure_local_postfix_increment_under_exten
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with local postfix increment should compile under extension: %s\n",
             error.message);
@@ -8907,7 +14017,7 @@ static int test_compiler_accepts_int_closure_bitwise_expression_under_extension(
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with bitwise expression should compile under extension: %s\n",
             error.message);
@@ -8929,7 +14039,7 @@ static int test_compiler_accepts_int_closure_logical_expression_under_extension(
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with logical expression should compile under extension: %s\n",
             error.message);
@@ -8951,7 +14061,7 @@ static int test_compiler_accepts_int_closure_shift_expression_under_extension(vo
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with shift expression should compile under extension: %s\n",
             error.message);
@@ -8973,7 +14083,7 @@ static int test_compiler_accepts_int_closure_bitwise_compound_assignment_under_e
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with bitwise compound assignment should compile under extension: %s\n",
             error.message);
@@ -8995,7 +14105,7 @@ static int test_compiler_accepts_int_closure_bitwise_not_expression_under_extens
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure with bitwise not expression should compile under extension: %s\n",
             error.message);
@@ -9017,7 +14127,7 @@ static int test_compiler_accepts_int_closure_return_assignment_expression_under_
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure return assignment expression should compile under extension: %s\n",
             error.message);
@@ -9039,7 +14149,7 @@ static int test_compiler_accepts_int_closure_return_prefix_increment_expression_
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure return prefix increment expression should compile under extension: %s\n",
             error.message);
@@ -9061,7 +14171,7 @@ static int test_compiler_accepts_int_closure_return_comma_expression_under_exten
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "main__closure_f_") == NULL ||
-        strstr(output, "  call main__closure_f_") == NULL) {
+        strstr(output, "  call __fnwrap_closure_main__closure_f_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: int closure return comma expression should compile under extension: %s\n",
             error.message);
@@ -12529,6 +17639,123 @@ int main(void) {
         if (strstr("COMPILER-DYNAMIC-FNVAL-FORWARD", filter) != NULL) {
             return test_compiler_accepts_dynamic_local_function_value_forwarding_into_function_parameter_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-SECOND-ORDER-DYNAMIC-TERNARY-FNVAL-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_second_order_dynamic_ternary_function_value_actual_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PASSTHROUGH-DECL-LOCAL-FNVAL-NO-SHELL", filter) != NULL) {
+            return test_compiler_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-CLOSURE-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_closure_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-ZERO-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_zero_arg_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-ZERO-CLOSURE-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_zero_arg_closure_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-ZERO-VOID-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_zero_arg_void_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-ZERO-VOID-CLOSURE-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_zero_arg_void_closure_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-VOID-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_passthrough_dynamic_zero_arg_void_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-ZERO-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_passthrough_dynamic_zero_arg_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-LOCAL-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_local_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-LOCAL-REASSIGNED-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_local_reassigned_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-LOCAL-SCALAR-REASSIGNED-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_local_scalar_and_reassigned_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-LOCAL-WRAPPER-SCALAR-UPDATE-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_local_wrapper_scalar_update_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-LOCAL-WRAPPER-REPEATED-SCALAR-UPDATE-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_local_wrapper_repeated_scalar_update_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-THIRD-ORDER-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_third_order_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-THIRD-ORDER-WRAPPER-SCALAR-UPDATE-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_third_order_wrapper_scalar_update_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-THIRD-ORDER-WRAPPER-REPEATED-SCALAR-UPDATE-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_third_order_wrapper_repeated_scalar_update_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-THIRD-ORDER-RETURNED-FNVAL-BIND", filter) != NULL) {
+            return test_compiler_accepts_third_order_returned_function_value_parameter_bind_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-THIRD-ORDER-LOCAL-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_third_order_local_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-FNVAL-IMM-CALL", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_function_value_parameter_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-CLOSURE-FNVAL-IMM-CALL", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_closure_function_value_parameter_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-DYNAMIC-RETURNED-FNVAL-IMM-CALL", filter) != NULL) {
+            return test_compiler_accepts_second_order_dynamic_returned_function_value_parameter_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-FNVAL-IMM-CALL", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_passthrough_dynamic_function_value_parameter_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-DYNAMIC-LOCAL-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_dynamic_local_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-DYNAMIC-LOCAL-CLOSURE-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_dynamic_local_closure_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-UNARY-EVAL", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_unary_helper_eval_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-COMPOUND-UPDATE-EVAL", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_compound_update_helper_eval_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-COMMA-EVAL", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_comma_helper_eval_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-TERNARY-EVAL", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_ternary_helper_eval_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-PASSTHROUGH-DYNAMIC-LOCAL-FNVAL-STMT-CALL-PREFIX", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_with_statement_call_prefix_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-SECOND-ORDER-RETURNED-CLOSURE-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_second_order_returned_closure_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PARAM-LOCAL-FNVAL-DIRECT-NO-SHELL", filter) != NULL) {
+            return test_compiler_accepts_parameter_local_function_value_direct_call_without_specialization_shell() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PARAM-LOCAL-ZERO-FNVAL-DIRECT-NO-SHELL", filter) != NULL) {
+            return test_compiler_accepts_parameter_local_zero_arg_function_value_direct_call_without_specialization_shell() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PARAM-LOCAL-ZERO-VOID-FNVAL-DIRECT-NO-SHELL", filter) != NULL) {
+            return test_compiler_accepts_parameter_local_zero_arg_void_function_value_direct_call_without_specialization_shell() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PARAM-LOCAL-CLOSURE-DIRECT-NO-SHELL", filter) != NULL) {
+            return test_compiler_accepts_parameter_local_closure_direct_call_without_specialization_shell() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PARAM-LOCAL-CLOSURE-FORWARD-NO-SHELL", filter) != NULL) {
+            return test_compiler_accepts_parameter_local_closure_forward_without_specialization_shell() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PARAM-LOCAL-ZERO-VOID-FNVAL-FORWARD-NO-SHELL", filter) != NULL) {
+            return test_compiler_accepts_parameter_local_zero_arg_void_function_value_forward_without_specialization_shell() ? 0 : 1;
+        }
         if (strstr("COMPILER-DYNAMIC-FNVAL-ZERO-FORWARD", filter) != NULL) {
             return test_compiler_accepts_dynamic_local_zero_arg_function_value_forwarding_into_function_parameter_under_extension() ? 0 : 1;
         }
@@ -12561,6 +17788,520 @@ int main(void) {
         }
         if (strstr("COMPILER-RETURNED-CLOSURE-ALIAS-FORWARD", filter) != NULL) {
             return test_compiler_accepts_returned_closure_alias_forwarding_into_function_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-BIND", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_bind_and_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-LOCAL-BOUNCE-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_local_bounce_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BIND-RETURN-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bind_return_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bind_return_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BOUNCE-PASSTHROUGH-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bounce_passthrough_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BOUNCE-PASSTHROUGH-BIND-RETURN-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bounce_passthrough_bind_return_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-BOUNCE-PASSTHROUGH-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bounce_passthrough_bind_return_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-RETURNED-CALL-TERNARY-MERGE-DEEPER-CHAIN-BIND-RETURN-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_deeper_chain_bind_return_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-BOUNCE-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_bounce_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-BOUNCE-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_bounce_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-BOUNCE-PASSTHROUGH-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_bounce_passthrough_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-BOUNCE-PASSTHROUGH-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_bounce_passthrough_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-REASSIGN-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_reassign_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-REASSIGN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_reassign_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-RETURNED-CALL-REASSIGN-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_returned_call_reassign_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-PRODUCER-TERNARY-MERGE-RETURNED-CALL-REASSIGN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_returned_call_reassign_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-CLOSURE-PRODUCER-TERNARY-MERGE-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-CLOSURE-PRODUCER-TERNARY-MERGE-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-VOID-CLOSURE-PRODUCER-TERNARY-MERGE-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-VOID-CLOSURE-PRODUCER-TERNARY-MERGE-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DIRECT-DYNAMIC-RETURNED-CLOSURE-ARGUMENT", filter) != NULL) {
+            return test_compiler_accepts_direct_dynamic_returned_closure_function_value_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DIRECT-DYNAMIC-RETURNED-ZERO-CLOSURE-ARGUMENT", filter) != NULL) {
+            return test_compiler_accepts_direct_dynamic_returned_zero_arg_closure_function_value_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-RETURNED-FNVAL-REASSIGN", filter) != NULL) {
+            return test_compiler_accepts_returned_function_value_reassignment_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-RETURNED-ZERO-FNVAL-REASSIGN", filter) != NULL) {
+            return test_compiler_accepts_returned_zero_arg_function_value_reassignment_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-RETURNED-CLOSURE-REASSIGN", filter) != NULL) {
+            return test_compiler_accepts_returned_closure_reassignment_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-RETURNED-ZERO-VOID-CLOSURE-REASSIGN", filter) != NULL) {
+            return test_compiler_accepts_returned_zero_arg_void_closure_reassignment_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-FNVAL-REASSIGN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_function_value_reassignment_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-FNVAL-LOCAL-INIT", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_function_value_local_initializer_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-ZERO-FNVAL-LOCAL-INIT", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_zero_arg_function_value_local_initializer_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-ASSIGNMENT-RESULT-RETURNED-CLOSURE-LOCAL-INIT", filter) != NULL) {
+            return test_compiler_accepts_assignment_result_returned_closure_local_initializer_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-ASSIGNMENT-RESULT-RETURNED-ZERO-VOID-CLOSURE-LOCAL-INIT", filter) != NULL) {
+            return test_compiler_accepts_assignment_result_returned_zero_arg_void_closure_local_initializer_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-FNVAL-BOUNCE", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_function_value_local_bounce_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-FNVAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_function_value_forward_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-CLOSURE-BOUNCE", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_closure_local_bounce_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-CLOSURE-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_closure_forward_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-FNVAL-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_function_value_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-FNVAL-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_function_value_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-CLOSURE-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_closure_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-CLOSURE-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_closure_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-FNVAL-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-FNVAL-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-VOID-FNVAL-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-VOID-FNVAL-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-CLOSURE-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-CLOSURE-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-VOID-CLOSURE-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-VOID-CLOSURE-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-FNVAL-BOUNCE-PASSTHROUGH-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_function_value_bounce_passthrough_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-FNVAL-BOUNCE-PASSTHROUGH-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_function_value_bounce_passthrough_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-CLOSURE-BOUNCE-PASSTHROUGH-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_closure_bounce_passthrough_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-CLOSURE-BOUNCE-PASSTHROUGH-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_closure_bounce_passthrough_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-FNVAL-BOUNCE-PASSTHROUGH-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bounce_passthrough_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-FNVAL-BOUNCE-PASSTHROUGH-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bounce_passthrough_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-VOID-FNVAL-BOUNCE-PASSTHROUGH-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bounce_passthrough_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-VOID-FNVAL-BOUNCE-PASSTHROUGH-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bounce_passthrough_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-CLOSURE-BOUNCE-PASSTHROUGH-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_bounce_passthrough_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-CLOSURE-BOUNCE-PASSTHROUGH-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_bounce_passthrough_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-VOID-CLOSURE-BOUNCE-PASSTHROUGH-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bounce_passthrough_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-VOID-CLOSURE-BOUNCE-PASSTHROUGH-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bounce_passthrough_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-FNVAL-STMT-REASSIGN-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_function_value_statement_reassign_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-FNVAL-STMT-REASSIGN-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_function_value_statement_reassign_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-CLOSURE-STMT-REASSIGN-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_closure_statement_reassign_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-CLOSURE-STMT-REASSIGN-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_closure_statement_reassign_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-FNVAL-STMT-REASSIGN-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_statement_reassign_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-FNVAL-STMT-REASSIGN-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_statement_reassign_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-RETURNED-CALL-TERNARY-FNVAL-ASSIGN-DIRECT", filter) != NULL) {
+            return test_compiler_accepts_returned_call_ternary_function_value_assignment_then_direct_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-RETURNED-CALL-TERNARY-CLOSURE-ASSIGN-DIRECT", filter) != NULL) {
+            return test_compiler_accepts_returned_call_ternary_closure_assignment_then_direct_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-VOID-FNVAL-STMT-REASSIGN-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_statement_reassign_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-VOID-FNVAL-STMT-REASSIGN-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_statement_reassign_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-CLOSURE-STMT-REASSIGN-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_statement_reassign_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-CLOSURE-STMT-REASSIGN-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_statement_reassign_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-VOID-CLOSURE-STMT-REASSIGN-BIND-RETURN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_statement_reassign_bind_return_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-CALL-TERNARY-ZERO-VOID-CLOSURE-STMT-REASSIGN-BIND-RETURN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_statement_reassign_bind_return_actual_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-ASSIGNMENT-RESULT-FNVAL-REASSIGN", filter) != NULL) {
+            return test_compiler_accepts_assignment_result_function_value_reassignment_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-WRAPPED-RETURNED-FNVAL-REASSIGN", filter) != NULL) {
+            return test_compiler_accepts_wrapped_returned_function_value_reassignment_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-ASSIGNMENT-RESULT-RETURNED-CLOSURE-REASSIGN", filter) != NULL) {
+            return test_compiler_accepts_assignment_result_returned_closure_reassignment_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-CLOSURE-PRODUCER-TERNARY-MERGE-BOUNCE-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_bounce_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-CLOSURE-PRODUCER-TERNARY-MERGE-BOUNCE-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_bounce_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-CLOSURE-PRODUCER-TERNARY-MERGE-BOUNCE-PASSTHROUGH-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_bounce_passthrough_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-CLOSURE-PRODUCER-TERNARY-MERGE-BOUNCE-PASSTHROUGH-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_bounce_passthrough_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-CLOSURE-PRODUCER-TERNARY-MERGE-REASSIGN-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_reassign_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-CLOSURE-PRODUCER-TERNARY-MERGE-REASSIGN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_reassign_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-VOID-CLOSURE-PRODUCER-TERNARY-MERGE-BOUNCE-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_bounce_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-VOID-CLOSURE-PRODUCER-TERNARY-MERGE-BOUNCE-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_bounce_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-VOID-CLOSURE-PRODUCER-TERNARY-MERGE-BOUNCE-PASSTHROUGH-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_bounce_passthrough_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-VOID-CLOSURE-PRODUCER-TERNARY-MERGE-BOUNCE-PASSTHROUGH-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_bounce_passthrough_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-VOID-CLOSURE-PRODUCER-TERNARY-MERGE-REASSIGN-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_reassign_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-VOID-CLOSURE-PRODUCER-TERNARY-MERGE-REASSIGN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_reassign_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-CLOSURE-PRODUCER-TERNARY-MERGE-RETURNED-CALL-REASSIGN-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_returned_call_reassign_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-CLOSURE-PRODUCER-TERNARY-MERGE-RETURNED-CALL-REASSIGN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_returned_call_reassign_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-VOID-CLOSURE-PRODUCER-TERNARY-MERGE-RETURNED-CALL-REASSIGN-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_returned_call_reassign_immediate_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-VOID-CLOSURE-PRODUCER-TERNARY-MERGE-RETURNED-CALL-REASSIGN-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_returned_call_reassign_actual_argument_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-CLOSURE-STATEMENT-PASSTHROUGH-CALL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_closure_statement_passthrough_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-ZERO-ARG-VOID-CLOSURE-STATEMENT-PASSTHROUGH-CALL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_zero_arg_void_closure_statement_passthrough_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-STATEMENT-PASSTHROUGH-CALL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_closure_statement_passthrough_call_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("COMPILER-PASSTHROUGH-TERNARY-CLOSURE-LOCAL-INIT", filter) != NULL) {
+            return test_compiler_accepts_passthrough_ternary_closure_local_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PASSTHROUGH-TERNARY-NONCAPTURING-RETURN-IMMEDIATE", filter) != NULL) {
+            return test_compiler_accepts_passthrough_ternary_noncapturing_function_value_return_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PASSTHROUGH-TERNARY-NONCAPTURING-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_passthrough_ternary_noncapturing_function_value_actual_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PASSTHROUGH-TERNARY-CLOSURE-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_passthrough_ternary_closure_function_value_actual_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PASSTHROUGH-TERNARY-ZERO-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_passthrough_ternary_zero_arg_function_value_actual_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PASSTHROUGH-TERNARY-ZERO-VOID-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_passthrough_ternary_zero_arg_void_function_value_actual_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PASSTHROUGH-TERNARY-ZERO-CLOSURE-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_passthrough_ternary_zero_arg_closure_function_value_actual_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-PASSTHROUGH-TERNARY-ZERO-VOID-CLOSURE-ACTUAL", filter) != NULL) {
+            return test_compiler_accepts_passthrough_ternary_zero_arg_void_closure_function_value_actual_argument_under_extension() ? 0 : 1;
         }
         if (strstr("COMPILER-FLOAT-CHAIN-ADD-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
             return test_compiler_accepts_chained_float_addition_call_argument_to_float_under_extension() ? 0 : 1;
@@ -12900,7 +18641,16 @@ int main(void) {
     ok &= test_compiler_accepts_dynamic_local_closure_function_valued_return_immediate_call_under_extension();
     ok &= test_compiler_accepts_dynamic_local_closure_function_valued_return_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_returned_multi_capture_local_closure_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_returned_multi_capture_closure_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_dynamic_returned_multi_capture_local_closure_forward_into_parameter_under_extension();
+    ok &= test_compiler_accepts_returned_function_value_reassignment_under_extension();
+    ok &= test_compiler_accepts_returned_zero_arg_function_value_reassignment_under_extension();
+    ok &= test_compiler_accepts_returned_closure_reassignment_under_extension();
+    ok &= test_compiler_accepts_returned_zero_arg_void_closure_reassignment_under_extension();
+    ok &= test_compiler_accepts_wrapped_function_value_reassignment_under_extension();
+    ok &= test_compiler_accepts_assignment_result_function_value_reassignment_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_function_value_reassignment_under_extension();
+    ok &= test_compiler_accepts_assignment_result_returned_closure_reassignment_under_extension();
     ok &= test_compiler_accepts_noncapturing_function_valued_return_bind_and_call_under_extension();
     ok &= test_compiler_accepts_noncapturing_function_valued_return_immediate_call_under_extension();
     ok &= test_compiler_rejects_noncapturing_function_valued_return_immediate_call_scalar_type_mismatch_under_extension();
@@ -12911,6 +18661,7 @@ int main(void) {
     ok &= test_compiler_accepts_local_noncapturing_function_value_return_immediate_call_under_extension();
     ok &= test_compiler_accepts_rebound_local_noncapturing_function_value_return_immediate_call_under_extension();
     ok &= test_compiler_accepts_dynamic_noncapturing_function_valued_return_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_noncapturing_two_arg_function_valued_return_immediate_call_under_extension();
     ok &= test_compiler_accepts_dynamic_noncapturing_function_valued_return_bind_and_call_under_extension();
     ok &= test_compiler_accepts_ternary_noncapturing_function_value_return_immediate_call_under_extension();
     ok &= test_compiler_accepts_ternary_noncapturing_function_value_return_bind_and_call_under_extension();
@@ -12918,6 +18669,8 @@ int main(void) {
     ok &= test_compiler_accepts_ternary_closure_function_value_return_bind_and_call_under_extension();
     ok &= test_compiler_accepts_ternary_function_value_assignment_then_direct_call_under_extension();
     ok &= test_compiler_accepts_ternary_closure_assignment_then_direct_call_under_extension();
+    ok &= test_compiler_accepts_returned_call_ternary_function_value_assignment_then_direct_call_under_extension();
+    ok &= test_compiler_accepts_returned_call_ternary_closure_assignment_then_direct_call_under_extension();
     ok &= test_compiler_accepts_passing_top_level_function_value_to_unused_function_parameter_under_extension();
     ok &= test_compiler_rejects_top_level_function_value_in_plain_value_position_under_extension_for_now();
     ok &= test_compiler_accepts_direct_call_of_function_valued_parameter_with_specialization_lowering();
@@ -12926,6 +18679,44 @@ int main(void) {
     ok &= test_compiler_rejects_direct_call_of_function_valued_parameter_arity_mismatch_under_extension();
     ok &= test_compiler_accepts_forwarding_function_valued_parameter_with_specialization_lowering();
     ok &= test_compiler_accepts_multiple_function_valued_parameters_with_specialization_lowering();
+    ok &= test_compiler_accepts_second_order_dynamic_returned_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_accepts_second_order_returned_passthrough_dynamic_noncapturing_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_accepts_second_order_returned_passthrough_dynamic_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_accepts_second_order_local_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_second_order_local_reassigned_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_second_order_local_scalar_and_reassigned_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_second_order_local_wrapper_scalar_update_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_second_order_local_wrapper_repeated_scalar_update_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_second_order_zero_arg_wrapper_scalar_update_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_second_order_zero_arg_void_wrapper_scalar_update_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_second_order_returned_zero_arg_wrapper_scalar_update_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_accepts_second_order_returned_zero_arg_wrapper_scalar_update_function_value_parameter_bind_call_under_extension();
+    ok &= test_compiler_accepts_second_order_returned_zero_arg_void_wrapper_scalar_update_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_accepts_second_order_returned_zero_arg_void_wrapper_scalar_update_function_value_parameter_bind_call_under_extension();
+    ok &= test_compiler_accepts_second_order_dynamic_ternary_function_value_actual_argument_under_extension();
+    ok &= test_compiler_accepts_second_order_closure_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_third_order_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_third_order_zero_arg_wrapper_scalar_update_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_third_order_zero_arg_void_wrapper_scalar_update_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_second_order_zero_arg_closure_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_second_order_zero_arg_void_closure_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_second_order_returned_closure_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_accepts_second_order_dynamic_local_closure_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_second_order_returned_closure_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_third_order_wrapper_scalar_update_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_third_order_wrapper_repeated_scalar_update_function_value_parameter_forwarding_under_extension();
+    ok &= test_compiler_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell();
+    ok &= test_compiler_accepts_parameter_local_function_value_direct_call_without_specialization_shell();
+    ok &= test_compiler_accepts_parameter_local_scalar_rebind_function_value_direct_call_without_specialization_shell();
+    ok &= test_compiler_accepts_parameter_local_scalar_and_alias_function_value_direct_call_without_specialization_shell();
+    ok &= test_compiler_accepts_parameter_local_scalar_update_function_value_direct_call_without_specialization_shell();
+    ok &= test_compiler_accepts_parameter_local_scalar_update_and_alias_function_value_direct_call_without_specialization_shell();
+    ok &= test_compiler_accepts_parameter_local_call_update_function_value_direct_call_without_specialization_shell();
+    ok &= test_compiler_accepts_parameter_local_repeated_call_update_function_value_direct_call_without_specialization_shell();
+    ok &= test_compiler_accepts_parameter_local_two_callable_update_without_specialization_shell();
+    ok &= test_compiler_accepts_parameter_local_zero_arg_function_value_direct_call_without_specialization_shell();
+    ok &= test_compiler_accepts_parameter_local_closure_direct_call_without_specialization_shell();
+    ok &= test_compiler_accepts_parameter_local_closure_forward_without_specialization_shell();
     ok &= test_compiler_accepts_void_function_valued_parameter_with_builtin_binding();
     ok &= test_compiler_accepts_zero_arg_function_valued_parameter_with_specialization_lowering();
     ok &= test_compiler_rejects_zero_arg_function_valued_parameter_direct_call_arity_mismatch_under_extension();
@@ -12963,6 +18754,52 @@ int main(void) {
     ok &= test_compiler_accepts_assignment_result_function_value_direct_call_under_extension();
     ok &= test_compiler_rejects_assignment_result_function_value_direct_call_scalar_type_mismatch_under_extension();
     ok &= test_compiler_accepts_wrapped_function_value_local_initializer_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_function_value_local_initializer_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_zero_arg_function_value_local_initializer_under_extension();
+    ok &= test_compiler_accepts_assignment_result_returned_closure_local_initializer_under_extension();
+    ok &= test_compiler_accepts_assignment_result_returned_zero_arg_void_closure_local_initializer_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_function_value_local_initializer_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_closure_local_initializer_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_function_value_local_bounce_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_function_value_forward_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_closure_local_bounce_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_closure_forward_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_function_value_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_function_value_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_closure_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_closure_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_function_value_bounce_passthrough_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_function_value_bounce_passthrough_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_closure_bounce_passthrough_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_closure_bounce_passthrough_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bounce_passthrough_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_bounce_passthrough_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bounce_passthrough_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_bounce_passthrough_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_bounce_passthrough_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_bounce_passthrough_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bounce_passthrough_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_bounce_passthrough_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_function_value_statement_reassign_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_function_value_statement_reassign_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_closure_statement_reassign_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_closure_statement_reassign_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_statement_reassign_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_function_value_statement_reassign_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_statement_reassign_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_function_value_statement_reassign_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_statement_reassign_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_closure_statement_reassign_bind_return_actual_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_statement_reassign_bind_return_under_extension();
+    ok &= test_compiler_accepts_wrapped_returned_call_ternary_zero_arg_void_closure_statement_reassign_bind_return_actual_under_extension();
     ok &= test_compiler_accepts_ternary_function_value_local_initializer_under_extension();
     ok &= test_compiler_rejects_ternary_function_value_local_initializer_parameter_kind_mismatch_under_extension();
     ok &= test_compiler_rejects_function_valued_return_call_local_initializer_parameter_kind_mismatch_under_extension();
@@ -12983,6 +18820,7 @@ int main(void) {
     ok &= test_compiler_rejects_ternary_function_value_callee_scalar_type_mismatch_under_extension();
     ok &= test_compiler_rejects_ternary_function_value_callee_arity_mismatch_under_extension();
     ok &= test_compiler_accepts_ternary_closure_callee_under_extension();
+    ok &= test_compiler_accepts_ternary_multi_capture_closure_callee_under_extension();
     ok &= test_compiler_rejects_ternary_closure_callee_scalar_type_mismatch_under_extension();
     ok &= test_compiler_rejects_ternary_closure_callee_arity_mismatch_under_extension();
     ok &= test_compiler_accepts_returned_closure_forwarding_into_function_parameter_under_extension();
@@ -13002,6 +18840,9 @@ int main(void) {
     ok &= test_compiler_rejects_returned_closure_backed_function_value_parameter_immediate_call_arity_mismatch_under_extension();
     ok &= test_compiler_accepts_returned_closure_backed_function_value_parameter_bind_and_call_under_extension();
     ok &= test_compiler_accepts_dynamic_returned_closure_backed_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_two_arg_closure_backed_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_closure_backed_function_value_parameter_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_backed_function_value_parameter_immediate_call_under_extension();
     ok &= test_compiler_rejects_dynamic_returned_closure_backed_function_value_parameter_immediate_call_scalar_type_mismatch_under_extension();
     ok &= test_compiler_rejects_dynamic_returned_closure_backed_function_value_parameter_immediate_call_arity_mismatch_under_extension();
     ok &= test_compiler_accepts_dynamic_returned_closure_backed_function_value_parameter_bind_and_call_under_extension();
@@ -13016,14 +18857,80 @@ int main(void) {
     ok &= test_compiler_accepts_direct_dynamic_returned_noncapturing_two_arg_function_value_argument_under_extension();
     ok &= test_compiler_accepts_direct_dynamic_returned_noncapturing_zero_arg_function_value_argument_under_extension();
     ok &= test_compiler_accepts_direct_dynamic_returned_noncapturing_zero_arg_void_function_value_argument_under_extension();
+    ok &= test_compiler_accepts_direct_dynamic_returned_closure_function_value_argument_under_extension();
+    ok &= test_compiler_accepts_direct_dynamic_returned_multi_capture_closure_immediate_call_under_extension();
+    ok &= test_compiler_accepts_direct_dynamic_returned_zero_arg_closure_function_value_argument_under_extension();
+    ok &= test_compiler_accepts_direct_dynamic_returned_zero_arg_void_closure_function_value_argument_under_extension();
     ok &= test_compiler_accepts_direct_closure_literal_argument_to_function_value_parameter_under_extension();
     ok &= test_compiler_accepts_zero_arg_direct_closure_literal_argument_to_function_value_parameter_under_extension();
     ok &= test_compiler_accepts_void_direct_closure_literal_argument_to_function_value_parameter_under_extension();
+    ok &= test_compiler_accepts_multi_capture_direct_closure_literal_argument_to_function_value_parameter_under_extension();
     ok &= test_compiler_accepts_returned_closure_alias_forwarding_into_function_parameter_under_extension();
     ok &= test_compiler_accepts_closure_assignment_then_direct_call_under_extension();
     ok &= test_compiler_accepts_closure_assignment_then_forward_into_function_parameter_under_extension();
     ok &= test_compiler_accepts_returned_closure_assignment_then_direct_call_under_extension();
     ok &= test_compiler_accepts_returned_closure_assignment_then_return_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_rebind_then_return_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_multi_capture_closure_rebind_then_return_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_rebind_then_return_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_passthrough_bind_then_return_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_two_hop_passthrough_bind_then_return_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_two_hop_passthrough_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_three_hop_passthrough_bind_then_return_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_three_hop_passthrough_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_three_hop_passthrough_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_bind_and_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_local_bounce_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bind_return_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bind_return_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bounce_passthrough_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bounce_passthrough_bind_return_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_bounce_passthrough_bind_return_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_returned_call_ternary_merge_deeper_chain_bind_return_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_bounce_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_bounce_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_bounce_passthrough_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_bounce_passthrough_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_reassign_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_local_reassign_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_returned_call_reassign_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_producer_ternary_merge_returned_call_reassign_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_bounce_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_bounce_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_bounce_passthrough_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_bounce_passthrough_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_reassign_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_local_reassign_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_bounce_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_bounce_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_bounce_passthrough_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_bounce_passthrough_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_reassign_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_local_reassign_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_returned_call_reassign_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_closure_producer_ternary_merge_returned_call_reassign_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_returned_call_reassign_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_producer_ternary_merge_returned_call_reassign_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_closure_statement_passthrough_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_zero_arg_void_closure_statement_passthrough_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_statement_passthrough_call_under_extension();
+    ok &= test_compiler_accepts_passthrough_ternary_closure_local_initializer_under_extension();
+    ok &= test_compiler_accepts_passthrough_ternary_noncapturing_function_value_return_immediate_call_under_extension();
+    ok &= test_compiler_accepts_passthrough_ternary_noncapturing_function_value_actual_argument_under_extension();
+    ok &= test_compiler_accepts_passthrough_ternary_closure_function_value_actual_argument_under_extension();
+    ok &= test_compiler_accepts_passthrough_ternary_zero_arg_function_value_actual_argument_under_extension();
+    ok &= test_compiler_accepts_passthrough_ternary_zero_arg_void_function_value_actual_argument_under_extension();
+    ok &= test_compiler_accepts_passthrough_ternary_zero_arg_closure_function_value_actual_argument_under_extension();
+    ok &= test_compiler_accepts_passthrough_ternary_zero_arg_void_closure_function_value_actual_argument_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_local_bounce_immediate_call_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_closure_local_bounce_actual_argument_under_extension();
     ok &= test_compiler_accepts_dynamic_closure_local_dispatch_under_extension();
     ok &= test_compiler_accepts_ternary_closure_local_initializer_under_extension();
     ok &= test_compiler_accepts_dynamic_closure_local_forward_into_parameter_under_extension();

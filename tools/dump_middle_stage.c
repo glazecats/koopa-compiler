@@ -295,7 +295,24 @@ int main(int argc, char **argv) {
         !parser_parse_translation_unit_ast(&tokens, &ast, &parser_error) ||
         !semantic_analyze_program_with_options(&ast, &semantic_options, &semantic_error) ||
         !ir_lower_program(&ast, &ir_options, &ir_program, &ir_error)) {
-        fprintf(stderr, "failed before ir dump stage\n");
+        fprintf(stderr, "failed before ir dump stage");
+        if (parser_error.message[0] != '\0') {
+            fprintf(stderr, ": parser %d:%d: %s",
+                parser_error.line,
+                parser_error.column,
+                parser_error.message);
+        } else if (semantic_error.message[0] != '\0') {
+            fprintf(stderr, ": semantic %d:%d: %s",
+                semantic_error.line,
+                semantic_error.column,
+                semantic_error.message);
+        } else if (ir_error.message[0] != '\0') {
+            fprintf(stderr, ": ir %d:%d: %s",
+                ir_error.line,
+                ir_error.column,
+                ir_error.message);
+        }
+        fputc('\n', stderr);
         goto cleanup;
     }
 

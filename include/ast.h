@@ -155,6 +155,11 @@ struct AstExpression {
             char **parameter_names;
             int *parameter_value_kinds;
             char **parameter_type_names;
+            AstFunctionReturnType *parameter_function_return_types;
+            size_t *parameter_function_parameter_counts;
+            int **parameter_function_parameter_value_kinds;
+            AstFunctionReturnType **parameter_function_parameter_return_types;
+            size_t **parameter_function_parameter_parameter_counts;
             AstStatement *body;
         } closure;
     } as;
@@ -174,6 +179,11 @@ struct AstStatement {
     AstFunctionReturnType *declaration_function_return_types;
     size_t *declaration_function_parameter_counts;
     int **declaration_function_parameter_value_kinds;
+    AstFunctionReturnType **declaration_function_parameter_return_types;
+    size_t **declaration_function_parameter_parameter_counts;
+    int ***declaration_function_parameter_parameter_value_kinds;
+    AstFunctionReturnType ***declaration_function_parameter_parameter_return_types;
+    size_t ***declaration_function_parameter_parameter_parameter_counts;
     char **declaration_type_names;
     AstExpression **expressions;
     size_t expression_count;
@@ -204,6 +214,9 @@ typedef struct {
     int *function_return_function_parameter_value_kinds;
     AstFunctionReturnType *function_return_function_parameter_return_types;
     size_t *function_return_function_parameter_parameter_counts;
+    int **function_return_function_parameter_parameter_value_kinds;
+    AstFunctionReturnType **function_return_function_parameter_parameter_return_types;
+    size_t **function_return_function_parameter_parameter_parameter_counts;
     char **function_return_function_parameter_type_names;
     int declaration_value_kind;
     char *declaration_type_name;
@@ -222,6 +235,12 @@ typedef struct {
     AstExpression ***parameter_array_extent_exprs;
     AstFunctionReturnType *parameter_function_return_types;
     size_t *parameter_function_parameter_counts;
+    int **parameter_function_parameter_value_kinds;
+    AstFunctionReturnType **parameter_function_parameter_return_types;
+    size_t **parameter_function_parameter_parameter_counts;
+    int ***parameter_function_parameter_parameter_value_kinds;
+    AstFunctionReturnType ***parameter_function_parameter_parameter_return_types;
+    size_t ***parameter_function_parameter_parameter_parameter_counts;
     int *parameter_is_const;
     int *parameter_name_lines;
     int *parameter_name_columns;

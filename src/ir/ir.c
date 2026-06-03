@@ -172,6 +172,7 @@ typedef struct {
     const char *direct_target_name;
     const char *const *dynamic_target_names;
     size_t dynamic_target_count;
+    const char **owned_dynamic_target_names;
     size_t *owned_payload_local_ids;
     const size_t *capture_local_ids;
     size_t capture_count;
@@ -187,6 +188,7 @@ typedef struct {
     const char *direct_target_name;
     const char *const *dynamic_target_names;
     size_t dynamic_target_count;
+    const char **owned_dynamic_target_names;
     size_t *owned_payload_local_ids;
     size_t payload_slot_count;
     const size_t *capture_local_ids;
@@ -222,6 +224,55 @@ static void ir_init_function_object_descriptor(IrLowerFunctionObjectDescriptor *
     descriptor->dynamic_tag_local_id = (size_t)-1;
 }
 
+static const char **ir_clone_dynamic_target_name_array(const char *const *target_names,
+    size_t target_count) {
+    const char **copy = NULL;
+    size_t index;
+
+    if (!target_names || target_count == 0u) {
+        return NULL;
+    }
+
+    copy = (const char **)malloc(target_count * sizeof(const char *));
+    if (!copy) {
+        return NULL;
+    }
+    for (index = 0u; index < target_count; ++index) {
+        copy[index] = target_names[index];
+    }
+    return copy;
+}
+
+static int ir_assign_dynamic_target_name_array_copy(
+    const char *const *target_names,
+    size_t target_count,
+    const char *const **out_target_names,
+    const char ***out_owned_target_names) {
+    const char **copy = NULL;
+
+    if (out_target_names) {
+        *out_target_names = NULL;
+    }
+    if (out_owned_target_names) {
+        *out_owned_target_names = NULL;
+    }
+    if (target_count == 0u) {
+        return 1;
+    }
+
+    copy = ir_clone_dynamic_target_name_array(target_names, target_count);
+    if (!copy) {
+        return 0;
+    }
+    if (out_target_names) {
+        *out_target_names = copy;
+    }
+    if (out_owned_target_names) {
+        *out_owned_target_names = copy;
+    }
+    return 1;
+}
+
 static int ir_init_function_object_descriptor_from_binding_info(
     const IrLowerBindingInfo *binding_info,
     const IrFunctionValueTargetSet *target_set,
@@ -238,8 +289,17 @@ static int ir_init_function_object_descriptor_from_binding_info(
 
     is_closure_family = binding_info->kind == IR_LOWER_BINDING_CLOSURE_LOCAL;
     out_descriptor->direct_target_name = binding_info->type_name;
-    out_descriptor->dynamic_target_names = target_set ? target_set->target_names : NULL;
     out_descriptor->dynamic_target_count = target_set ? target_set->target_count : 0u;
+    if (out_descriptor->dynamic_target_count > 0u) {
+        if (!ir_assign_dynamic_target_name_array_copy(
+                target_set ? target_set->target_names : NULL,
+                out_descriptor->dynamic_target_count,
+                &out_descriptor->dynamic_target_names,
+                &out_descriptor->owned_dynamic_target_names)) {
+            ir_init_function_object_descriptor(out_descriptor);
+            return 0;
+        }
+    }
     out_descriptor->capture_local_ids = binding_info->closure_capture_local_ids;
     out_descriptor->capture_count = binding_info->closure_capture_count;
     out_descriptor->dynamic_tag_local_id = binding_info->function_target_tag_local_id;
@@ -314,6 +374,8 @@ static int ir_init_function_object_descriptor_from_static_target_with_payload(
 static int ir_init_callable_object_view_from_function_object_descriptor(
     const IrLowerFunctionObjectDescriptor *descriptor,
     IrLowerCallableObjectView *out_view) {
+    const char **owned_dynamic_target_names = NULL;
+
     if (out_view) {
         memset(out_view, 0, sizeof(*out_view));
         out_view->dynamic_tag_local_id = (size_t)-1;
@@ -324,10 +386,23 @@ static int ir_init_callable_object_view_from_function_object_descriptor(
         return 0;
     }
 
+    if (descriptor->dynamic_target_count > 0u) {
+        if (!ir_assign_dynamic_target_name_array_copy(
+                descriptor->dynamic_target_names,
+                descriptor->dynamic_target_count,
+                (const char ***)&owned_dynamic_target_names,
+                (const char ***)&owned_dynamic_target_names)) {
+            return 0;
+        }
+    }
+
     out_view->producer_external = descriptor->producer_external;
     out_view->direct_target_name = descriptor->direct_target_name;
-    out_view->dynamic_target_names = descriptor->dynamic_target_names;
+    out_view->dynamic_target_names = owned_dynamic_target_names
+        ? owned_dynamic_target_names
+        : descriptor->dynamic_target_names;
     out_view->dynamic_target_count = descriptor->dynamic_target_count;
+    out_view->owned_dynamic_target_names = owned_dynamic_target_names;
     out_view->owned_payload_local_ids = descriptor->owned_payload_local_ids;
     out_view->capture_local_ids = descriptor->capture_local_ids;
     out_view->capture_count = descriptor->capture_count;
@@ -337,6 +412,20 @@ static int ir_init_callable_object_view_from_function_object_descriptor(
     out_view->has_const_tag_value = descriptor->has_const_tag_value;
     out_view->const_tag_value = descriptor->const_tag_value;
     return 1;
+}
+
+static void ir_free_callable_object_view_storage(IrLowerCallableObjectView *view) {
+    if (!view) {
+        return;
+    }
+    free((void *)view->owned_dynamic_target_names);
+    free(view->owned_payload_local_ids);
+    view->owned_dynamic_target_names = NULL;
+    view->dynamic_target_names = NULL;
+    view->owned_payload_local_ids = NULL;
+    view->capture_local_ids = NULL;
+    view->dynamic_target_count = 0u;
+    view->capture_count = 0u;
 }
 
 static long long ir_normalize_sysy_int_value(long long value) {
@@ -441,6 +530,13 @@ static int ir_program_append_function(IrProgram *program,
     const char *name,
     IrFunction **out_function,
     IrError *error);
+static int ir_program_bind_function_external_ref(IrProgram *program,
+    const char *function_name,
+    const AstExternal *external,
+    int external_is_owned,
+    IrError *error);
+static const AstExternal *ir_program_find_function_external_ref(const IrProgram *program,
+    const char *function_name);
 static int ir_function_append_local(IrFunction *function,
     const char *source_name,
     int is_parameter,
@@ -685,6 +781,7 @@ static int ir_lower_try_emit_dynamic_function_value_specialized_call(IrLowerCont
     const AstExpression *call_expr,
     const AstExternal *callee_external,
     const char *callee_name,
+    int function_arg_wrapper_side_effects_emitted,
     IrValueRef *out_value,
     int *out_applied);
 static const AstStructType *ir_find_struct_type(const AstProgram *program, const char *name);
@@ -700,6 +797,9 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt);
 static int ir_lower_statement(IrLowerContext *ctx, const AstStatement *stmt);
 static int ir_external_body_has_function_parameter_callee_calls(const AstExternal *external,
     const AstStatement *stmt);
+static int ir_expression_contains_function_parameter_callee_call(
+    const AstExternal *external,
+    const AstExpression *expr);
 static int ir_external_body_needs_function_value_specialization(const AstProgram *program,
     const AstExternal *current_external,
     const AstStatement *stmt);
