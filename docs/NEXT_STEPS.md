@@ -357,10 +357,26 @@
       prefix arguments when a local bind later dispatches through one returned
       dynamic family. Focused IR, lower-IR, and compiler-driver regression
       coverage is now in place for this deeper passthrough/local-bind sibling
-      too. The next nearby blocker is the still broader family where several
-      higher-order wrappers and multiple independent dynamic producer families
-      compose in the same expression tree instead of only one recovered
-      ternary returned family flowing through the chain.
+      too.
+    - current multiple-dynamic-returned-function-argument checkpoint:
+      the same caller-side specialization line now also survives one more real
+      composition step instead of stopping at one recovered dynamic family per
+      call. Witnesses such as
+      `return compose(pick(getint(), add1), pick(getint(), add1), 4);` and
+      `return compose(idf(pick(getint(), add1)), idf(pick(getint(), add1)), 4);`
+      are now green for the returned dynamic closure-capture family. The kept
+      bridge on this slice is explicit combination dispatch: when one call site
+      carries multiple function-valued parameters and more than one of them is
+      a two-target dynamic returned family, lowering now materializes each
+      callable payload once, synthesizes the cross-product of specialized
+      callees, and emits nested caller-side tag branches to the matching
+      specialized leaf call instead of falling back to one unresolved static
+      specialization attempt. Focused IR, lower-IR, and compiler-driver
+      regression coverage is now in place for both the direct and one-hop
+      passthrough siblings. The next nearby blocker is the broader family where
+      this same multi-dynamic combination story must coexist with deeper
+      higher-order wrappers, larger target sets, or mixed producer kinds in the
+      same expression tree instead of only two-target returned closure families.
     - current returned multi-capture dynamic forwarding checkpoint:
       the nearby returned multi-capture closure forwarding family is now also
       real instead of remaining blocked on `IR-INT-123`. The focused witness
