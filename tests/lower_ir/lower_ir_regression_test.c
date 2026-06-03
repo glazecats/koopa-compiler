@@ -9216,6 +9216,37 @@ static int test_lower_ir_accepts_ternary_actual_argument_of_dynamic_returned_fun
     return ok;
 }
 
+static int test_lower_ir_accepts_passthrough_local_bind_of_ternary_dynamic_returned_function_parameter_capture_inside_closure_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int idf(int f(int))(int){ return f; }\n"
+            "int pick(int c, int f(int))(int){ int g(int)=closure [f] int (int y){ return f(y); }; int h(int)=closure [f] int (int y){ return f(f(y)); }; if(c) g=h; return g; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ int c=1; int h(int)=idf(c ? pick(1, add1) : pick(0, add1)); return h(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 8u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call idf(") == 0u &&
+        strstr(actual_text, "store_local h$ftag.2, tmp.27\n") != NULL &&
+        strstr(actual_text, "store_local h$closurecap$0.1, tmp.28\n") != NULL &&
+        strstr(actual_text, "tmp.25 = call pick__closure_g_131107__fv_0_pick__closure_g_131107(tmp.47, 4)\n") != NULL &&
+        strstr(actual_text, "tmp.25 = call pick__closure_h_131159__fv_0_pick__closure_g_131107(tmp.48, 4)\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR passthrough local bind of ternary dynamic returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -15497,6 +15528,11 @@ int main(void) {
                 ? 0
                 : 1;
         }
+        if (strstr("LOWER-IR-PASSTHROUGH-LOCAL-BIND-TERNARY-DYNAMIC-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_lower_ir_accepts_passthrough_local_bind_of_ternary_dynamic_returned_function_parameter_capture_inside_closure_under_extension()
+                ? 0
+                : 1;
+        }
         if (strstr("LOWER-IR-PASSTHROUGH-TERNARY-CLOSURE-LOCAL-INIT", filter) != NULL) {
             return test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension() ? 0 : 1;
         }
@@ -16029,6 +16065,7 @@ int main(void) {
     ok &= test_lower_ir_accepts_three_hop_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_alias_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_ternary_actual_argument_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
+    ok &= test_lower_ir_accepts_passthrough_local_bind_of_ternary_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value_return_immediate_call_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value_actual_argument_under_extension();

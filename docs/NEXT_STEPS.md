@@ -342,11 +342,25 @@
       callable payload first, then rebuild one dynamic callable object from
       that payload before the final `call_indirect`. Focused IR, lower-IR, and
       compiler-driver regression coverage is now in place for this ternary
-      returned-call actual-argument consumer too. The next nearby blocker is
-      the still broader family where these recursive returned-callee and
-      returned actual-argument reconstructions must survive through even more
-      mixed chains, especially when several higher-order wrappers and deeper
-      dynamic producer families compose in the same expression tree.
+      returned-call actual-argument consumer too.
+    - current recursive passthrough-over-ternary returned-family checkpoint:
+      that same caller-side callable-object reconstruction line now also
+      survives one more wrapper layer instead of requiring the ternary
+      returned family to appear directly at the final consumer. Witnesses such
+      as `return apply(id2(c ? pick(1, add1) : pick(0, add1)), 4);` and
+      `int h(int)=idf(c ? pick(1, add1) : pick(0, add1)); return h(4);` are
+      now green for the dynamic returned closure-capture family. The kept
+      bridge is still the same explicit callable-object spine, but it now
+      follows exact returned-function-value passthrough wrappers recursively,
+      re-materializes ternary returned-call payloads when rebuilding callable
+      views, and forwards the recovered payload through hidden specialized-call
+      prefix arguments when a local bind later dispatches through one returned
+      dynamic family. Focused IR, lower-IR, and compiler-driver regression
+      coverage is now in place for this deeper passthrough/local-bind sibling
+      too. The next nearby blocker is the still broader family where several
+      higher-order wrappers and multiple independent dynamic producer families
+      compose in the same expression tree instead of only one recovered
+      ternary returned family flowing through the chain.
     - current returned multi-capture dynamic forwarding checkpoint:
       the nearby returned multi-capture closure forwarding family is now also
       real instead of remaining blocked on `IR-INT-123`. The focused witness

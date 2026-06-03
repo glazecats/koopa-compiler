@@ -1045,7 +1045,12 @@ static int ir_try_materialize_identifier_function_value_capture_slot(
 static int ir_resolve_callable_object_view(IrLowerContext *ctx,
     const AstExpression *expr,
     IrLowerCallableObjectView *out_view) {
+    const AstExpression *base = ir_unwrap_function_value_wrapper_expression(expr);
     IrLowerFunctionObjectDescriptor descriptor;
+    const AstExternal *return_parameter_external = NULL;
+    size_t return_parameter_index = (size_t)-1;
+    const AstExpression *return_parameter_arg_expr = NULL;
+    const AstExpression *return_parameter_arg_base = NULL;
 
     if (out_view) {
         memset(out_view, 0, sizeof(*out_view));
@@ -1053,7 +1058,38 @@ static int ir_resolve_callable_object_view(IrLowerContext *ctx,
     }
     if (!ctx || !out_view ||
         !ir_resolve_function_value_descriptor(ctx, expr, &descriptor)) {
-        return 0;
+        if (!ctx || !expr || !out_view || !base || base->kind != AST_EXPR_CALL) {
+            return 0;
+        }
+        if (!ir_try_get_recursive_returned_function_value_parameter_argument_expr(
+                ctx,
+                base,
+                &return_parameter_external,
+                &return_parameter_index,
+                &return_parameter_arg_expr) ||
+            !return_parameter_external ||
+            !return_parameter_arg_expr ||
+            return_parameter_arg_expr == expr) {
+            return 0;
+        }
+        return_parameter_arg_base =
+            ir_unwrap_function_value_wrapper_expression(return_parameter_arg_expr);
+        if (return_parameter_arg_base &&
+            return_parameter_arg_base->kind == AST_EXPR_TERNARY) {
+            return ir_materialize_ternary_function_value_argument_callable_object_view(
+                ctx,
+                return_parameter_external,
+                return_parameter_index,
+                return_parameter_arg_base,
+                out_view,
+                NULL,
+                NULL);
+        }
+        return return_parameter_arg_base &&
+            ir_resolve_any_callable_object_view(
+                ctx,
+                return_parameter_arg_expr,
+                out_view);
     }
     return ir_init_callable_object_view_from_function_object_descriptor(
         &descriptor,
@@ -3563,6 +3599,7 @@ static int ir_build_dynamic_function_value_specialization_forward_args(
     size_t *out_dynamic_forward_arg_count) {
     IrValueRef *dynamic_forward_args = NULL;
     size_t dynamic_forward_arg_count = 0u;
+    size_t visible_index = 0u;
 
     if (out_dynamic_forward_args) {
         *out_dynamic_forward_args = NULL;
@@ -3578,8 +3615,11 @@ static int ir_build_dynamic_function_value_specialization_forward_args(
     {
         size_t forwarded_dynamic_capture_count = 0u;
         size_t static_capture_count = 0u;
-        size_t visible_index = 0u;
         size_t dynamic_capture_count = dynamic_callable_view->capture_count;
+        size_t hidden_prefix_param_count =
+            callee_external->parameter_count >= call_expr->as.call.arg_count
+                ? callee_external->parameter_count - call_expr->as.call.arg_count
+                : 0u;
 
         if (callee_external->parameter_value_kinds) {
             for (size_t i = 0u; i < dynamic_capture_count && i < callee_external->parameter_count; ++i) {
@@ -3593,16 +3633,20 @@ static int ir_build_dynamic_function_value_specialization_forward_args(
         }
 
         if (callee_external->parameter_value_kinds) {
-            for (size_t i = 0u; i < callee_external->parameter_count && i < call_expr->as.call.arg_count; ++i) {
+            for (size_t source_arg_index = 0u;
+                 source_arg_index < call_expr->as.call.arg_count;
+                 ++source_arg_index) {
                 const AstExpression *arg_expr = NULL;
                 const AstExpression *arg_base = NULL;
                 IrLowerBindingInfo binding_info;
+                size_t param_index = hidden_prefix_param_count + source_arg_index;
 
-                if (i == function_arg_index ||
-                    callee_external->parameter_value_kinds[i] != AST_PARAMETER_VALUE_FUNCTION) {
+                if (source_arg_index == function_arg_index ||
+                    param_index >= callee_external->parameter_count ||
+                    callee_external->parameter_value_kinds[param_index] != AST_PARAMETER_VALUE_FUNCTION) {
                     continue;
                 }
-                arg_expr = call_expr->as.call.args[i];
+                arg_expr = call_expr->as.call.args[source_arg_index];
                 arg_base = ir_unwrap_function_value_wrapper_expression(arg_expr);
                 memset(&binding_info, 0, sizeof(binding_info));
                 if (arg_base &&
@@ -3615,10 +3659,6 @@ static int ir_build_dynamic_function_value_specialization_forward_args(
                     static_capture_count += binding_info.closure_capture_count;
                 }
             }
-        }
-
-        if (forwarded_dynamic_capture_count + static_capture_count == 0u) {
-            return 1;
         }
 
         dynamic_forward_arg_count =
@@ -3643,16 +3683,20 @@ static int ir_build_dynamic_function_value_specialization_forward_args(
         }
 
         if (callee_external->parameter_value_kinds) {
-            for (size_t i = 0u; i < callee_external->parameter_count && i < call_expr->as.call.arg_count; ++i) {
+            for (size_t source_arg_index = 0u;
+                 source_arg_index < call_expr->as.call.arg_count;
+                 ++source_arg_index) {
                 const AstExpression *arg_expr = NULL;
                 const AstExpression *arg_base = NULL;
                 IrLowerBindingInfo binding_info;
+                size_t param_index = hidden_prefix_param_count + source_arg_index;
 
-                if (i == function_arg_index ||
-                    callee_external->parameter_value_kinds[i] != AST_PARAMETER_VALUE_FUNCTION) {
+                if (source_arg_index == function_arg_index ||
+                    param_index >= callee_external->parameter_count ||
+                    callee_external->parameter_value_kinds[param_index] != AST_PARAMETER_VALUE_FUNCTION) {
                     continue;
                 }
-                arg_expr = call_expr->as.call.args[i];
+                arg_expr = call_expr->as.call.args[source_arg_index];
                 arg_base = ir_unwrap_function_value_wrapper_expression(arg_expr);
                 memset(&binding_info, 0, sizeof(binding_info));
                 if (arg_base &&
@@ -3669,6 +3713,80 @@ static int ir_build_dynamic_function_value_specialization_forward_args(
                             ir_value_local(binding_info.closure_capture_local_ids[capture_index]);
                     }
                 }
+            }
+        }
+
+        if (callee_external->parameter_value_kinds &&
+            callee_external->parameter_names) {
+            for (size_t i = 0u; i < hidden_prefix_param_count; ++i) {
+                const AstExpression *resolved_hidden_arg_expr = NULL;
+                const AstExpression *resolved_hidden_arg_base = NULL;
+                IrLowerCallableObjectView resolved_hidden_arg_view;
+                IrValueRef *grown_forward_args = NULL;
+
+                if (i == function_arg_index ||
+                    callee_external->parameter_value_kinds[i] != AST_PARAMETER_VALUE_FUNCTION ||
+                    !callee_external->parameter_names[i] ||
+                    callee_external->parameter_names[i][0] == '\0') {
+                    continue;
+                }
+                if (!ir_try_resolve_returned_bound_callee_hidden_function_arg_expr(
+                        ctx,
+                        call_expr,
+                        callee_external->parameter_names[i],
+                        &resolved_hidden_arg_expr) ||
+                    !resolved_hidden_arg_expr) {
+                    continue;
+                }
+
+                memset(&resolved_hidden_arg_view, 0, sizeof(resolved_hidden_arg_view));
+                resolved_hidden_arg_view.dynamic_tag_local_id = (size_t)-1;
+                resolved_hidden_arg_base =
+                    ir_unwrap_function_value_wrapper_expression(resolved_hidden_arg_expr);
+                if ((resolved_hidden_arg_base &&
+                        resolved_hidden_arg_base->kind == AST_EXPR_TERNARY &&
+                        !ir_materialize_ternary_function_value_argument_callable_object_view(
+                            ctx,
+                            callee_external,
+                            i,
+                            resolved_hidden_arg_base,
+                            &resolved_hidden_arg_view,
+                            NULL,
+                            NULL)) ||
+                    (!resolved_hidden_arg_base ||
+                        resolved_hidden_arg_base->kind != AST_EXPR_TERNARY) &&
+                        !ir_resolve_any_callable_object_view(
+                            ctx,
+                            resolved_hidden_arg_expr,
+                            &resolved_hidden_arg_view) ||
+                    resolved_hidden_arg_view.capture_count == 0u ||
+                    !resolved_hidden_arg_view.capture_local_ids) {
+                    ir_free_callable_object_view_storage(&resolved_hidden_arg_view);
+                    continue;
+                }
+
+                grown_forward_args = (IrValueRef *)realloc(
+                    dynamic_forward_args,
+                    (dynamic_forward_arg_count + resolved_hidden_arg_view.capture_count) *
+                        sizeof(IrValueRef));
+                if (!grown_forward_args) {
+                    ir_free_callable_object_view_storage(&resolved_hidden_arg_view);
+                    free(dynamic_forward_args);
+                    ir_set_error(ctx->error,
+                        line,
+                        column,
+                        "IR-INT-029: out of memory while extending dynamic returned closure forwarding args");
+                    return 0;
+                }
+                dynamic_forward_args = grown_forward_args;
+                for (size_t capture_index = 0u;
+                     capture_index < resolved_hidden_arg_view.capture_count;
+                     ++capture_index) {
+                    dynamic_forward_args[visible_index++] =
+                        ir_value_local(resolved_hidden_arg_view.capture_local_ids[capture_index]);
+                }
+                dynamic_forward_arg_count += resolved_hidden_arg_view.capture_count;
+                ir_free_callable_object_view_storage(&resolved_hidden_arg_view);
             }
         }
 
@@ -11473,6 +11591,10 @@ static int ir_try_materialize_two_target_returned_callable_object_view_with_fami
     IrLowerCallableObjectView *out_view) {
     IrLowerFunctionObjectDescriptor descriptor;
     int return_family_is_closure = 0;
+    const AstExternal *return_parameter_external = NULL;
+    size_t return_parameter_index = (size_t)-1;
+    const AstExpression *return_parameter_arg_expr = NULL;
+    const AstExpression *return_parameter_arg_base = NULL;
 
     if (out_view) {
         memset(out_view, 0, sizeof(*out_view));
@@ -11485,6 +11607,31 @@ static int ir_try_materialize_two_target_returned_callable_object_view_with_fami
         closure_payload_local_name_prefix[0] == '\0' ||
         !ctx->ast_program) {
         return 0;
+    }
+    if (ir_try_get_recursive_returned_function_value_parameter_argument_expr(
+            ctx,
+            call_expr,
+            &return_parameter_external,
+            &return_parameter_index,
+            &return_parameter_arg_expr) &&
+        return_parameter_external &&
+        return_parameter_arg_expr &&
+        return_parameter_arg_expr != call_expr) {
+        return_parameter_arg_base =
+            ir_unwrap_function_value_wrapper_expression(return_parameter_arg_expr);
+        if (return_parameter_arg_base &&
+            return_parameter_arg_base->kind == AST_EXPR_TERNARY &&
+            ir_materialize_ternary_function_value_argument_callable_object_view(
+                ctx,
+                return_parameter_external,
+                return_parameter_index,
+                return_parameter_arg_base,
+                out_view,
+                NULL,
+                NULL) &&
+            ir_callable_object_view_is_two_target_dynamic_family(out_view)) {
+            return 1;
+        }
     }
     if (!ir_try_resolve_returned_function_object_descriptor_with_family_prefixes(
             ctx,
@@ -12193,6 +12340,7 @@ static int ir_call_argument_resolve_extension_function_value_target(const AstPro
     {
         const AstExpression *arg_base = ir_unwrap_function_value_wrapper_expression(arg_expr);
         if (ctx && arg_base && arg_base->kind == AST_EXPR_TERNARY) {
+            IrLowerCallableObjectView materialized_ternary_view;
             const AstExpression *then_base =
                 ir_unwrap_paren_expression(arg_base->as.ternary.then_expr);
             const AstExpression *else_base =
@@ -12206,6 +12354,40 @@ static int ir_call_argument_resolve_extension_function_value_target(const AstPro
             size_t then_capture_count = 0u;
             size_t else_capture_count = 0u;
             int target_discovery_only = out_target_name != NULL && !out_capture_local_ids && !out_capture_count;
+
+            memset(&materialized_ternary_view, 0, sizeof(materialized_ternary_view));
+            materialized_ternary_view.dynamic_tag_local_id = (size_t)-1;
+            if (ir_materialize_ternary_function_value_argument_callable_object_view(
+                    (IrLowerContext *)ctx,
+                    callee_external,
+                    arg_index,
+                    arg_base,
+                    &materialized_ternary_view,
+                    NULL,
+                    NULL) &&
+                materialized_ternary_view.direct_target_name &&
+                materialized_ternary_view.direct_target_name[0] != '\0') {
+                if (ir_project_static_callable_object_view_target_binding(
+                        &materialized_ternary_view,
+                        out_capture_local_ids,
+                        out_capture_count,
+                        out_target_name)) {
+                    return 1;
+                }
+                if (out_capture_local_ids) {
+                    *out_capture_local_ids = materialized_ternary_view.capture_local_ids;
+                }
+                if (out_capture_count) {
+                    *out_capture_count = materialized_ternary_view.capture_count;
+                }
+                if (out_target_name) {
+                    *out_target_name = materialized_ternary_view.direct_target_name;
+                }
+                return 1;
+            }
+            if (ctx->error && ctx->error->message[0] != '\0') {
+                return 0;
+            }
 
             if (then_base && then_base->kind == AST_EXPR_CALL &&
                 ir_try_resolve_exact_returned_function_value_parameter_passthrough_base_expr(
