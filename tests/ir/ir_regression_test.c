@@ -6790,6 +6790,66 @@ static int test_ir_accepts_dynamic_returned_function_parameter_capture_inside_cl
     return ok;
 }
 
+static int test_ir_accepts_three_hop_dynamic_returned_function_parameter_capture_inside_closure_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int id(int h(int))(int){ return h; }\n"
+            "int make(int c, int f(int))(int){ int g(int)=closure [f] int (int y){ return f(y); }; int h(int)=closure [f] int (int y){ return f(f(y)); }; if(c) g=h; return g; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ int g(int)=id(id(make(1, add1))); return g(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        ir_test_count_fragment_occurrences(actual_text, "call make(") == 3u &&
+        strstr(actual_text, "g$ftag.4 = mov __retclosure_declslot_0.6\n") != NULL &&
+        strstr(actual_text, "g$closurecap$0.5 = mov __retclosure_declslot_1.7\n") != NULL &&
+        strstr(actual_text, "tmp.10 = call make__closure_g_131107__fv_0_add1(4)\n") != NULL &&
+        strstr(actual_text, "tmp.10 = call make__closure_h_131159__fv_0_add1(4)\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: three-hop dynamic returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_alias_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int id(int h(int))(int){ return h; }\n"
+            "int make(int c, int f(int))(int){ int g(int)=closure [f] int (int y){ return f(y); }; int h(int)=closure [f] int (int y){ return f(f(y)); }; if(c) g=h; return g; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ int g(int)=id(make(1, add1)); int p(int)=g; return p(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        ir_test_count_fragment_occurrences(actual_text, "call make(") == 1u &&
+        strstr(actual_text, "p$ftag.4 = mov g$ftag.0\n") != NULL &&
+        strstr(actual_text, "p$closurecap$0.5 = mov g$closurecap$0.1\n") != NULL &&
+        strstr(actual_text, "tmp.4 = call make__closure_g_131107__fv_0_add1(4)\n") != NULL &&
+        strstr(actual_text, "tmp.4 = call make__closure_h_131159__fv_0_add1(4)\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: alias of dynamic returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -15053,6 +15113,12 @@ int main(void) {
         if (strstr("IR-DYNAMIC-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
             return test_ir_accepts_dynamic_returned_function_parameter_capture_inside_closure_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-THREEHOP-DYNAMIC-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_ir_accepts_three_hop_dynamic_returned_function_parameter_capture_inside_closure_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-ALIAS-DYNAMIC-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_ir_accepts_alias_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension() ? 0 : 1;
+        }
         if (strstr("IR-PASSTHROUGH-DECL-LOCAL-FNVAL-NO-SHELL", filter) != NULL) {
             return test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension() ? 0 : 1;
         }
@@ -15449,6 +15515,8 @@ int main(void) {
     ok &= test_ir_accepts_function_parameter_capture_inside_closure_under_extension();
     ok &= test_ir_accepts_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_ir_accepts_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
+    ok &= test_ir_accepts_three_hop_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
+    ok &= test_ir_accepts_alias_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension();
     ok &= test_ir_accepts_parameter_local_function_value_direct_call_without_specialization_shell_under_extension();
     ok &= test_ir_accepts_parameter_local_scalar_rebind_function_value_direct_call_without_specialization_shell_under_extension();

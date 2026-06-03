@@ -317,11 +317,24 @@
       such as `make__closure_g_*__fv_0_add1` /
       `make__closure_h_*__fv_0_add1`. Focused IR, lower-IR, and
       compiler-driver regression coverage is now in place for this dynamic
-      returned-parameter slice too. The next nearby blocker is the broader
-      family where the same returned dynamic closure producer must stay stable
-      across more general actual-argument transport and deeper multi-hop
-      returned callable flows, instead of only the direct bind-and-call
-      consumer.
+      returned-parameter slice too.
+    - current multi-hop returned dynamic closure-capture checkpoint:
+      the same returned dynamic family now also stays stable one hop deeper
+      instead of only on the direct bind-and-call consumer. Focused witnesses
+      such as `int g(int)=id(id(make(1, add1))); return g(4);` and the alias
+      sibling `int g(int)=id(make(1, add1)); int p(int)=g; return p(4);`
+      are now green on the same specialization spine. The key bridge is still
+      intentionally narrow but now explicitly recursive: returned-call
+      materialization can walk exact function-value passthrough calls when
+      looking for the real producer, and hidden captured function-value
+      specialization can also follow local alias declarations plus passthrough
+      call chains when reconstructing the concrete bound target. Focused IR,
+      lower-IR, and compiler-driver regression coverage is now in place for
+      these deeper bind-and-call consumers too. The next nearby blocker is the
+      still broader family where the same recursive returned-callee tracking
+      needs to survive through more arbitrary dynamic returned actual-argument
+      transport and deeper mixed call/alias chains rather than the currently
+      locked direct-bind and simple alias/passthrough shapes.
     - current returned multi-capture dynamic forwarding checkpoint:
       the nearby returned multi-capture closure forwarding family is now also
       real instead of remaining blocked on `IR-INT-123`. The focused witness

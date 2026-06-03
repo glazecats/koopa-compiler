@@ -9125,6 +9125,66 @@ static int test_lower_ir_accepts_dynamic_returned_function_parameter_capture_ins
     return ok;
 }
 
+static int test_lower_ir_accepts_three_hop_dynamic_returned_function_parameter_capture_inside_closure_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int id(int h(int))(int){ return h; }\n"
+            "int make(int c, int f(int))(int){ int g(int)=closure [f] int (int y){ return f(y); }; int h(int)=closure [f] int (int y){ return f(f(y)); }; if(c) g=h; return g; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ int g(int)=id(id(make(1, add1))); return g(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") == 3u &&
+        strstr(actual_text, "store_local g$ftag.4, tmp.11\n") != NULL &&
+        strstr(actual_text, "store_local g$closurecap$0.5, tmp.12\n") != NULL &&
+        strstr(actual_text, "tmp.10 = call make__closure_g_131107__fv_0_add1(4)\n") != NULL &&
+        strstr(actual_text, "tmp.10 = call make__closure_h_131159__fv_0_add1(4)\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR three-hop dynamic returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_alias_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int id(int h(int))(int){ return h; }\n"
+            "int make(int c, int f(int))(int){ int g(int)=closure [f] int (int y){ return f(y); }; int h(int)=closure [f] int (int y){ return f(f(y)); }; if(c) g=h; return g; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ int g(int)=id(make(1, add1)); int p(int)=g; return p(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") == 1u &&
+        strstr(actual_text, "store_local p$ftag.4, tmp.7\n") != NULL &&
+        strstr(actual_text, "store_local p$closurecap$0.5, tmp.8\n") != NULL &&
+        strstr(actual_text, "tmp.4 = call make__closure_g_131107__fv_0_add1(4)\n") != NULL &&
+        strstr(actual_text, "tmp.4 = call make__closure_h_131159__fv_0_add1(4)\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR alias of dynamic returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -15391,6 +15451,16 @@ int main(void) {
                 ? 0
                 : 1;
         }
+        if (strstr("LOWER-IR-THREEHOP-DYNAMIC-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_lower_ir_accepts_three_hop_dynamic_returned_function_parameter_capture_inside_closure_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("LOWER-IR-ALIAS-DYNAMIC-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_lower_ir_accepts_alias_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension()
+                ? 0
+                : 1;
+        }
         if (strstr("LOWER-IR-PASSTHROUGH-TERNARY-CLOSURE-LOCAL-INIT", filter) != NULL) {
             return test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension() ? 0 : 1;
         }
@@ -15920,6 +15990,8 @@ int main(void) {
     ok &= test_lower_ir_accepts_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
+    ok &= test_lower_ir_accepts_three_hop_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
+    ok &= test_lower_ir_accepts_alias_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value_return_immediate_call_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value_actual_argument_under_extension();

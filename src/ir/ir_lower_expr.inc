@@ -3380,10 +3380,7 @@ static int ir_try_resolve_returned_bound_callee_hidden_function_arg_expr(
     const AstExpression *callee_base = NULL;
     IrLowerBindingInfo binding_info;
     const AstExpression *init_expr = NULL;
-    const AstExpression *init_base = NULL;
-    const AstExpression *producer_callee_base = NULL;
-    const AstExternal *producer_external = NULL;
-    size_t producer_param_index = (size_t)-1;
+    size_t hop_count = 0u;
 
     if (out_arg_expr) {
         *out_arg_expr = NULL;
@@ -3419,35 +3416,71 @@ static int ir_try_resolve_returned_bound_callee_hidden_function_arg_expr(
         return 0;
     }
 
-    init_base = ir_unwrap_function_value_wrapper_expression(init_expr);
-    if (!init_base || init_base->kind != AST_EXPR_CALL ||
-        !init_base->as.call.args) {
-        return 0;
+    while (init_expr && hop_count < 64u) {
+        const AstExpression *init_base =
+            ir_unwrap_function_value_wrapper_expression(init_expr);
+        const AstExpression *producer_callee_base = NULL;
+        const AstExternal *producer_external = NULL;
+        size_t producer_param_index = (size_t)-1;
+        size_t passthrough_index = (size_t)-1;
+        const AstExpression *aliased_init_expr = NULL;
+
+        if (!init_base) {
+            return 0;
+        }
+        if (init_base->kind == AST_EXPR_IDENTIFIER &&
+            init_base->as.identifier.name &&
+            ir_try_find_current_function_local_function_initializer_expr(
+                ctx,
+                init_base->as.identifier.name,
+                &aliased_init_expr) &&
+            aliased_init_expr) {
+            init_expr = aliased_init_expr;
+            ++hop_count;
+            continue;
+        }
+        if (init_base->kind != AST_EXPR_CALL ||
+            !init_base->as.call.args) {
+            return 0;
+        }
+
+        producer_callee_base =
+            ir_unwrap_function_value_wrapper_expression(init_base->as.call.callee);
+        if (!producer_callee_base || producer_callee_base->kind != AST_EXPR_IDENTIFIER ||
+            !producer_callee_base->as.identifier.name) {
+            return 0;
+        }
+
+        producer_external =
+            ir_find_named_function_external_prefer_definition(
+                ctx->ast_program,
+                producer_callee_base->as.identifier.name);
+        if (!producer_external) {
+            return 0;
+        }
+        if (ir_find_external_parameter_index_by_name(
+                producer_external,
+                hidden_parameter_name,
+                1,
+                &producer_param_index) &&
+            producer_param_index < init_base->as.call.arg_count) {
+            *out_arg_expr = init_base->as.call.args[producer_param_index];
+            return *out_arg_expr != NULL;
+        }
+        if (!producer_external->has_function_return_signature ||
+            !ir_function_value_return_exact_parameter_passthrough_index(
+                ctx->ast_program,
+                producer_external,
+                &passthrough_index) ||
+            passthrough_index == (size_t)-1 ||
+            passthrough_index >= init_base->as.call.arg_count) {
+            return 0;
+        }
+        init_expr = init_base->as.call.args[passthrough_index];
+        ++hop_count;
     }
 
-    producer_callee_base =
-        ir_unwrap_function_value_wrapper_expression(init_base->as.call.callee);
-    if (!producer_callee_base || producer_callee_base->kind != AST_EXPR_IDENTIFIER ||
-        !producer_callee_base->as.identifier.name) {
-        return 0;
-    }
-
-    producer_external =
-        ir_find_named_function_external_prefer_definition(
-            ctx->ast_program,
-            producer_callee_base->as.identifier.name);
-    if (!producer_external ||
-        !ir_find_external_parameter_index_by_name(
-            producer_external,
-            hidden_parameter_name,
-            1,
-            &producer_param_index) ||
-        producer_param_index >= init_base->as.call.arg_count) {
-        return 0;
-    }
-
-    *out_arg_expr = init_base->as.call.args[producer_param_index];
-    return *out_arg_expr != NULL;
+    return 0;
 }
 
 static int ir_resolve_hidden_function_value_specialization_binding(
@@ -9416,6 +9449,7 @@ static int ir_lower_call_into_returned_closure_slots(IrLowerContext *ctx,
     size_t dest_first_local_id,
     size_t dest_slot_count) {
     const AstExpression *base = ir_unwrap_paren_expression(call_expr);
+    const AstExpression *current_call_expr = call_expr;
     const char *callee_name = NULL;
     const AstExternal *callee_external = NULL;
     IrFunction *callee_function = NULL;
@@ -9446,24 +9480,63 @@ static int ir_lower_call_into_returned_closure_slots(IrLowerContext *ctx,
     }
     current_function_name = ctx->function ? ctx->function->name : NULL;
 
-    callee_name = ir_extract_direct_call_callee_name(base->as.call.callee);
-    if (!callee_name || callee_name[0] == '\0') {
-        ir_set_error(ctx->error,
-            base->line,
-            base->column,
-            "IR-INT-103: returned-call materialization requires a direct identifier callee");
-        return 0;
-    }
+    while (1) {
+        size_t passthrough_index = (size_t)-1;
+        const AstExpression *passthrough_arg_expr = NULL;
+        const AstExpression *passthrough_arg_base = NULL;
 
-    callee_external = ir_find_named_function_external_prefer_definition(ctx->ast_program, callee_name);
-    if (!callee_external || !callee_external->has_function_return_signature ||
-        strcmp(callee_external->name, expected_return_function_external->name) != 0) {
-        ir_set_error(ctx->error,
-            base->line,
-            base->column,
-            "IR-INT-104: returned-call materialization callee '%s' does not match expected function-value producer",
-            callee_name);
-        return 0;
+        base = ir_unwrap_paren_expression(current_call_expr);
+        if (!base || base->kind != AST_EXPR_CALL) {
+            ir_set_error(ctx->error,
+                call_expr->line,
+                call_expr->column,
+                "IR-INT-103: returned-call materialization requires a direct identifier callee");
+            return 0;
+        }
+
+        callee_name = ir_extract_direct_call_callee_name(base->as.call.callee);
+        if (!callee_name || callee_name[0] == '\0') {
+            ir_set_error(ctx->error,
+                base->line,
+                base->column,
+                "IR-INT-103: returned-call materialization requires a direct identifier callee");
+            return 0;
+        }
+
+        callee_external = ir_find_named_function_external_prefer_definition(ctx->ast_program, callee_name);
+        if (callee_external && callee_external->has_function_return_signature &&
+            strcmp(callee_external->name, expected_return_function_external->name) == 0) {
+            break;
+        }
+        if (!callee_external ||
+            !callee_external->has_function_return_signature ||
+            !ir_function_value_return_exact_parameter_passthrough_index(
+                ctx->ast_program,
+                callee_external,
+                &passthrough_index) ||
+            passthrough_index == (size_t)-1 ||
+            !base->as.call.args ||
+            passthrough_index >= base->as.call.arg_count) {
+            ir_set_error(ctx->error,
+                base->line,
+                base->column,
+                "IR-INT-104: returned-call materialization callee '%s' does not match expected function-value producer",
+                callee_name);
+            return 0;
+        }
+
+        passthrough_arg_expr = base->as.call.args[passthrough_index];
+        passthrough_arg_base =
+            ir_unwrap_function_value_wrapper_expression(passthrough_arg_expr);
+        if (!passthrough_arg_base || passthrough_arg_base->kind != AST_EXPR_CALL) {
+            ir_set_error(ctx->error,
+                base->line,
+                base->column,
+                "IR-INT-104: returned-call materialization callee '%s' does not match expected function-value producer",
+                callee_name);
+            return 0;
+        }
+        current_call_expr = passthrough_arg_base;
     }
 
     callee_function = ir_program_find_function_mut(ctx->program, callee_name);
