@@ -9063,6 +9063,36 @@ static int test_lower_ir_accepts_function_parameter_capture_inside_closure_under
     return ok;
 }
 
+static int test_lower_ir_accepts_returned_function_parameter_capture_inside_closure_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int make(int f(int))(int){ return closure [f] int (int y){ return f(y); }; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ int g(int)=make(add1); return g(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func make(__ret0.0, f.1) {\n") != NULL &&
+        strstr(actual_text, "store_indirect tmp.0, tmp.1\n") != NULL &&
+        strstr(actual_text, "declare make__retclosure_1_35(f.0, y.1)\n") != NULL &&
+        strstr(actual_text, "call make(tmp.0, 0)\n") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__retclosure_1_35_1(tmp.2, 4)\n") != NULL &&
+        strstr(actual_text, "call make__retclosure_1_35(tmp.1, tmp.4)\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -15320,6 +15350,11 @@ int main(void) {
                 ? 0
                 : 1;
         }
+        if (strstr("LOWER-IR-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_lower_ir_accepts_returned_function_parameter_capture_inside_closure_under_extension()
+                ? 0
+                : 1;
+        }
         if (strstr("LOWER-IR-PASSTHROUGH-TERNARY-CLOSURE-LOCAL-INIT", filter) != NULL) {
             return test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension() ? 0 : 1;
         }
@@ -15847,6 +15882,7 @@ int main(void) {
     ok &= test_lower_ir_accepts_dynamic_returned_closure_statement_passthrough_call_under_extension();
     ok &= test_lower_ir_accepts_static_function_value_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_function_parameter_capture_inside_closure_under_extension();
+    ok &= test_lower_ir_accepts_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value_return_immediate_call_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value_actual_argument_under_extension();

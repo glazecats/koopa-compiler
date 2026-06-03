@@ -288,10 +288,24 @@
       specialization `wrap__fv_0_add1__closure_*__fv_0_add1` is synthesized
       only once the outer function-value binding is known. Focused IR,
       lower-IR, and compiler-driver regression coverage is now in place for
-      this local-parameter slice. The next adjacent blocker is the returned
-      sibling `int make(int f(int))(int){ return closure [f] ...; }`, which
-      still needs the same transport story carried through returned closure
-      producers.
+      this local-parameter slice.
+    - current returned function-parameter closure-capture checkpoint:
+      the adjacent returned sibling is now also landed instead of remaining
+      blocked. A witness such as
+      `int make(int f(int))(int){ return closure [f] int (int y){ return f(y); }; }`
+      now compiles end-to-end when instantiated with a static noncapturing
+      actual target like `make(add1)`. The first kept returned shape is still
+      intentionally conservative: the returning function writes the captured
+      function-value tag directly into its hidden return payload slot, the
+      caller re-materializes that payload into a closure env slot, and the
+      resulting callable object continues to use the existing closure wrapper
+      path through `fn_make __fnwrap_closure_make__retclosure_*` +
+      `call_indirect`. Focused IR, lower-IR, and compiler-driver regression
+      coverage is now in place for this returned-parameter slice. The next
+      nearby blocker is no longer the basic returned sibling itself, but the
+      more general family where returned closure helpers must preserve the
+      same function-valued capture story through dynamic / multi-target
+      returned function-value producers.
     - current returned multi-capture dynamic forwarding checkpoint:
       the nearby returned multi-capture closure forwarding family is now also
       real instead of remaining blocked on `IR-INT-123`. The focused witness

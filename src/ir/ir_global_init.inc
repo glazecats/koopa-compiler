@@ -1460,6 +1460,17 @@ retry_return_expr_shape:
 static int ir_build_returned_closure_helper_name(const AstExternal *external,
     char **out_name,
     IrError *error) {
+    return ir_build_returned_closure_helper_name_for_owner(
+        external,
+        external ? external->name : NULL,
+        out_name,
+        error);
+}
+
+static int ir_build_returned_closure_helper_name_for_owner(const AstExternal *external,
+    const char *owner_name,
+    char **out_name,
+    IrError *error) {
     const AstExpression *closure_expr = NULL;
     size_t needed = 0u;
     char *name = NULL;
@@ -1467,7 +1478,8 @@ static int ir_build_returned_closure_helper_name(const AstExternal *external,
     if (out_name) {
         *out_name = NULL;
     }
-    if (!external || !external->name || external->name[0] == '\0' || !external->function_body || !out_name) {
+    if (!external || !owner_name || owner_name[0] == '\0' ||
+        !external->function_body || !out_name) {
         ir_set_error(error, 0, 0, "IR-INT-091: invalid returned-closure helper naming contract");
         return 0;
     }
@@ -1479,7 +1491,7 @@ static int ir_build_returned_closure_helper_name(const AstExternal *external,
         return 0;
     }
 
-    needed = strlen(external->name) + 48u;
+    needed = strlen(owner_name) + 48u;
     name = (char *)malloc(needed);
     if (!name) {
         ir_set_error(error, external->line, external->column,
@@ -1490,7 +1502,7 @@ static int ir_build_returned_closure_helper_name(const AstExternal *external,
     snprintf(name,
         needed,
         "%s__retclosure_%d_%d",
-        external->name,
+        owner_name,
         closure_expr->line,
         closure_expr->column);
     *out_name = name;
@@ -1866,6 +1878,7 @@ cleanup:
 static int ir_ensure_returned_closure_helper_function(const AstProgram *ast_program,
     IrProgram *program,
     const AstExternal *external,
+    const char *current_function_name_override,
     const char **out_target_name,
     IrError *error) {
     const AstExpression *closure_expr = NULL;
@@ -1887,13 +1900,27 @@ static int ir_ensure_returned_closure_helper_function(const AstProgram *ast_prog
             "IR-INT-097: returned-closure helper ensure requires a closure return expression");
         return 0;
     }
-    if (!ir_build_returned_closure_helper_name(external, &helper_name, error)) {
+    if (!ir_build_returned_closure_helper_name_for_owner(
+            external,
+            (current_function_name_override && current_function_name_override[0] != '\0')
+                ? current_function_name_override
+                : external->name,
+            &helper_name,
+            error)) {
         return 0;
     }
 
     memset(&helper_ctx, 0, sizeof(helper_ctx));
     helper_ctx.ast_program = ast_program;
     helper_ctx.program = program;
+    helper_ctx.function =
+        ((current_function_name_override && current_function_name_override[0] != '\0')
+                ? ir_program_find_function_mut(program, current_function_name_override)
+                : NULL);
+    if (!helper_ctx.function && external && external->name) {
+        helper_ctx.function =
+            ir_program_find_function_mut(program, external->name);
+    }
     ok = ir_lower_closure_helper_function_from_expr(
         &helper_ctx,
         closure_expr,
@@ -1973,6 +2000,10 @@ static int ir_resolve_local_function_value_declaration_target_name(
         memset(&helper_ctx, 0, sizeof(helper_ctx));
         helper_ctx.ast_program = ast_program;
         helper_ctx.program = program;
+        helper_ctx.function =
+            external && external->name
+                ? ir_program_find_function_mut(program, external->name)
+                : NULL;
         ok = ir_lower_closure_helper_function_from_expr(
             &helper_ctx,
             base,
@@ -2059,6 +2090,7 @@ static int ir_resolve_local_function_value_declaration_target_name(
 static int ir_resolve_function_value_return_target_name(const AstProgram *ast_program,
     IrProgram *program,
     const AstExternal *external,
+    const char *current_function_name_override,
     const char **out_target_name,
     IrError *error) {
     const AstExternal *resolved_external = external;
@@ -2098,6 +2130,7 @@ static int ir_resolve_function_value_return_target_name(const AstProgram *ast_pr
             ast_program,
             program,
             resolved_external,
+            current_function_name_override,
             out_target_name,
             error);
     }
@@ -2154,6 +2187,7 @@ static int ir_resolve_function_value_return_target_name(const AstProgram *ast_pr
             ast_program,
             program,
             callee_external,
+            NULL,
             out_target_name,
             error);
     }
@@ -2620,6 +2654,7 @@ static int ir_resolve_function_value_passthrough_target_name_recursive(
             ast_program,
             program,
             callee_external,
+            NULL,
             out_target_name,
             error);
     }
@@ -2815,6 +2850,7 @@ static int ir_resolve_function_value_wrapper_target_name(const AstProgram *ast_p
             ast_program,
             program,
             callee_external,
+            NULL,
             out_target_name,
             error);
     }
@@ -6037,6 +6073,7 @@ static int ir_lower_function_core(const AstProgram *ast_program,
                 ast_program,
                 program,
                 external,
+                current_function_name,
                 &ctx.function_value_return_target_name,
                 error)) {
             goto cleanup;

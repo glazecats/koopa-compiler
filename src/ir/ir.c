@@ -686,14 +686,20 @@ static int ir_function_parameter_name_is_compatible_function_value(const AstExte
 static int ir_build_returned_closure_helper_name(const AstExternal *external,
     char **out_name,
     IrError *error);
+static int ir_build_returned_closure_helper_name_for_owner(const AstExternal *external,
+    const char *owner_name,
+    char **out_name,
+    IrError *error);
 static int ir_ensure_returned_closure_helper_function(const AstProgram *ast_program,
     IrProgram *program,
     const AstExternal *external,
+    const char *current_function_name_override,
     const char **out_target_name,
     IrError *error);
 static int ir_resolve_function_value_return_target_name(const AstProgram *ast_program,
     IrProgram *program,
     const AstExternal *external,
+    const char *current_function_name_override,
     const char **out_target_name,
     IrError *error);
 static int ir_resolve_function_value_wrapper_target_name(const AstProgram *ast_program,

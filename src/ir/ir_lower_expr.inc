@@ -961,20 +961,21 @@ static int ir_resolve_function_value_descriptor(IrLowerContext *ctx,
         out_descriptor);
 }
 
-static int ir_try_materialize_identifier_function_value_capture_slot(
+static int ir_try_resolve_identifier_function_value_capture_value(
     IrLowerContext *ctx,
     const char *capture_name,
-    size_t dest_local_id,
+    IrValueRef *out_value,
     int *out_applied) {
     IrLowerFunctionObjectDescriptor descriptor;
     long long tag_value = 0;
-    IrValueRef source_value;
 
     if (out_applied) {
         *out_applied = 0;
     }
-    if (!ctx || !capture_name || capture_name[0] == '\0' ||
-        dest_local_id == (size_t)-1) {
+    if (out_value) {
+        *out_value = ir_value_immediate(0);
+    }
+    if (!ctx || !capture_name || capture_name[0] == '\0' || !out_value) {
         return 0;
     }
 
@@ -993,29 +994,52 @@ static int ir_try_materialize_identifier_function_value_capture_slot(
     }
 
     if (descriptor.dynamic_tag_local_id != (size_t)-1) {
-        source_value = ir_value_local(descriptor.dynamic_tag_local_id);
+        *out_value = ir_value_local(descriptor.dynamic_tag_local_id);
     } else if (descriptor.has_const_tag_value) {
-        source_value = ir_value_immediate(descriptor.const_tag_value);
+        *out_value = ir_value_immediate(descriptor.const_tag_value);
     } else if (ir_lower_register_function_value_target(
             ctx,
             capture_name,
             descriptor.direct_target_name,
             &tag_value)) {
-        source_value = ir_value_immediate(tag_value);
+        *out_value = ir_value_immediate(tag_value);
     } else {
-        return 0;
-    }
-
-    if (!ir_emit_mov(
-            ctx,
-            ir_value_local(dest_local_id),
-            source_value)) {
         return 0;
     }
     if (out_applied) {
         *out_applied = 1;
     }
     return 1;
+}
+
+static int ir_try_materialize_identifier_function_value_capture_slot(
+    IrLowerContext *ctx,
+    const char *capture_name,
+    size_t dest_local_id,
+    int *out_applied) {
+    IrValueRef source_value;
+
+    if (out_applied) {
+        *out_applied = 0;
+    }
+    if (!ctx || !capture_name || capture_name[0] == '\0' ||
+        dest_local_id == (size_t)-1) {
+        return 0;
+    }
+    if (!ir_try_resolve_identifier_function_value_capture_value(
+            ctx,
+            capture_name,
+            &source_value,
+            out_applied)) {
+        return 0;
+    }
+    if (!out_applied || !*out_applied) {
+        return 1;
+    }
+    return ir_emit_mov(
+        ctx,
+        ir_value_local(dest_local_id),
+        source_value);
 }
 
 static int ir_resolve_callable_object_view(IrLowerContext *ctx,
@@ -10262,6 +10286,7 @@ static int ir_resolve_returned_closure_target_info(
             program,
             ctx->program,
             return_function_external,
+            NULL,
             &helper_name,
             ctx->error)) {
         return 0;
@@ -11022,6 +11047,7 @@ have_resolution_closure_capture_value:
                 base_expr->as.closure.capture_names ? base_expr->as.closure.capture_names[slot_index] : NULL;
             AstExpression capture_expr;
             IrValueRef capture_value;
+            int applied_function_capture = 0;
 
             if (!capture_name || capture_name[0] == '\0') {
                 ir_set_error(ctx->error,
@@ -11036,7 +11062,15 @@ have_resolution_closure_capture_value:
             capture_expr.column = base_expr->column;
             capture_expr.as.identifier.name = (char *)capture_name;
             capture_expr.as.identifier.name_length = strlen(capture_name);
-            if (!ir_lower_expression(ctx, &capture_expr, &capture_value)) {
+            if (!ir_try_resolve_identifier_function_value_capture_value(
+                    ctx,
+                    capture_name,
+                    &capture_value,
+                    &applied_function_capture)) {
+                return 0;
+            }
+            if (!applied_function_capture &&
+                !ir_lower_expression(ctx, &capture_expr, &capture_value)) {
                 return 0;
             }
             if (use_snapshot) {

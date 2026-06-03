@@ -12862,6 +12862,31 @@ static int test_compiler_accepts_function_parameter_capture_inside_closure_under
     return ok;
 }
 
+static int test_compiler_accepts_returned_function_parameter_capture_inside_closure_under_extension(void) {
+    static const char *source =
+        "int make(int f(int))(int){ return closure [f] int (int y){ return f(y); }; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int g(int)=make(add1); return g(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call make") == NULL ||
+        strstr(output, "__fnwrap_closure_make__retclosure_1_35_1") == NULL ||
+        strstr(output, "call make__retclosure_1_35") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: returned function-parameter capture inside closure should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_under_extension(void) {
     static const char *source =
         "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
@@ -17869,6 +17894,9 @@ int main(void) {
         if (strstr("COMPILER-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
             return test_compiler_accepts_function_parameter_capture_inside_closure_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_compiler_accepts_returned_function_parameter_capture_inside_closure_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-RETURNED-CLOSURE-FORWARD", filter) != NULL) {
             return test_compiler_accepts_returned_closure_forwarding_into_function_parameter_under_extension() ? 0 : 1;
         }
@@ -19022,6 +19050,7 @@ int main(void) {
     ok &= test_compiler_accepts_dynamic_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_static_function_value_capture_inside_closure_under_extension();
     ok &= test_compiler_accepts_function_parameter_capture_inside_closure_under_extension();
+    ok &= test_compiler_accepts_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_compiler_accepts_dynamic_runtime_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_dynamic_runtime_zero_arg_void_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_multi_capture_closure_forward_into_parameter_under_extension();
