@@ -6378,9 +6378,8 @@ static int test_compiler_accepts_second_order_returned_passthrough_dynamic_funct
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
         strstr(output, "call pickh") == NULL ||
-        strstr(output, "pickh__closure_h_") != NULL ||
-        strstr(output, "pickh__closure_k_") != NULL ||
-        strstr(output, "__fv_1_add1") != NULL ||
+        strstr(output, "call pickh__closure_h_131120__fv_1_add1") == NULL ||
+        strstr(output, "call pickh__closure_k_131208__fv_1_add1") == NULL ||
         compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 3u ||
         strstr(output, "  call add1\n") == NULL) {
         fprintf(stderr,
@@ -12887,6 +12886,31 @@ static int test_compiler_accepts_returned_function_parameter_capture_inside_clos
     return ok;
 }
 
+static int test_compiler_accepts_dynamic_returned_function_parameter_capture_inside_closure_under_extension(void) {
+    static const char *source =
+        "int make(int c, int f(int))(int){ int g(int)=closure [f] int (int y){ return f(y); }; int h(int)=closure [f] int (int y){ return f(f(y)); }; if(c) g=h; return g; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int g(int)=make(1, add1); return g(4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "call make__closure_g_65571__fv_0_add1") == NULL ||
+        strstr(output, "call make__closure_h_65623__fv_0_add1") == NULL ||
+        strstr(output, "call __fnwrap_add1") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: dynamic returned function-parameter capture inside closure should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_under_extension(void) {
     static const char *source =
         "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
@@ -17897,6 +17921,9 @@ int main(void) {
         if (strstr("COMPILER-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
             return test_compiler_accepts_returned_function_parameter_capture_inside_closure_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-DYNAMIC-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_compiler_accepts_dynamic_returned_function_parameter_capture_inside_closure_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-RETURNED-CLOSURE-FORWARD", filter) != NULL) {
             return test_compiler_accepts_returned_closure_forwarding_into_function_parameter_under_extension() ? 0 : 1;
         }
@@ -19051,6 +19078,7 @@ int main(void) {
     ok &= test_compiler_accepts_static_function_value_capture_inside_closure_under_extension();
     ok &= test_compiler_accepts_function_parameter_capture_inside_closure_under_extension();
     ok &= test_compiler_accepts_returned_function_parameter_capture_inside_closure_under_extension();
+    ok &= test_compiler_accepts_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_compiler_accepts_dynamic_runtime_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_dynamic_runtime_zero_arg_void_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_multi_capture_closure_forward_into_parameter_under_extension();

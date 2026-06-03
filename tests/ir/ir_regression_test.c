@@ -6324,9 +6324,8 @@ static int test_ir_accepts_second_order_returned_passthrough_dynamic_function_va
     ok = actual_text &&
         strstr(actual_text, "tmp.3 = call pickh(tmp.0, tmp.1, 5, tmp.2)\n") != NULL &&
         strstr(actual_text, "tmp.4 = eq __retclosure_argcap_0.0, 1\n") != NULL &&
-        strstr(actual_text, "call pickh__closure_h_") == NULL &&
-        strstr(actual_text, "call pickh__closure_k_") == NULL &&
-        strstr(actual_text, "__fv_1_add1") == NULL &&
+        strstr(actual_text, "tmp.5 = call pickh__closure_h_131120__fv_1_add1(__retclosure_argcap_1.1, 41)\n") != NULL &&
+        strstr(actual_text, "tmp.5 = call pickh__closure_k_131208__fv_1_add1(__retclosure_argcap_1.1, 41)\n") != NULL &&
         strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
         strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.1\n") != NULL &&
         strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.2\n") != NULL &&
@@ -6751,6 +6750,39 @@ static int test_ir_accepts_returned_function_parameter_capture_inside_closure_un
     if (!ok) {
         fprintf(stderr,
             "[ir-reg] FAIL: returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_dynamic_returned_function_parameter_capture_inside_closure_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int make(int c, int f(int))(int){ int g(int)=closure [f] int (int y){ return f(y); }; int h(int)=closure [f] int (int y){ return f(f(y)); }; if(c) g=h; return g; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ int g(int)=make(1, add1); return g(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func make(__ret0.0, __ret1.1, c.2, f.3) {\n") != NULL &&
+        strstr(actual_text, "g$closurecap$0.4 = mov f.3\n") != NULL &&
+        strstr(actual_text, "h$closurecap$0.6 = mov f.3\n") != NULL &&
+        strstr(actual_text, "0 = store_indirect __ret0.0, g$ftag.5\n") != NULL &&
+        strstr(actual_text, "0 = store_indirect __ret1.1, g$closurecap$0.4\n") != NULL &&
+        strstr(actual_text, "tmp.4 = call make__closure_g_65571__fv_0_add1(4)\n") != NULL &&
+        strstr(actual_text, "tmp.4 = call make__closure_h_65623__fv_0_add1(4)\n") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.") != NULL &&
+        strstr(actual_text, "call_indirect tmp.0(y.0)\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: dynamic returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
             actual_text ? actual_text : "<null>");
     }
 
@@ -15018,6 +15050,9 @@ int main(void) {
         if (strstr("IR-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
             return test_ir_accepts_returned_function_parameter_capture_inside_closure_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-DYNAMIC-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_ir_accepts_dynamic_returned_function_parameter_capture_inside_closure_under_extension() ? 0 : 1;
+        }
         if (strstr("IR-PASSTHROUGH-DECL-LOCAL-FNVAL-NO-SHELL", filter) != NULL) {
             return test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension() ? 0 : 1;
         }
@@ -15413,6 +15448,7 @@ int main(void) {
     ok &= test_ir_accepts_static_function_value_capture_inside_closure_under_extension();
     ok &= test_ir_accepts_function_parameter_capture_inside_closure_under_extension();
     ok &= test_ir_accepts_returned_function_parameter_capture_inside_closure_under_extension();
+    ok &= test_ir_accepts_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension();
     ok &= test_ir_accepts_parameter_local_function_value_direct_call_without_specialization_shell_under_extension();
     ok &= test_ir_accepts_parameter_local_scalar_rebind_function_value_direct_call_without_specialization_shell_under_extension();

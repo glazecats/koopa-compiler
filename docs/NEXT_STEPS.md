@@ -301,11 +301,27 @@
       resulting callable object continues to use the existing closure wrapper
       path through `fn_make __fnwrap_closure_make__retclosure_*` +
       `call_indirect`. Focused IR, lower-IR, and compiler-driver regression
-      coverage is now in place for this returned-parameter slice. The next
-      nearby blocker is no longer the basic returned sibling itself, but the
-      more general family where returned closure helpers must preserve the
-      same function-valued capture story through dynamic / multi-target
-      returned function-value producers.
+      coverage is now in place for this returned-parameter slice.
+    - current dynamic returned function-parameter closure-capture checkpoint:
+      the next dynamic sibling is now also landed for the bind-and-call
+      family instead of stopping at the static returned case. A witness such
+      as
+      `int make(int c, int f(int))(int){ int g(int)=closure [f] ...; int h(int)=closure [f] ...; if(c) g=h; return g; }`
+      now compiles end-to-end when instantiated through
+      `int g(int)=make(1, add1); return g(4);`. The kept path is still
+      deliberately incremental rather than fully generic: returned payload
+      transport preserves both the outer closure-family tag and the captured
+      function-value tag, dynamic closure body-eval dispatch now declines
+      helper families that still need function-value specialization, and the
+      bind-and-call site falls back to branch-selected specialized helpers
+      such as `make__closure_g_*__fv_0_add1` /
+      `make__closure_h_*__fv_0_add1`. Focused IR, lower-IR, and
+      compiler-driver regression coverage is now in place for this dynamic
+      returned-parameter slice too. The next nearby blocker is the broader
+      family where the same returned dynamic closure producer must stay stable
+      across more general actual-argument transport and deeper multi-hop
+      returned callable flows, instead of only the direct bind-and-call
+      consumer.
     - current returned multi-capture dynamic forwarding checkpoint:
       the nearby returned multi-capture closure forwarding family is now also
       real instead of remaining blocked on `IR-INT-123`. The focused witness
