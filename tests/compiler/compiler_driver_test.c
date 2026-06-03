@@ -10535,8 +10535,8 @@ static int test_compiler_accepts_second_order_dynamic_ternary_function_value_act
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
         !output ||
-        strstr(output, "pass__fv_0_apply_1_add1") != NULL ||
-        strstr(output, "pass__fv_0_apply_twice_1_add1") != NULL ||
+        strstr(output, "pass__fv_0_apply_1_add1") == NULL ||
+        strstr(output, "pass__fv_0_apply_twice_1_add1") == NULL ||
         strstr(output, "apply_twice__fv_0_add1") != NULL ||
         compiler_test_count_fragment_occurrences(output, "  call __fnwrap_add1\n") != 3u ||
         strstr(output, "  call add1\n") == NULL) {
@@ -13097,6 +13097,37 @@ static int test_compiler_accepts_passthrough_multiple_dynamic_returned_closure_f
         strstr(output, "_1_pick__closure_b_") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: passthrough multiple dynamic returned closure function arguments should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension(void) {
+    static const char *source =
+        "int compose(int f(int), int g(int), int x){ return f(g(x)); }\n"
+        "int pick(int c, int f(int))(int){ int a(int)=closure [f] int (int y){ return f(y); }; int b(int)=closure [f] int (int y){ return f(f(y)); }; if(c) a=b; return a; }\n"
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return compose(pick(getint(), add1), make(3), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call getint\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call make\n") != 1u ||
+        strstr(output, "call compose__fv_0_pick__closure_a_") == NULL ||
+        strstr(output, "call compose__fv_0_pick__closure_b_") == NULL ||
+        strstr(output, "make__retclosure_3_30") == NULL ||
+        strstr(output, "  call compose\n") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: mixed dynamic and static returned closure function arguments should compile under extension: %s\n",
             error.message);
         ok = 0;
     }
@@ -18139,6 +18170,9 @@ int main(void) {
         if (strstr("COMPILER-PASSTHROUGH-MULTI-DYNAMIC-RETURNED-CLOSURE-FNARGS", filter) != NULL) {
             return test_compiler_accepts_passthrough_multiple_dynamic_returned_closure_function_arguments_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-MIXED-DYNAMIC-STATIC-RETURNED-CLOSURE-FNARGS", filter) != NULL) {
+            return test_compiler_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-RETURNED-CLOSURE-FORWARD", filter) != NULL) {
             return test_compiler_accepts_returned_closure_forwarding_into_function_parameter_under_extension() ? 0 : 1;
         }
@@ -19301,6 +19335,7 @@ int main(void) {
     ok &= test_compiler_accepts_passthrough_local_bind_of_ternary_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_compiler_accepts_multiple_dynamic_returned_closure_function_arguments_under_extension();
     ok &= test_compiler_accepts_passthrough_multiple_dynamic_returned_closure_function_arguments_under_extension();
+    ok &= test_compiler_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension();
     ok &= test_compiler_accepts_dynamic_runtime_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_dynamic_runtime_zero_arg_void_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_multi_capture_closure_forward_into_parameter_under_extension();

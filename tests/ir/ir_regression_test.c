@@ -6948,6 +6948,40 @@ static int test_ir_accepts_multiple_dynamic_returned_closure_function_arguments_
     return ok;
 }
 
+static int test_ir_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int compose(int f(int), int g(int), int x){ return f(g(x)); }\n"
+            "int pick(int c, int f(int))(int){ int a(int)=closure [f] int (int y){ return f(y); }; int b(int)=closure [f] int (int y){ return f(f(y)); }; if(c) a=b; return a; }\n"
+            "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ return compose(pick(getint(), add1), make(3), 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        ir_test_count_fragment_occurrences(actual_text, "call getint()") == 2u &&
+        ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
+        ir_test_count_fragment_occurrences(actual_text, "call make(") == 1u &&
+        strstr(actual_text, "tmp.11 = eq __retclosure_argslot_0.2, 1\n") != NULL &&
+        strstr(actual_text, "call compose__fv_0_pick__closure_a_") != NULL &&
+        strstr(actual_text, "call compose__fv_0_pick__closure_b_") != NULL &&
+        strstr(actual_text, "make__retclosure_3_30") != NULL &&
+        strstr(actual_text, "call compose(") == NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: mixed dynamic and static returned closure function arguments mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -12993,12 +13027,12 @@ static int test_ir_accepts_second_order_dynamic_ternary_function_value_actual_ar
         strstr(actual_text, "tmp.0 = call getint()\n") != NULL &&
         strstr(actual_text, "__ternary_fn_argtag.1 = mov 1\n") != NULL &&
         strstr(actual_text, "__ternary_fn_argtag.1 = mov 2\n") != NULL &&
-        strstr(actual_text, "pass__fv_0_apply_1_add1") == NULL &&
-        strstr(actual_text, "pass__fv_0_apply_twice_1_add1") == NULL &&
+        strstr(actual_text, "tmp.3 = call pass__fv_0_apply_1_add1(41)\n") != NULL &&
+        strstr(actual_text, "tmp.3 = call pass__fv_0_apply_twice_1_add1(41)\n") != NULL &&
         strstr(actual_text, "apply_twice__fv_0_add1") == NULL &&
         strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.0\n") != NULL &&
-        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.1\n") != NULL &&
-        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.2\n") != NULL &&
+        strstr(actual_text, "func pass__fv_0_apply_1_add1(x.0) {\n") != NULL &&
+        strstr(actual_text, "func pass__fv_0_apply_twice_1_add1(x.0) {\n") != NULL &&
         strstr(actual_text, "call_indirect tmp.") != NULL;
     if (!ok) {
         fprintf(stderr,
@@ -15226,6 +15260,9 @@ int main(void) {
         if (strstr("IR-MULTI-DYNAMIC-RETURNED-CLOSURE-FNARGS", filter) != NULL) {
             return test_ir_accepts_multiple_dynamic_returned_closure_function_arguments_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-MIXED-DYNAMIC-STATIC-RETURNED-CLOSURE-FNARGS", filter) != NULL) {
+            return test_ir_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension() ? 0 : 1;
+        }
         if (strstr("IR-PASSTHROUGH-DECL-LOCAL-FNVAL-NO-SHELL", filter) != NULL) {
             return test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension() ? 0 : 1;
         }
@@ -15627,6 +15664,7 @@ int main(void) {
     ok &= test_ir_accepts_ternary_actual_argument_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_ir_accepts_passthrough_local_bind_of_ternary_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_ir_accepts_multiple_dynamic_returned_closure_function_arguments_under_extension();
+    ok &= test_ir_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension();
     ok &= test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension();
     ok &= test_ir_accepts_parameter_local_function_value_direct_call_without_specialization_shell_under_extension();
     ok &= test_ir_accepts_parameter_local_scalar_rebind_function_value_direct_call_without_specialization_shell_under_extension();

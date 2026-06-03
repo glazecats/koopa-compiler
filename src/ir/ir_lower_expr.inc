@@ -17541,7 +17541,7 @@ static int ir_try_emit_multi_dynamic_function_value_specialized_call(
         }
     }
 
-    if (dynamic_function_arg_count <= 1u) {
+    if (dynamic_function_arg_count == 0u) {
         goto cleanup_skip;
     }
 

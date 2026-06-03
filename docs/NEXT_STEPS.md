@@ -379,6 +379,23 @@
       multi-dynamic combination story must coexist with deeper higher-order
       wrappers, larger target sets, or mixed producer kinds in the same
       expression tree instead of only two-target returned closure families.
+    - current mixed-producer multi-function-argument checkpoint:
+      the same multi-function-argument combination dispatch now also survives
+      one first mixed producer family instead of requiring every function-valued
+      argument in the call to come from the same returned dynamic closure line.
+      Witnesses such as
+      `return compose(pick(getint(), add1), make(3), 4);` and
+      `return compose(make(3), pick(getint(), add1), 4);`
+      are now green. The kept bridge is that the multi-function-argument
+      dispatcher no longer insists on “at least two dynamic returned families”
+      before taking over; it now also handles the mixed sibling where one
+      argument is a dynamic returned closure family and another is a static
+      returned closure producer, while still feeding both into the same
+      specialized leaf-call cross-product path. Focused IR, lower-IR, and
+      compiler-driver regression coverage is now in place. The next nearby
+      blocker is the still broader family where multiple dynamic families and
+      mixed producer kinds are further wrapped by deeper higher-order shells,
+      or where dynamic target sets grow beyond the current two-target model.
     - current returned multi-capture dynamic forwarding checkpoint:
       the nearby returned multi-capture closure forwarding family is now also
       real instead of remaining blocked on `IR-INT-123`. The focused witness
