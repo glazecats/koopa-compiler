@@ -893,6 +893,21 @@ static int ir_function_value_return_exact_parameter_passthrough_index(const AstP
     return 0;
 }
 
+static int ir_builtin_function_name_exists(const char *name) {
+    size_t i;
+
+    if (!name || name[0] == '\0') {
+        return 0;
+    }
+
+    for (i = 0u; i < sizeof(k_ir_builtin_functions) / sizeof(k_ir_builtin_functions[0]); ++i) {
+        if (strcmp(k_ir_builtin_functions[i].name, name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int ir_function_returned_closure_payload_slot_count(const AstProgram *ast_program,
     IrProgram *program,
     const AstExternal *external,
@@ -1482,6 +1497,112 @@ static int ir_build_returned_closure_helper_name(const AstExternal *external,
     return 1;
 }
 
+static int ir_try_populate_closure_capture_from_function_parameter(
+    IrLowerContext *ctx,
+    const char *capture_name,
+    const IrLowerFunctionObjectDescriptor *capture_descriptor,
+    int *out_value_kind,
+    AstFunctionReturnType *out_return_type,
+    size_t *out_parameter_count,
+    int **out_parameter_value_kinds,
+    AstFunctionReturnType **out_parameter_return_types,
+    size_t **out_parameter_parameter_counts,
+    const char **out_bound_target,
+    const size_t **out_bound_capture_local_ids,
+    size_t *out_bound_capture_count) {
+    const AstExternal *current_external = NULL;
+    size_t parameter_index = (size_t)-1;
+    size_t expected_parameter_count = 0u;
+    AstFunctionReturnType expected_return_type = AST_FUNCTION_RETURN_INT;
+
+    if (out_bound_target) {
+        *out_bound_target = NULL;
+    }
+    if (out_bound_capture_local_ids) {
+        *out_bound_capture_local_ids = NULL;
+    }
+    if (out_bound_capture_count) {
+        *out_bound_capture_count = 0u;
+    }
+    if (!ctx || !capture_name || capture_name[0] == '\0' ||
+        !out_value_kind || !out_return_type || !out_parameter_count ||
+        !out_parameter_value_kinds || !out_parameter_return_types ||
+        !out_parameter_parameter_counts) {
+        return 0;
+    }
+
+    current_external =
+        (ctx->program && ctx->function && ctx->function->name)
+            ? ir_program_find_function_external_ref(ctx->program, ctx->function->name)
+            : NULL;
+    if (!current_external &&
+        ctx &&
+        ctx->ast_program &&
+        ctx->function &&
+        ctx->function->name) {
+        current_external =
+            ir_find_named_function_external_prefer_definition(
+                ctx->ast_program,
+                ctx->function->name);
+    }
+    if (!current_external ||
+        !ir_find_external_parameter_index_by_name(
+            current_external,
+            capture_name,
+            1,
+            &parameter_index)) {
+        return 0;
+    }
+
+    *out_value_kind = AST_PARAMETER_VALUE_FUNCTION;
+    expected_return_type =
+        current_external->parameter_function_return_types
+            ? current_external->parameter_function_return_types[parameter_index]
+            : AST_FUNCTION_RETURN_INT;
+    expected_parameter_count =
+        current_external->parameter_function_parameter_counts
+            ? current_external->parameter_function_parameter_counts[parameter_index]
+            : 0u;
+    *out_return_type = expected_return_type;
+    *out_parameter_count = expected_parameter_count;
+    *out_parameter_value_kinds =
+        current_external->parameter_function_parameter_value_kinds
+            ? current_external->parameter_function_parameter_value_kinds[parameter_index]
+            : NULL;
+    *out_parameter_return_types =
+        current_external->parameter_function_parameter_return_types
+            ? current_external->parameter_function_parameter_return_types[parameter_index]
+            : NULL;
+    *out_parameter_parameter_counts =
+        current_external->parameter_function_parameter_parameter_counts
+            ? current_external->parameter_function_parameter_parameter_counts[parameter_index]
+            : NULL;
+
+    if (capture_descriptor &&
+        capture_descriptor->direct_target_name &&
+        capture_descriptor->direct_target_name[0] != '\0' &&
+        !capture_descriptor->is_closure_family &&
+        !capture_descriptor->has_dynamic_family &&
+        (ir_program_find_function_mut(ctx->program, capture_descriptor->direct_target_name) ||
+            ir_program_find_function_external_ref(ctx->program, capture_descriptor->direct_target_name) ||
+            ir_builtin_function_matches_signature(
+                capture_descriptor->direct_target_name,
+                expected_return_type,
+                expected_parameter_count))) {
+        if (out_bound_target) {
+            *out_bound_target = capture_descriptor->direct_target_name;
+        }
+        if (out_bound_capture_local_ids) {
+            *out_bound_capture_local_ids = NULL;
+        }
+        if (out_bound_capture_count) {
+            *out_bound_capture_count = 0u;
+        }
+    }
+
+    return 1;
+}
+
 static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
     const AstExpression *closure_expr,
     const char *helper_name,
@@ -1568,6 +1689,9 @@ static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
                 capture_descriptor.direct_target_name[0] != '\0' &&
                 !capture_descriptor.is_closure_family &&
                 !capture_descriptor.has_dynamic_family &&
+                (ir_program_find_function_mut(ctx->program, capture_descriptor.direct_target_name) ||
+                    ir_program_find_function_external_ref(ctx->program, capture_descriptor.direct_target_name) ||
+                    ir_builtin_function_name_exists(capture_descriptor.direct_target_name)) &&
                 ir_lower_register_function_value_target(
                     ctx,
                     capture_names[parameter_index],
@@ -1579,6 +1703,20 @@ static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
                 bound_function_targets[parameter_index] = capture_descriptor.direct_target_name;
                 bound_function_capture_local_ids[parameter_index] = NULL;
                 bound_function_capture_counts[parameter_index] = 0u;
+            } else if (ir_try_populate_closure_capture_from_function_parameter(
+                    ctx,
+                    capture_names[parameter_index],
+                    &capture_descriptor,
+                    &parameter_value_kinds[parameter_index],
+                    &parameter_function_return_types[parameter_index],
+                    &parameter_function_parameter_counts[parameter_index],
+                    &parameter_function_parameter_value_kinds[parameter_index],
+                    &parameter_function_parameter_return_types[parameter_index],
+                    &parameter_function_parameter_parameter_counts[parameter_index],
+                    &bound_function_targets[parameter_index],
+                    &bound_function_capture_local_ids[parameter_index],
+                    &bound_function_capture_counts[parameter_index])) {
+                continue;
             }
         }
     }
@@ -6489,6 +6627,9 @@ static int ir_lower_closure_helper_function(IrLowerContext *ctx,
                 capture_descriptor.direct_target_name[0] != '\0' &&
                 !capture_descriptor.is_closure_family &&
                 !capture_descriptor.has_dynamic_family &&
+                (ir_program_find_function_mut(ctx->program, capture_descriptor.direct_target_name) ||
+                    ir_program_find_function_external_ref(ctx->program, capture_descriptor.direct_target_name) ||
+                    ir_builtin_function_name_exists(capture_descriptor.direct_target_name)) &&
                 ir_lower_register_function_value_target(
                     ctx,
                     capture_names[parameter_index],
@@ -6500,6 +6641,20 @@ static int ir_lower_closure_helper_function(IrLowerContext *ctx,
                 bound_function_targets[parameter_index] = capture_descriptor.direct_target_name;
                 bound_function_capture_local_ids[parameter_index] = NULL;
                 bound_function_capture_counts[parameter_index] = 0u;
+            } else if (ir_try_populate_closure_capture_from_function_parameter(
+                    ctx,
+                    capture_names[parameter_index],
+                    &capture_descriptor,
+                    &parameter_value_kinds[parameter_index],
+                    &parameter_function_return_types[parameter_index],
+                    &parameter_function_parameter_counts[parameter_index],
+                    &parameter_function_parameter_value_kinds[parameter_index],
+                    &parameter_function_parameter_return_types[parameter_index],
+                    &parameter_function_parameter_parameter_counts[parameter_index],
+                    &bound_function_targets[parameter_index],
+                    &bound_function_capture_local_ids[parameter_index],
+                    &bound_function_capture_counts[parameter_index])) {
+                continue;
             }
         }
     }

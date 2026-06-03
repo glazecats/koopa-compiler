@@ -274,6 +274,24 @@
       `call_indirect` on canonical IR before collapsing to direct wrapped
       calls on lower-IR / compiler surfaces. Focused IR, lower-IR, and
       compiler-driver regression coverage is now in place for this slice.
+    - current function-parameter closure-capture checkpoint:
+      the same closure-capture line now also reaches one first real
+      function-valued-parameter transport slice instead of stopping at static
+      locals. A witness such as
+      `int wrap(int f(int), int x){ int g(int)=closure [f] int (int y){ return f(y); }; return g(x); }`
+      now compiles end-to-end when instantiated with a static noncapturing
+      actual target like `wrap(add1, 4)`. The kept bridge is still
+      deliberately narrow: closure helper signatures now inherit
+      function-valued-parameter metadata from the enclosing function, closure
+      capture materialization copies the source function-value tag instead of
+      trying to read a nonexistent scalar local, and the concrete helper
+      specialization `wrap__fv_0_add1__closure_*__fv_0_add1` is synthesized
+      only once the outer function-value binding is known. Focused IR,
+      lower-IR, and compiler-driver regression coverage is now in place for
+      this local-parameter slice. The next adjacent blocker is the returned
+      sibling `int make(int f(int))(int){ return closure [f] ...; }`, which
+      still needs the same transport story carried through returned closure
+      producers.
     - current returned multi-capture dynamic forwarding checkpoint:
       the nearby returned multi-capture closure forwarding family is now also
       real instead of remaining blocked on `IR-INT-123`. The focused witness

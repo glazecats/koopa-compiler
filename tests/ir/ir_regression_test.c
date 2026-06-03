@@ -6694,6 +6694,39 @@ static int test_ir_accepts_static_function_value_capture_inside_closure_under_ex
     return ok;
 }
 
+static int test_ir_accepts_function_parameter_capture_inside_closure_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int wrap(int f(int), int x){ int g(int)=closure [f] int (int y){ return f(y); }; return g(x); }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ return wrap(add1, 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "g$closurecap$0.") != NULL &&
+        strstr(actual_text, "g$closurecap$0.2 = mov f.0\n") != NULL &&
+        strstr(actual_text, "declare wrap__closure_g_") != NULL &&
+        strstr(actual_text, "func __fnwrap_closure_wrap__closure_g_") != NULL &&
+        strstr(actual_text, "call wrap__closure_g_") != NULL &&
+        strstr(actual_text, "func wrap__fv_0_add1(") != NULL &&
+        strstr(actual_text, "__closure_g_65566__fv_0_add1") != NULL &&
+        strstr(actual_text, "fn_make __fnwrap_add1, 0, shape.") != NULL &&
+        strstr(actual_text, "call_indirect tmp.0(y.0)\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: function-parameter capture inside closure mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -14948,6 +14981,9 @@ int main(void) {
         if (strstr("IR-CLOSURE-CAPTURE-STATIC-FNVAL", filter) != NULL) {
             return test_ir_accepts_static_function_value_capture_inside_closure_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_ir_accepts_function_parameter_capture_inside_closure_under_extension() ? 0 : 1;
+        }
         if (strstr("IR-PASSTHROUGH-DECL-LOCAL-FNVAL-NO-SHELL", filter) != NULL) {
             return test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension() ? 0 : 1;
         }
@@ -15341,6 +15377,7 @@ int main(void) {
     ok &= test_ir_accepts_second_order_dynamic_local_closure_function_value_parameter_forwarding_under_extension();
     ok &= test_ir_accepts_second_order_returned_closure_function_value_parameter_forwarding_under_extension();
     ok &= test_ir_accepts_static_function_value_capture_inside_closure_under_extension();
+    ok &= test_ir_accepts_function_parameter_capture_inside_closure_under_extension();
     ok &= test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension();
     ok &= test_ir_accepts_parameter_local_function_value_direct_call_without_specialization_shell_under_extension();
     ok &= test_ir_accepts_parameter_local_scalar_rebind_function_value_direct_call_without_specialization_shell_under_extension();

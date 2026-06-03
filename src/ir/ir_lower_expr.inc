@@ -988,7 +988,7 @@ static int ir_try_materialize_identifier_function_value_capture_slot(
         return 1;
     }
 
-    if (descriptor.capture_count > 0u || descriptor.has_dynamic_family) {
+    if (descriptor.capture_count > 0u) {
         return 1;
     }
 
@@ -3332,6 +3332,20 @@ static int ir_resolve_hidden_function_value_specialization_binding(
             &descriptor) ||
         !descriptor.direct_target_name ||
         descriptor.direct_target_name[0] == '\0') {
+        return 0;
+    }
+    if (descriptor.has_dynamic_family ||
+        (descriptor.dynamic_tag_local_id != (size_t)-1 &&
+            !descriptor.has_const_tag_value &&
+            !ir_program_find_function_mut(ctx->program, descriptor.direct_target_name) &&
+            !ir_builtin_function_matches_signature(
+                descriptor.direct_target_name,
+                callee_external->parameter_function_return_types
+                    ? callee_external->parameter_function_return_types[parameter_index]
+                    : AST_FUNCTION_RETURN_INT,
+                callee_external->parameter_function_parameter_counts
+                    ? callee_external->parameter_function_parameter_counts[parameter_index]
+                    : 0u))) {
         return 0;
     }
 
@@ -6263,6 +6277,20 @@ static int ir_try_emit_static_direct_target_specialized_call(IrLowerContext *ctx
     if (!call_expr->as.call.args ||
         call_expr->as.call.arg_count + hidden_prefix_param_count != callee_external->parameter_count) {
         return 1;
+    }
+
+    for (i = 0u; i < hidden_prefix_param_count; ++i) {
+        if (callee_external->parameter_value_kinds &&
+            callee_external->parameter_value_kinds[i] == AST_PARAMETER_VALUE_FUNCTION &&
+            !ir_resolve_hidden_function_value_specialization_binding(
+                ctx,
+                callee_external,
+                i,
+                NULL,
+                NULL,
+                NULL)) {
+            return 1;
+        }
     }
 
     if (!is_closure_family &&
