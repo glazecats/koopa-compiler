@@ -13136,6 +13136,42 @@ static int test_compiler_accepts_mixed_dynamic_and_static_returned_closure_funct
     return ok;
 }
 
+static int test_compiler_accepts_passthrough_returned_dynamic_higher_order_mixed_closure_function_arguments_under_extension(void) {
+    static const char *source =
+        "int compose(int f(int), int g(int), int x){ return f(g(x)); }\n"
+        "int compose2(int f(int), int g(int), int x){ return g(f(x)); }\n"
+        "int idh(int h(int f(int), int g(int), int x))(int f(int), int g(int), int x){ return h; }\n"
+        "int choose(int c)(int f(int), int g(int), int x){ int h(int f(int), int g(int), int x)=compose; int k(int f(int), int g(int), int x)=compose2; if(c) h=k; return h; }\n"
+        "int pick(int c, int f(int))(int){ int a(int)=closure [f] int (int y){ return f(y); }; int b(int)=closure [f] int (int y){ return f(f(y)); }; if(c) a=b; return a; }\n"
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(choose(getint()))(pick(getint(), add1), make(3), 4); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        compiler_test_count_fragment_occurrences(output, "  call getint\n") != 2u ||
+        compiler_test_count_fragment_occurrences(output, "  call choose\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call pick\n") != 1u ||
+        compiler_test_count_fragment_occurrences(output, "  call make\n") != 1u ||
+        strstr(output, "call compose__fv_0_pick__closure_a_") == NULL ||
+        strstr(output, "call compose__fv_0_pick__closure_b_") == NULL ||
+        strstr(output, "call compose2__fv_0_pick__closure_a_") == NULL ||
+        strstr(output, "call compose2__fv_0_pick__closure_b_") == NULL ||
+        strstr(output, "  call idh\n") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: passthrough returned dynamic higher-order mixed closure function arguments should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_accepts_second_order_returned_passthrough_dynamic_local_function_value_parameter_forwarding_under_extension(void) {
     static const char *source =
         "int idh(int h(int f(int), int x))(int f(int), int x){ return h; }\n"
@@ -18173,6 +18209,9 @@ int main(void) {
         if (strstr("COMPILER-MIXED-DYNAMIC-STATIC-RETURNED-CLOSURE-FNARGS", filter) != NULL) {
             return test_compiler_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-PASSTHROUGH-RETURNED-DYNAMIC-HO-MIXED-CLOSURE-FNARGS", filter) != NULL) {
+            return test_compiler_accepts_passthrough_returned_dynamic_higher_order_mixed_closure_function_arguments_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-RETURNED-CLOSURE-FORWARD", filter) != NULL) {
             return test_compiler_accepts_returned_closure_forwarding_into_function_parameter_under_extension() ? 0 : 1;
         }
@@ -19336,6 +19375,7 @@ int main(void) {
     ok &= test_compiler_accepts_multiple_dynamic_returned_closure_function_arguments_under_extension();
     ok &= test_compiler_accepts_passthrough_multiple_dynamic_returned_closure_function_arguments_under_extension();
     ok &= test_compiler_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension();
+    ok &= test_compiler_accepts_passthrough_returned_dynamic_higher_order_mixed_closure_function_arguments_under_extension();
     ok &= test_compiler_accepts_dynamic_runtime_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_dynamic_runtime_zero_arg_void_closure_local_forward_into_parameter_under_extension();
     ok &= test_compiler_accepts_multi_capture_closure_forward_into_parameter_under_extension();

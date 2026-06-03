@@ -4166,6 +4166,63 @@ static int ir_build_multi_dynamic_function_value_specialization_call_args(
     return 1;
 }
 
+static int ir_build_function_argument_callable_object_views(
+    IrLowerContext *ctx,
+    const AstExpression *call_expr,
+    const AstExternal *callee_external,
+    IrLowerCallableObjectView *function_arg_views,
+    unsigned char *function_arg_is_dynamic,
+    size_t *dynamic_function_arg_indices,
+    long long *dynamic_then_tag_values,
+    size_t *out_dynamic_function_arg_count) {
+    size_t dynamic_function_arg_count = 0u;
+
+    if (out_dynamic_function_arg_count) {
+        *out_dynamic_function_arg_count = 0u;
+    }
+    if (!ctx || !call_expr || !callee_external || !function_arg_views ||
+        !function_arg_is_dynamic || !dynamic_function_arg_indices ||
+        !dynamic_then_tag_values || !out_dynamic_function_arg_count ||
+        call_expr->kind != AST_EXPR_CALL) {
+        return 0;
+    }
+
+    for (size_t i = 0u; i < callee_external->parameter_count; ++i) {
+        function_arg_views[i].dynamic_tag_local_id = (size_t)-1;
+        if (!callee_external->parameter_value_kinds ||
+            callee_external->parameter_value_kinds[i] != AST_PARAMETER_VALUE_FUNCTION) {
+            continue;
+        }
+        if (!ir_lower_emit_function_value_wrapper_side_effects(ctx, call_expr->as.call.args[i])) {
+            return 0;
+        }
+        if (ir_try_resolve_dynamic_function_value_specialization_callable_object_view(
+                ctx,
+                call_expr->as.call.args[i],
+                callee_external,
+                i,
+                &function_arg_views[i],
+                NULL,
+                NULL,
+                &dynamic_then_tag_values[dynamic_function_arg_count])) {
+            function_arg_is_dynamic[i] = 1u;
+            dynamic_function_arg_indices[dynamic_function_arg_count++] = i;
+            continue;
+        }
+        if (!ir_try_resolve_static_actual_argument_callable_object_view(
+                ctx,
+                call_expr->as.call.args[i],
+                &function_arg_views[i]) ||
+            !function_arg_views[i].direct_target_name ||
+            function_arg_views[i].direct_target_name[0] == '\0') {
+            return 0;
+        }
+    }
+
+    *out_dynamic_function_arg_count = dynamic_function_arg_count;
+    return 1;
+}
+
 static int ir_emit_multi_dynamic_function_value_specialization_dispatch_tree(
     IrLowerContext *ctx,
     const IrLowerCallableObjectView *function_arg_views,
@@ -7931,6 +7988,14 @@ static int ir_try_emit_returned_dynamic_function_value_specialized_call(
     size_t function_arg_index = (size_t)-1;
     size_t function_param_count_a = 0u;
     size_t function_param_count_b = 0u;
+    IrLowerCallableObjectView *function_arg_views = NULL;
+    unsigned char *function_arg_is_dynamic = NULL;
+    size_t *dynamic_function_arg_indices = NULL;
+    long long *function_arg_dynamic_then_tag_values = NULL;
+    const char **specialized_names_for_a = NULL;
+    const char **specialized_names_for_b = NULL;
+    size_t dynamic_function_arg_count = 0u;
+    size_t dynamic_combination_count = 0u;
 
     if (out_applied) {
         *out_applied = 0;
@@ -8117,6 +8182,197 @@ static int ir_try_emit_returned_dynamic_function_value_specialized_call(
                 out_applied);
         }
         ir_free_callable_object_view_storage(&static_actual_argument_view);
+    }
+
+    if (!dynamic_callable_view->is_closure_family &&
+        call_expr->as.call.arg_count == callee_external_a->parameter_count &&
+        call_expr->as.call.arg_count == callee_external_b->parameter_count &&
+        callee_external_a->parameter_value_kinds &&
+        callee_external_b->parameter_value_kinds) {
+        size_t param_index;
+        int function_param_layout_matches = 1;
+        size_t function_value_param_count = 0u;
+
+        for (param_index = 0u; param_index < callee_external_a->parameter_count; ++param_index) {
+            int is_function_param_a =
+                callee_external_a->parameter_value_kinds[param_index] == AST_PARAMETER_VALUE_FUNCTION;
+            int is_function_param_b =
+                callee_external_b->parameter_value_kinds[param_index] == AST_PARAMETER_VALUE_FUNCTION;
+
+            if (is_function_param_a != is_function_param_b) {
+                function_param_layout_matches = 0;
+                break;
+            }
+            if (is_function_param_a) {
+                function_value_param_count += 1u;
+            }
+        }
+
+        if (function_param_layout_matches &&
+            function_value_param_count > 1u &&
+            function_value_param_count < sizeof(size_t) * 8u) {
+            function_arg_views =
+                (IrLowerCallableObjectView *)calloc(
+                    callee_external_a->parameter_count,
+                    sizeof(IrLowerCallableObjectView));
+            function_arg_is_dynamic =
+                (unsigned char *)calloc(callee_external_a->parameter_count, sizeof(unsigned char));
+            dynamic_function_arg_indices =
+                (size_t *)calloc(function_value_param_count, sizeof(size_t));
+            function_arg_dynamic_then_tag_values =
+                (long long *)calloc(function_value_param_count, sizeof(long long));
+            if (!function_arg_views || !function_arg_is_dynamic ||
+                !dynamic_function_arg_indices || !function_arg_dynamic_then_tag_values) {
+                free(function_arg_views);
+                free(function_arg_is_dynamic);
+                free(dynamic_function_arg_indices);
+                free(function_arg_dynamic_then_tag_values);
+                ir_set_error(ctx->error,
+                    call_expr->line,
+                    call_expr->column,
+                    "IR-INT-029: out of memory while preparing returned multi-function-value specialization");
+                return 0;
+            }
+
+            if (!ir_build_function_argument_callable_object_views(
+                    ctx,
+                    call_expr,
+                    callee_external_a,
+                    function_arg_views,
+                    function_arg_is_dynamic,
+                    dynamic_function_arg_indices,
+                    function_arg_dynamic_then_tag_values,
+                    &dynamic_function_arg_count)) {
+                goto returned_multi_dynamic_cleanup_fail;
+            }
+
+            if (dynamic_function_arg_count > 0u) {
+                dynamic_combination_count = (size_t)1u << dynamic_function_arg_count;
+                specialized_names_for_a =
+                    (const char **)calloc(dynamic_combination_count, sizeof(const char *));
+                specialized_names_for_b =
+                    (const char **)calloc(dynamic_combination_count, sizeof(const char *));
+                if (!specialized_names_for_a || !specialized_names_for_b) {
+                    ir_set_error(ctx->error,
+                        call_expr->line,
+                        call_expr->column,
+                        "IR-INT-029: out of memory while preparing returned multi-dynamic specialization names");
+                    goto returned_multi_dynamic_cleanup_fail;
+                }
+                for (size_t mask = 0u; mask < dynamic_combination_count; ++mask) {
+                    if (!ir_build_multi_dynamic_function_value_specialization_name_for_mask(
+                            ctx,
+                            callee_external_a,
+                            function_arg_views,
+                            function_arg_is_dynamic,
+                            dynamic_function_arg_indices,
+                            dynamic_function_arg_count,
+                            mask,
+                            call_expr->line,
+                            call_expr->column,
+                            &specialized_names_for_a[mask]) ||
+                        !ir_build_multi_dynamic_function_value_specialization_name_for_mask(
+                            ctx,
+                            callee_external_b,
+                            function_arg_views,
+                            function_arg_is_dynamic,
+                            dynamic_function_arg_indices,
+                            dynamic_function_arg_count,
+                            mask,
+                            call_expr->line,
+                            call_expr->column,
+                            &specialized_names_for_b[mask])) {
+                        goto returned_multi_dynamic_cleanup_fail;
+                    }
+                }
+                if (!ir_build_multi_dynamic_function_value_specialization_call_args(
+                        ctx,
+                        call_expr,
+                        callee_external_a,
+                        function_arg_views,
+                        &call_args,
+                        &branch_call_arg_count)) {
+                    goto returned_multi_dynamic_cleanup_fail;
+                }
+
+                compare_value = ir_value_temp(ir_allocate_temp(ctx->function));
+                result_temp_id = ir_allocate_temp(ctx->function);
+                result_value = ir_value_temp(result_temp_id);
+                if (!ir_emit_binary(ctx,
+                        compare_value,
+                        IR_BINARY_EQ,
+                        ir_value_local(dynamic_callable_view->dynamic_tag_local_id),
+                        ir_value_immediate(dynamic_then_tag_value)) ||
+                    !ir_function_append_block(ctx->function, &then_block_id, NULL, ctx->error) ||
+                    !ir_function_append_block(ctx->function, &else_block_id, NULL, ctx->error) ||
+                    !ir_block_set_branch(ir_lower_current_block(ctx),
+                        compare_value,
+                        then_block_id,
+                        else_block_id,
+                        ctx->error) ||
+                    !ir_function_append_block(ctx->function, &join_block_id, NULL, ctx->error) ||
+                    !ir_emit_multi_dynamic_function_value_specialization_dispatch_tree(
+                        ctx,
+                        function_arg_views,
+                        dynamic_function_arg_indices,
+                        function_arg_dynamic_then_tag_values,
+                        dynamic_function_arg_count,
+                        0u,
+                        then_block_id,
+                        join_block_id,
+                        0u,
+                        result_value,
+                        specialized_names_for_a,
+                        call_args,
+                        branch_call_arg_count) ||
+                    !ir_emit_multi_dynamic_function_value_specialization_dispatch_tree(
+                        ctx,
+                        function_arg_views,
+                        dynamic_function_arg_indices,
+                        function_arg_dynamic_then_tag_values,
+                        dynamic_function_arg_count,
+                        0u,
+                        else_block_id,
+                        join_block_id,
+                        0u,
+                        result_value,
+                        specialized_names_for_b,
+                        call_args,
+                        branch_call_arg_count)) {
+                    goto returned_multi_dynamic_cleanup_fail;
+                }
+
+                ctx->block_id = join_block_id;
+                ctx->has_block = 1;
+                free(call_args);
+                free(specialized_names_for_a);
+                free(specialized_names_for_b);
+                free(function_arg_is_dynamic);
+                free(dynamic_function_arg_indices);
+                free(function_arg_dynamic_then_tag_values);
+                for (param_index = 0u; param_index < callee_external_a->parameter_count; ++param_index) {
+                    ir_free_callable_object_view_storage(&function_arg_views[param_index]);
+                }
+                free(function_arg_views);
+                return ir_finish_void_or_value_callable_dispatch_result(
+                    callee_external_a->function_return_type == AST_FUNCTION_RETURN_VOID,
+                    result_value,
+                    out_value,
+                    out_applied);
+            }
+
+            free(function_arg_is_dynamic);
+            free(dynamic_function_arg_indices);
+            free(function_arg_dynamic_then_tag_values);
+            for (param_index = 0u; param_index < callee_external_a->parameter_count; ++param_index) {
+                ir_free_callable_object_view_storage(&function_arg_views[param_index]);
+            }
+            free(function_arg_views);
+            function_arg_views = NULL;
+            function_arg_is_dynamic = NULL;
+            dynamic_function_arg_indices = NULL;
+            function_arg_dynamic_then_tag_values = NULL;
+        }
     }
 
     specialization_args_a =
@@ -8307,6 +8563,23 @@ static int ir_try_emit_returned_dynamic_function_value_specialized_call(
         result_value,
         out_value,
         out_applied);
+
+returned_multi_dynamic_cleanup_fail:
+    free(call_args);
+    free(specialized_names_for_a);
+    free(specialized_names_for_b);
+    free(function_arg_is_dynamic);
+    free(dynamic_function_arg_indices);
+    free(function_arg_dynamic_then_tag_values);
+    if (function_arg_views) {
+        for (size_t cleanup_index = 0u;
+             cleanup_index < callee_external_a->parameter_count;
+             ++cleanup_index) {
+            ir_free_callable_object_view_storage(&function_arg_views[cleanup_index]);
+        }
+    }
+    free(function_arg_views);
+    return 0;
 }
 
 static int ir_try_emit_direct_dynamic_function_value_specialized_call(

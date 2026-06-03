@@ -6982,6 +6982,46 @@ static int test_ir_accepts_mixed_dynamic_and_static_returned_closure_function_ar
     return ok;
 }
 
+static int test_ir_accepts_passthrough_returned_dynamic_higher_order_mixed_closure_function_arguments_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int compose(int f(int), int g(int), int x){ return f(g(x)); }\n"
+            "int compose2(int f(int), int g(int), int x){ return g(f(x)); }\n"
+            "int idh(int h(int f(int), int g(int), int x))(int f(int), int g(int), int x){ return h; }\n"
+            "int choose(int c)(int f(int), int g(int), int x){ int h(int f(int), int g(int), int x)=compose; int k(int f(int), int g(int), int x)=compose2; if(c) h=k; return h; }\n"
+            "int pick(int c, int f(int))(int){ int a(int)=closure [f] int (int y){ return f(y); }; int b(int)=closure [f] int (int y){ return f(f(y)); }; if(c) a=b; return a; }\n"
+            "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ return idh(choose(getint()))(pick(getint(), add1), make(3), 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        ir_test_count_fragment_occurrences(actual_text, "call getint()") == 2u &&
+        ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
+        ir_test_count_fragment_occurrences(actual_text, "call choose(") == 1u &&
+        ir_test_count_fragment_occurrences(actual_text, "call make(") == 1u &&
+        strstr(actual_text, "tmp.9 = eq __retfn_argcap_0.0, 1\n") != NULL &&
+        strstr(actual_text, "tmp.11 = eq __retclosure_argslot_0.1, 1\n") != NULL &&
+        strstr(actual_text, "call compose__fv_0_pick__closure_a_") != NULL &&
+        strstr(actual_text, "call compose__fv_0_pick__closure_b_") != NULL &&
+        strstr(actual_text, "call compose2__fv_0_pick__closure_a_") != NULL &&
+        strstr(actual_text, "call compose2__fv_0_pick__closure_b_") != NULL &&
+        strstr(actual_text, "call idh(") == NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: passthrough returned dynamic higher-order mixed closure function arguments mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -15263,6 +15303,9 @@ int main(void) {
         if (strstr("IR-MIXED-DYNAMIC-STATIC-RETURNED-CLOSURE-FNARGS", filter) != NULL) {
             return test_ir_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-PASSTHROUGH-RETURNED-DYNAMIC-HO-MIXED-CLOSURE-FNARGS", filter) != NULL) {
+            return test_ir_accepts_passthrough_returned_dynamic_higher_order_mixed_closure_function_arguments_under_extension() ? 0 : 1;
+        }
         if (strstr("IR-PASSTHROUGH-DECL-LOCAL-FNVAL-NO-SHELL", filter) != NULL) {
             return test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension() ? 0 : 1;
         }
@@ -15665,6 +15708,7 @@ int main(void) {
     ok &= test_ir_accepts_passthrough_local_bind_of_ternary_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_ir_accepts_multiple_dynamic_returned_closure_function_arguments_under_extension();
     ok &= test_ir_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension();
+    ok &= test_ir_accepts_passthrough_returned_dynamic_higher_order_mixed_closure_function_arguments_under_extension();
     ok &= test_ir_accepts_passthrough_decl_local_function_value_forwarding_without_specialization_shell_under_extension();
     ok &= test_ir_accepts_parameter_local_function_value_direct_call_without_specialization_shell_under_extension();
     ok &= test_ir_accepts_parameter_local_scalar_rebind_function_value_direct_call_without_specialization_shell_under_extension();

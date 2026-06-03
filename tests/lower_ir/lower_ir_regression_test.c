@@ -9315,6 +9315,46 @@ static int test_lower_ir_accepts_mixed_dynamic_and_static_returned_closure_funct
     return ok;
 }
 
+static int test_lower_ir_accepts_passthrough_returned_dynamic_higher_order_mixed_closure_function_arguments_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int compose(int f(int), int g(int), int x){ return f(g(x)); }\n"
+            "int compose2(int f(int), int g(int), int x){ return g(f(x)); }\n"
+            "int idh(int h(int f(int), int g(int), int x))(int f(int), int g(int), int x){ return h; }\n"
+            "int choose(int c)(int f(int), int g(int), int x){ int h(int f(int), int g(int), int x)=compose; int k(int f(int), int g(int), int x)=compose2; if(c) h=k; return h; }\n"
+            "int pick(int c, int f(int))(int){ int a(int)=closure [f] int (int y){ return f(y); }; int b(int)=closure [f] int (int y){ return f(f(y)); }; if(c) a=b; return a; }\n"
+            "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ return idh(choose(getint()))(pick(getint(), add1), make(3), 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call getint()") == 2u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call choose(") == 1u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") == 1u &&
+        strstr(actual_text, "eq tmp.") != NULL &&
+        strstr(actual_text, "call compose__fv_0_pick__closure_a_") != NULL &&
+        strstr(actual_text, "call compose__fv_0_pick__closure_b_") != NULL &&
+        strstr(actual_text, "call compose2__fv_0_pick__closure_a_") != NULL &&
+        strstr(actual_text, "call compose2__fv_0_pick__closure_b_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__retclosure_6_30_1") != NULL &&
+        strstr(actual_text, "call idh(") == NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR passthrough returned dynamic higher-order mixed closure function arguments mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -15611,6 +15651,11 @@ int main(void) {
                 ? 0
                 : 1;
         }
+        if (strstr("LOWER-IR-PASSTHROUGH-RETURNED-DYNAMIC-HO-MIXED-CLOSURE-FNARGS", filter) != NULL) {
+            return test_lower_ir_accepts_passthrough_returned_dynamic_higher_order_mixed_closure_function_arguments_under_extension()
+                ? 0
+                : 1;
+        }
         if (strstr("LOWER-IR-PASSTHROUGH-TERNARY-CLOSURE-LOCAL-INIT", filter) != NULL) {
             return test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension() ? 0 : 1;
         }
@@ -16146,6 +16191,7 @@ int main(void) {
     ok &= test_lower_ir_accepts_passthrough_local_bind_of_ternary_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_multiple_dynamic_returned_closure_function_arguments_under_extension();
     ok &= test_lower_ir_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension();
+    ok &= test_lower_ir_accepts_passthrough_returned_dynamic_higher_order_mixed_closure_function_arguments_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value_return_immediate_call_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value_actual_argument_under_extension();

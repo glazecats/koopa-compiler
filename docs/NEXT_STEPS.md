@@ -392,10 +392,24 @@
       argument is a dynamic returned closure family and another is a static
       returned closure producer, while still feeding both into the same
       specialized leaf-call cross-product path. Focused IR, lower-IR, and
-      compiler-driver regression coverage is now in place. The next nearby
-      blocker is the still broader family where multiple dynamic families and
-      mixed producer kinds are further wrapped by deeper higher-order shells,
-      or where dynamic target sets grow beyond the current two-target model.
+      compiler-driver regression coverage is now in place.
+    - current returned-dynamic-higher-order mixed-producer checkpoint:
+      that same combination-dispatch line now also survives one more
+      higher-order shell instead of requiring the mixed producer family to be
+      called directly. Witnesses such as
+      `return idh(choose(getint()))(pick(getint(), add1), make(3), 4);`
+      are now green. The kept bridge is that returned-dynamic callee dispatch
+      no longer assumes the callee tag is the only runtime choice in play;
+      when a returned dynamic higher-order producer selects between two
+      compatible callees and the argument list also contains dynamic/static
+      callable producers, lowering now synthesizes the leaf-call combination
+      space for each returned-callee branch and nests the function-argument tag
+      branches under the returned-callee branch instead of falling back to one
+      unresolved returned-dynamic specialization attempt. Focused IR, lower-IR,
+      and compiler-driver regression coverage is now in place. The next nearby
+      blocker is the still broader family where this same higher-order mixed
+      combination story must also handle larger dynamic target sets beyond the
+      current two-target model.
     - current returned multi-capture dynamic forwarding checkpoint:
       the nearby returned multi-capture closure forwarding family is now also
       real instead of remaining blocked on `IR-INT-123`. The focused witness
