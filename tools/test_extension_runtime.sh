@@ -502,6 +502,30 @@ int apply(int f(int), int x){ return f(x); }
 int main(){ return apply(closure [] int (int z){ return z+1; }, getint()); }
 EOF
 
+run_case_with_stdin "ternary_closure_literal_actual_argument_side_effect_arg_else" "" "42" $'0\n41\n' <<'EOF'
+int add2(int x){ return x+2; }
+int apply(int f(int), int x){ return f(x); }
+int main(){ int c=getint(); int g(int)=add2; return apply(c ? g : closure [] int (int z){ return z+1; }, getint()); }
+EOF
+
+run_case_with_stdin "ternary_closure_literal_actual_argument_side_effect_arg_then" "" "43" $'1\n41\n' <<'EOF'
+int add2(int x){ return x+2; }
+int apply(int f(int), int x){ return f(x); }
+int main(){ int c=getint(); int g(int)=add2; return apply(c ? g : closure [] int (int z){ return z+1; }, getint()); }
+EOF
+
+run_case_with_stdin "ternary_mixed_capture_closure_literal_actual_argument_else" "" "45" $'0\n40\n' <<'EOF'
+int add2(int x){ return x+2; }
+int apply(int f(int), int x){ return f(x); }
+int main(){ int c=getint(); int y=5; int g(int)=add2; return apply(c ? g : closure [y] int (int z){ return z+y; }, getint()); }
+EOF
+
+run_case_with_stdin "ternary_mixed_capture_closure_literal_actual_argument_then" "" "42" $'1\n40\n' <<'EOF'
+int add2(int x){ return x+2; }
+int apply(int f(int), int x){ return f(x); }
+int main(){ int c=getint(); int y=5; int g(int)=add2; return apply(c ? g : closure [y] int (int z){ return z+y; }, getint()); }
+EOF
+
 run_case "dynamic_function_value_assignment_then_return" "" "42" <<'EOF'
 int add1(int x){ return x+1; }
 int add2(int x){ return x+2; }

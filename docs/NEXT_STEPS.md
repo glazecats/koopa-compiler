@@ -18586,3 +18586,33 @@ The execution log is intentionally retained below them as historical record, not
     `fn_make __fnwrap_pick__fv_1_add1__closure_*__fv_0_add1` +
     `call_indirect` instead of a hard lower failure,
     `make -j1 test-ir-regression` still FAILS
+- 2026-06-06 function-value supported-subset bug-hunt follow-up:
+  - active line:
+    no feature expansion; only already-supported function-value / closure
+    actual-argument surfaces were stress-tested and fixed
+  - landed implementation effect:
+    [src/ir/ir_lower_expr.inc](/workspaces/compiler_lab/src/ir/ir_lower_expr.inc)
+    now restores the caller lowering context after expression-side closure
+    helper synthesis, so later ordinary call arguments such as `getint()` are
+    lowered back into the real caller instead of accidentally continuing in
+    the helper function context
+  - adjacent mixed-capture repair:
+    ternary function-valued actual arguments may now mix a noncapturing
+    function value with a closure literal capture branch on the existing
+    callable-object bridge. The new path builds noncapturing and closure
+    wrappers with branch-specific env values instead of forcing both branches
+    to have the same capture count
+  - new runtime locks:
+    `ternary_closure_literal_actual_argument_side_effect_arg_else`,
+    `ternary_closure_literal_actual_argument_side_effect_arg_then`,
+    `ternary_mixed_capture_closure_literal_actual_argument_else`, and
+    `ternary_mixed_capture_closure_literal_actual_argument_then`
+  - focused supported-subset stress after the fixes:
+    `18 pass / 1 expected skip / 0 fail`; the skip remained the known
+    `SEMA-EXT-018` CPS-style nested continuation boundary
+  - broad rechecks after this step:
+    `make -j1 test-extension-runtime` PASS,
+    `make -j1 test-ir-regression test-lower-ir-regression test-compiler-driver test-value-ssa-regression` PASS,
+    `make -j1 test` PASS
+  - current full-suite red count:
+    `0`

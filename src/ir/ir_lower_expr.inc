@@ -1608,6 +1608,7 @@ static int ir_try_resolve_static_actual_argument_callable_object_view(IrLowerCon
     }
 
     if (base->kind == AST_EXPR_CLOSURE) {
+        const char *current_function_name = ir_lower_current_function_name(ctx);
         char *closure_helper_name = NULL;
         IrFunction *helper_function = NULL;
         size_t closure_capture_name_count = base->as.closure.capture_name_count;
@@ -1734,6 +1735,11 @@ static int ir_try_resolve_static_actual_argument_callable_object_view(IrLowerCon
                 closure_capture_local_ids,
                 closure_capture_count,
                 ctx->error) ||
+            !ir_lower_refresh_current_function(
+                ctx,
+                current_function_name,
+                base->line,
+                base->column) ||
             !(helper_function =
                 (ctx->program && closure_helper_name)
                     ? ir_program_find_function_mut(ctx->program, closure_helper_name)
@@ -6077,6 +6083,105 @@ static int ir_emit_two_target_wrapped_closure_callable_indirect_call(IrLowerCont
     return 1;
 }
 
+static int ir_emit_two_target_mixed_capture_callable_indirect_call(IrLowerContext *ctx,
+    IrValueRef tag_value,
+    long long then_tag_value,
+    const char *then_target_name,
+    const char *else_target_name,
+    const size_t *then_capture_local_ids,
+    size_t then_capture_count,
+    const size_t *else_capture_local_ids,
+    size_t else_capture_count,
+    const IrValueRef *args,
+    size_t arg_count,
+    IrValueRef *out_value) {
+    const char *then_wrapper_name = NULL;
+    const char *else_wrapper_name = NULL;
+    IrValueRef then_env_addr = ir_value_immediate(0);
+    IrValueRef else_env_addr = ir_value_immediate(0);
+    size_t shape_id = (size_t)-1;
+
+    if (out_value) {
+        *out_value = ir_value_immediate(0);
+    }
+    if (!ctx || !ctx->program || !then_target_name || !else_target_name || !out_value ||
+        (then_capture_count == 0u && else_capture_count == 0u) ||
+        (then_capture_count > 0u && !then_capture_local_ids) ||
+        (else_capture_count > 0u && !else_capture_local_ids) ||
+        (arg_count > 0u && !args)) {
+        return 0;
+    }
+
+    if (then_capture_count > 0u) {
+        if (!ir_ensure_closure_callable_wrapper_function(
+                ctx,
+                then_target_name,
+                then_capture_count,
+                &then_wrapper_name) ||
+            !ir_materialize_closure_callable_wrapper_env_addr(
+                ctx,
+                then_capture_local_ids,
+                then_capture_count,
+                &then_env_addr)) {
+            return 0;
+        }
+    } else if (!ir_ensure_noncapturing_callable_wrapper_function(
+            ctx,
+            then_target_name,
+            &then_wrapper_name)) {
+        return 0;
+    }
+
+    if (else_capture_count > 0u) {
+        if (!ir_ensure_closure_callable_wrapper_function(
+                ctx,
+                else_target_name,
+                else_capture_count,
+                &else_wrapper_name) ||
+            !ir_materialize_closure_callable_wrapper_env_addr(
+                ctx,
+                else_capture_local_ids,
+                else_capture_count,
+                &else_env_addr)) {
+            return 0;
+        }
+    } else if (!ir_ensure_noncapturing_callable_wrapper_function(
+            ctx,
+            else_target_name,
+            &else_wrapper_name)) {
+        return 0;
+    }
+
+    if (!ir_build_two_target_callable_shape_bridge_from_names(
+            ctx,
+            then_wrapper_name,
+            else_wrapper_name,
+            1u,
+            "IR-LOWER-071: mixed callable-wrapper dispatch bridge shape mismatch",
+            &shape_id)) {
+        return 0;
+    }
+
+    if (!ir_emit_two_target_callable_object_indirect_call_bridged(
+            ctx,
+            tag_value,
+            then_tag_value,
+            then_wrapper_name,
+            else_wrapper_name,
+            then_env_addr,
+            else_env_addr,
+            shape_id,
+            args,
+            arg_count,
+            out_value)) {
+        if (ctx->error && ctx->error->message[0] == '\0') {
+            ir_set_error(ctx->error, 0, 0, "IR-INT-094: failed while lowering mixed callable dispatch bridge");
+        }
+        return 0;
+    }
+    return 1;
+}
+
 static int ir_try_emit_two_target_dynamic_closure_callable_indirect_call_with_args(
     IrLowerContext *ctx,
     IrValueRef tag_value,
@@ -7244,6 +7349,141 @@ static int ir_try_lower_plain_direct_call(IrLowerContext *ctx,
     return ir_mark_callable_dispatch_applied(out_applied);
 }
 
+static int ir_try_emit_mixed_capture_ternary_function_value_argument_dispatch(IrLowerContext *ctx,
+    const AstExpression *call_expr,
+    const AstExternal *callee_external,
+    size_t function_arg_index,
+    const AstExpression *function_arg_base,
+    IrValueRef *out_value,
+    int *out_applied) {
+    const AstExpression *then_base = NULL;
+    const AstExpression *else_base = NULL;
+    const size_t *then_capture_local_ids = NULL;
+    const size_t *else_capture_local_ids = NULL;
+    size_t then_capture_count = 0u;
+    size_t else_capture_count = 0u;
+    const char *then_target_name = NULL;
+    const char *else_target_name = NULL;
+    long long then_tag_value = 0;
+    long long else_tag_value = 0;
+    size_t tag_local_id = (size_t)-1;
+    IrValueRef *forwarded_scalar_args = NULL;
+    const IrValueRef *forwarded_scalar_args_view = NULL;
+    size_t forwarded_scalar_arg_count = 0u;
+    IrValueRef ignored_result = ir_value_immediate(0);
+    IrValueRef *call_result_target = NULL;
+
+    if (out_applied) {
+        *out_applied = 0;
+    }
+    if (!ctx || !call_expr || !callee_external || !function_arg_base || !out_value ||
+        function_arg_base->kind != AST_EXPR_TERNARY) {
+        return 1;
+    }
+
+    then_base = ir_unwrap_paren_expression(function_arg_base->as.ternary.then_expr);
+    else_base = ir_unwrap_paren_expression(function_arg_base->as.ternary.else_expr);
+    if (!then_base || !else_base ||
+        (then_base->kind != AST_EXPR_CLOSURE &&
+            else_base->kind != AST_EXPR_CLOSURE)) {
+        return 1;
+    }
+    if (!ir_call_argument_resolve_extension_function_value_target(
+            ctx->ast_program,
+            ctx,
+            callee_external,
+            function_arg_index,
+            then_base,
+            &then_capture_local_ids,
+            &then_capture_count,
+            &then_target_name)) {
+        return (ctx->error && ctx->error->message[0] != '\0') ? 0 : 1;
+    }
+    if (!ir_call_argument_resolve_extension_function_value_target(
+            ctx->ast_program,
+            ctx,
+            callee_external,
+            function_arg_index,
+            else_base,
+            &else_capture_local_ids,
+            &else_capture_count,
+            &else_target_name)) {
+        return (ctx->error && ctx->error->message[0] != '\0') ? 0 : 1;
+    }
+    if (!then_target_name || !else_target_name ||
+        then_capture_count == else_capture_count) {
+        return 1;
+    }
+
+    if (!ir_function_append_local(
+            ctx->function,
+            "__ternary_fn_argtag",
+            0,
+            &tag_local_id,
+            ctx->error) ||
+        !ir_lower_register_function_value_target(
+            ctx,
+            "__ternary_fn_arg",
+            then_target_name,
+            &then_tag_value) ||
+        !ir_lower_register_function_value_target(
+            ctx,
+            "__ternary_fn_arg",
+            else_target_name,
+            &else_tag_value) ||
+        !ir_emit_materialized_ternary_function_value_selection(
+            ctx,
+            function_arg_base->as.ternary.condition,
+            then_tag_value,
+            else_tag_value,
+            (size_t)-1,
+            (size_t)-1,
+            1,
+            1,
+            NULL,
+            NULL,
+            0u,
+            tag_local_id,
+            NULL)) {
+        return 0;
+    }
+
+    call_result_target = callee_external->function_return_type == AST_FUNCTION_RETURN_VOID
+        ? &ignored_result
+        : out_value;
+    if (!ir_build_dynamic_non_function_callable_args_view(
+            ctx,
+            call_expr,
+            callee_external,
+            0u,
+            function_arg_index,
+            "IR-INT-126: out of memory while lowering callable-object arguments",
+            &forwarded_scalar_args,
+            &forwarded_scalar_args_view,
+            &forwarded_scalar_arg_count)) {
+        return 0;
+    }
+
+    if (!ir_emit_two_target_mixed_capture_callable_indirect_call(
+            ctx,
+            ir_value_local(tag_local_id),
+            then_tag_value,
+            then_target_name,
+            else_target_name,
+            then_capture_local_ids,
+            then_capture_count,
+            else_capture_local_ids,
+            else_capture_count,
+            forwarded_scalar_args_view,
+            forwarded_scalar_arg_count,
+            call_result_target)) {
+        free(forwarded_scalar_args);
+        return 0;
+    }
+    free(forwarded_scalar_args);
+    return ir_mark_callable_dispatch_applied(out_applied);
+}
+
 static int ir_try_emit_ternary_function_value_argument_dispatch(IrLowerContext *ctx,
     const AstExpression *call_expr,
     const AstExternal *callee_external,
@@ -7280,6 +7520,19 @@ static int ir_try_emit_ternary_function_value_argument_dispatch(IrLowerContext *
         ir_unwrap_paren_expression(
             call_expr->as.call.args[function_arg_index]);
     if (!function_arg_base || function_arg_base->kind != AST_EXPR_TERNARY) {
+        return 1;
+    }
+    if (!ir_try_emit_mixed_capture_ternary_function_value_argument_dispatch(
+            ctx,
+            call_expr,
+            callee_external,
+            function_arg_index,
+            function_arg_base,
+            out_value,
+            out_applied)) {
+        return 0;
+    }
+    if (out_applied && *out_applied) {
         return 1;
     }
     if (ir_materialize_ternary_function_value_argument_callable_object_view(
@@ -8973,8 +9226,12 @@ static int ir_materialize_ternary_function_value_argument_callable_object_view(
         goto build_materialized_ternary_callable_view;
     }
     if (!then_base || !else_base ||
-        then_base->kind != AST_EXPR_IDENTIFIER ||
-        else_base->kind != AST_EXPR_IDENTIFIER ||
+        (then_base->kind != AST_EXPR_IDENTIFIER &&
+            then_base->kind != AST_EXPR_CALL &&
+            then_base->kind != AST_EXPR_CLOSURE) ||
+        (else_base->kind != AST_EXPR_IDENTIFIER &&
+            else_base->kind != AST_EXPR_CALL &&
+            else_base->kind != AST_EXPR_CLOSURE) ||
         !ir_call_argument_resolve_extension_function_value_target(
             ctx->ast_program,
             ctx,
@@ -15943,7 +16200,8 @@ static int ir_call_argument_resolve_extension_function_value_target(const AstPro
 
             memset(&materialized_ternary_view, 0, sizeof(materialized_ternary_view));
             materialized_ternary_view.dynamic_tag_local_id = (size_t)-1;
-            if (ir_materialize_ternary_function_value_argument_callable_object_view(
+            if (!target_discovery_only &&
+                ir_materialize_ternary_function_value_argument_callable_object_view(
                     (IrLowerContext *)ctx,
                     callee_external,
                     arg_index,
@@ -16026,6 +16284,9 @@ static int ir_call_argument_resolve_extension_function_value_target(const AstPro
                 return 0;
             }
             if (target_discovery_only) {
+                if (strcmp(then_target_name, else_target_name) != 0) {
+                    return 0;
+                }
                 if (out_target_name) {
                     *out_target_name = then_target_name;
                 }
@@ -16059,6 +16320,7 @@ static int ir_call_argument_resolve_extension_function_value_target(const AstPro
             return 1;
         }
         if (ctx && arg_base && arg_base->kind == AST_EXPR_CLOSURE) {
+            const char *current_function_name = ir_lower_current_function_name(ctx);
             char *closure_helper_name = NULL;
             size_t closure_capture_name_count = arg_base->as.closure.capture_name_count;
             size_t closure_capture_count = 0u;
@@ -16184,6 +16446,15 @@ static int ir_call_argument_resolve_extension_function_value_target(const AstPro
                     closure_capture_local_ids,
                     closure_capture_count,
                     ctx->error)) {
+                free(closure_capture_local_ids);
+                free(closure_helper_name);
+                return 0;
+            }
+            if (!ir_lower_refresh_current_function(
+                    (IrLowerContext *)ctx,
+                    current_function_name,
+                    arg_base->line,
+                    arg_base->column)) {
                 free(closure_capture_local_ids);
                 free(closure_helper_name);
                 return 0;
