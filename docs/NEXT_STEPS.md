@@ -163,6 +163,14 @@
     branch at the caller into `apply__fv_0_add1` / `apply__fv_0_add2`, with
     compiler, canonical-IR, lower-IR, and extension-runtime regression
     coverage
+    - current side-effect argument repair:
+      function-valued-parameter dispatch probes now refuse helper/body-eval
+      shortcuts when any non-function actual argument has side effects. This
+      keeps scalar arguments such as `getint()` evaluated exactly once across
+      both dynamic higher-order forwarding (`relay(pass, apply, f, getint())`)
+      and direct closure-literal forwarding
+      (`apply(closure [] int (int z){ return z+1; }, getint())`), with
+      extension-runtime coverage for both families.
     - current higher-order returned-passthrough follow-up:
       the same dynamic noncapturing specialization spine now also closes the
       next higher-order passthrough family instead of stopping at direct

@@ -54,6 +54,44 @@ run_case() {
   echo "[extension-runtime] PASS: $case_id"
 }
 
+run_case_with_stdin() {
+  local case_id="$1"
+  local expected="$2"
+  local expected_status="$3"
+  local stdin_data="$4"
+  local source_path="$tmpdir/$case_id.sy"
+  local asm_path="$tmpdir/$case_id.s"
+  local obj_path="$tmpdir/$case_id.o"
+  local exe_path="$tmpdir/$case_id.out"
+  local stdin_path="$tmpdir/$case_id.stdin"
+  local stdout_path="$tmpdir/$case_id.stdout"
+
+  cat >"$source_path"
+  printf "%s" "$stdin_data" >"$stdin_path"
+
+  "$COMPILER_SNAPSHOT" -extension "$source_path" -o "$asm_path"
+  clang "$asm_path" -c -o "$obj_path" -target riscv32-unknown-linux-elf -march=rv32im -mabi=ilp32
+  ld.lld "$obj_path" -L/opt/lib/riscv32 -lsysy -o "$exe_path"
+  local actual_status
+  set +e
+  qemu-riscv32-static "$exe_path" <"$stdin_path" >"$stdout_path"
+  actual_status=$?
+  set -e
+
+  local actual
+  actual="$(cat "$stdout_path")"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "[extension-runtime] FAIL: $case_id expected '$expected' got '$actual'" >&2
+    exit 1
+  fi
+  if [[ "$actual_status" != "$expected_status" ]]; then
+    echo "[extension-runtime] FAIL: $case_id expected exit '$expected_status' got '$actual_status'" >&2
+    exit 1
+  fi
+
+  echo "[extension-runtime] PASS: $case_id"
+}
+
 run_case "defer_return_order" "132" <<'EOF'
 int main(){ putint(1); defer putint(2); putint(3); return 0; }
 EOF
@@ -439,6 +477,29 @@ int add1(int x){ return x+1; }
 int add2(int x){ return x+2; }
 int apply(int f(int), int x){ return f(x); }
 int main(){ int c=1; int f(int)=add1; int h(int)=add1; if((putint(0), c)) f=add2; h=f; return apply(h, 40); }
+EOF
+
+run_case_with_stdin "dynamic_higher_order_function_value_forward_side_effect_arg_else" "" "42" $'0\n41\n' <<'EOF'
+int apply(int f(int), int x){ return f(x); }
+int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }
+int relay(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return q(h, f, x); }
+int add1(int x){ return x+1; }
+int add2(int x){ return x+2; }
+int main(){ int f(int)=add1; if(getint()) f=add2; return relay(pass, apply, f, getint()); }
+EOF
+
+run_case_with_stdin "dynamic_higher_order_function_value_forward_side_effect_arg_then" "" "43" $'1\n41\n' <<'EOF'
+int apply(int f(int), int x){ return f(x); }
+int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }
+int relay(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return q(h, f, x); }
+int add1(int x){ return x+1; }
+int add2(int x){ return x+2; }
+int main(){ int f(int)=add1; if(getint()) f=add2; return relay(pass, apply, f, getint()); }
+EOF
+
+run_case_with_stdin "closure_literal_function_value_forward_side_effect_arg" "" "42" $'41\n' <<'EOF'
+int apply(int f(int), int x){ return f(x); }
+int main(){ return apply(closure [] int (int z){ return z+1; }, getint()); }
 EOF
 
 run_case "dynamic_function_value_assignment_then_return" "" "42" <<'EOF'

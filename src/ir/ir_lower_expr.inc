@@ -6,6 +6,7 @@
 
 static int ir_lower_scope_clear_mutated_scalar_locals_in_expr(IrLowerScopeStack *stack,
     const AstExpression *expr);
+static int ir_expression_has_side_effects(const AstExpression *expr);
 static int ir_expression_is_direct_float_condition(const IrLowerContext *ctx,
     const AstExpression *expr);
 static IrBinaryOp ir_binary_op_from_assignment_token(TokenType token_type,
@@ -5162,6 +5163,26 @@ static int ir_build_multi_dynamic_function_value_specialization_call_args(
     *out_call_args = call_args;
     *out_call_arg_count = call_arg_count;
     return 1;
+}
+
+static int ir_call_has_side_effectful_non_function_args(
+    const AstExpression *call_expr,
+    const AstExternal *callee_external) {
+    if (!call_expr || call_expr->kind != AST_EXPR_CALL || !callee_external ||
+        !callee_external->parameter_value_kinds || !call_expr->as.call.args ||
+        call_expr->as.call.arg_count != callee_external->parameter_count) {
+        return 0;
+    }
+
+    for (size_t arg_index = 0u; arg_index < call_expr->as.call.arg_count; ++arg_index) {
+        if (callee_external->parameter_value_kinds[arg_index] == AST_PARAMETER_VALUE_FUNCTION) {
+            continue;
+        }
+        if (ir_expression_has_side_effects(call_expr->as.call.args[arg_index])) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static int ir_build_function_argument_callable_object_views(
@@ -18595,6 +18616,9 @@ static int ir_try_build_function_body_eval_bindings_from_callable_views(
             continue;
         }
 
+        if (ir_expression_has_side_effects(call_expr->as.call.args[param_index])) {
+            goto cleanup;
+        }
         if (!ir_lower_expression(
                 ctx,
                 call_expr->as.call.args[param_index],
@@ -22895,12 +22919,16 @@ static int ir_lower_expression(IrLowerContext *ctx,
             if (callee_has_function_value_parameters &&
                 function_parameter_count > 1u &&
                 expr->as.call.arg_count == callee_external->parameter_count) {
-                int multi_static_passthrough_safe = 1;
+                int multi_static_passthrough_safe =
+                    !ir_call_has_side_effectful_non_function_args(expr, callee_external);
 
                 for (i = 0u; i < callee_external->parameter_count; ++i) {
                     const AstExpression *function_arg_expr = NULL;
                     const AstExpression *function_arg_base = NULL;
 
+                    if (!multi_static_passthrough_safe) {
+                        break;
+                    }
                     if (callee_external->parameter_value_kinds[i] != AST_PARAMETER_VALUE_FUNCTION) {
                         continue;
                     }
@@ -22968,7 +22996,8 @@ static int ir_lower_expression(IrLowerContext *ctx,
                         function_arg_wrapper_side_effects_emitted = 1;
                         memset(&static_actual_argument_view, 0, sizeof(static_actual_argument_view));
                         static_actual_argument_view.dynamic_tag_local_id = (size_t)-1;
-                        if (ir_try_resolve_static_actual_argument_callable_object_view(
+                        if (!ir_call_has_side_effectful_non_function_args(expr, callee_external) &&
+                            ir_try_resolve_static_actual_argument_callable_object_view(
                                 ctx,
                                 static_function_arg_expr,
                                 &static_actual_argument_view)) {
@@ -23053,12 +23082,16 @@ static int ir_lower_expression(IrLowerContext *ctx,
                         }
                     }
                 } else if (function_parameter_count > 1u) {
-                    int multi_static_passthrough_safe = 1;
+                    int multi_static_passthrough_safe =
+                        !ir_call_has_side_effectful_non_function_args(expr, callee_external);
 
                     for (i = 0u; i < callee_external->parameter_count; ++i) {
                         const AstExpression *function_arg_expr = NULL;
                         const AstExpression *function_arg_base = NULL;
 
+                        if (!multi_static_passthrough_safe) {
+                            break;
+                        }
                         if (callee_external->parameter_value_kinds[i] != AST_PARAMETER_VALUE_FUNCTION) {
                             continue;
                         }
