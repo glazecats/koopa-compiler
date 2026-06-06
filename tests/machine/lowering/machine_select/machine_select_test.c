@@ -8498,6 +8498,60 @@ static int test_machine_select_materializes_immediates(void) {
     return ok;
 }
 
+static int test_machine_select_conservative_no_phi_preserves_mixed_dynamic_closure_function_argument_consumers(void) {
+    static const char *source =
+        "int compose(int f(int), int g(int), int x){ return f(g(x)); }\n"
+        "int compose2(int f(int), int g(int), int x){ return g(f(x)); }\n"
+        "int idh(int h(int f(int), int g(int), int x))(int f(int), int g(int), int x){ return h; }\n"
+        "int choose(int c)(int f(int), int g(int), int x){ int h(int f(int), int g(int), int x)=compose; int k(int f(int), int g(int), int x)=compose2; if(c) h=k; return h; }\n"
+        "int pick(int c, int f(int))(int){ int a(int)=closure [f] int (int y){ return f(y); }; int b(int)=closure [f] int (int y){ return f(f(y)); }; if(c) a=b; return a; }\n"
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(choose(getint()))(pick(getint(), add1), make(3), 4); }\n";
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    if (!build_machine_ir_program_from_extension_source_text(source, &machine_program, &machine_error) ||
+        !machine_select_build_program_from_machine_ir_report_conservative_no_phi(
+            &(MachineIrAllocateRewriteReport){ .program = machine_program },
+            &select_program,
+            &select_error) ||
+        !machine_select_dump_program(&select_program, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: mixed dynamic closure consumer conservative-no-phi setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "call_void pick__fv_1_add1") ||
+        !strstr(actual_text, "calli __fnwrap_pick__fv_1_add1__closure_a_") ||
+        !strstr(actual_text, "calli __fnwrap_pick__fv_1_add1__closure_b_") ||
+        !strstr(actual_text, "calli __fnwrap_closure_make__retclosure_") ||
+        strstr(actual_text, "compose__fv_") ||
+        strstr(actual_text, "compose2__fv_")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: mixed dynamic closure consumer conservative-no-phi dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return ok;
+}
+
 static int test_machine_select_distinguishes_immediate_store_families(void) {
     MachineIrProgram machine_program;
     MachineIrFunction *function = NULL;
@@ -16857,6 +16911,9 @@ int main(void) {
     if (filter && filter[0] != '\0') {
         if (strstr("MACHINE-SELECT-FLOAT-SOURCE-TRANSPORT", filter) != NULL) {
             return test_machine_select_lowers_extension_float_transport() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-MIXED-DYNAMIC-CLOSURE-CONSUMERS", filter) != NULL) {
+            return test_machine_select_conservative_no_phi_preserves_mixed_dynamic_closure_function_argument_consumers() ? 0 : 1;
         }
         if (strstr("MACHINE-SELECT-FLOAT-GLOBAL-LITERAL-RUNTIME-INIT", filter) != NULL) {
             return test_machine_select_lowers_extension_float_global_literal_runtime_init() ? 0 : 1;

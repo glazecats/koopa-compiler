@@ -3004,47 +3004,7 @@ static int parse_parameter_list(Parser *p,
 
                     for (nested_index = 0u; nested_index < nested_param_count; ++nested_index) {
                         if (nested_parameter_value_kinds[nested_index] == AST_PARAMETER_VALUE_FUNCTION) {
-                            if (function_type_depth >= 2u) {
-                                set_error(p,
-                                    parameter_name_tok,
-                                    "Nested function-typed parameters currently support only three levels of function signature");
-                                free_name_array(parameter_names, count);
-                                free(parameter_value_kinds);
-                                free_name_array(parameter_type_names, count);
-                                free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
-                                free(parameter_array_ranks);
-                                free(parameter_is_const);
-                                free(parameter_name_lines);
-                                free(parameter_name_columns);
-                            free(parameter_function_return_types);
-                            free(parameter_function_parameter_counts);
-                            free(nested_parameter_value_kinds);
-                            free(nested_parameter_function_return_types);
-                            free(nested_parameter_function_parameter_counts);
-                            if (nested_parameter_function_parameter_value_kinds) {
-                                size_t free_index;
-                                for (free_index = 0u; free_index < nested_param_count; ++free_index) {
-                                    free(nested_parameter_function_parameter_value_kinds[free_index]);
-                                }
-                            }
-                            free(nested_parameter_function_parameter_value_kinds);
-                            if (nested_parameter_function_parameter_return_types) {
-                                size_t free_index;
-                                for (free_index = 0u; free_index < nested_param_count; ++free_index) {
-                                    free(nested_parameter_function_parameter_return_types[free_index]);
-                                }
-                            }
-                            free(nested_parameter_function_parameter_return_types);
-                            if (nested_parameter_function_parameter_parameter_counts) {
-                                size_t free_index;
-                                for (free_index = 0u; free_index < nested_param_count; ++free_index) {
-                                    free(nested_parameter_function_parameter_parameter_counts[free_index]);
-                                }
-                            }
-                            free(nested_parameter_function_parameter_parameter_counts);
-                            return 0;
-                        }
-                        continue;
+                            continue;
                         }
                         if (nested_parameter_value_kinds[nested_index] != AST_PARAMETER_VALUE_INT) {
                             set_error(p,
@@ -5327,6 +5287,18 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
             parser_ast_program_free(out_program);
             return 0;
         }
+    }
+
+    if (!ast_program_attach_function_signature_nodes(out_program)) {
+        parser_ast_program_free(out_program);
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message,
+                sizeof(error->message),
+                "Out of memory while building recursive function signature metadata");
+        }
+        return 0;
     }
 
     if (error) {

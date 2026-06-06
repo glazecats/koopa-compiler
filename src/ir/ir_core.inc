@@ -497,6 +497,11 @@ static int ir_function_append_local(IrFunction *function,
         ir_set_error(error, 0, 0, "IR-INT-005: invalid local append contract");
         return 0;
     }
+    if ((function->local_capacity > 0u && !function->locals) ||
+        function->local_count > function->local_capacity) {
+        ir_set_error(error, 0, 0, "IR-INT-005B: corrupted local append contract");
+        return 0;
+    }
 
     if (function->local_count == function->local_capacity) {
         if (!ir_next_growth_capacity(function->local_capacity,

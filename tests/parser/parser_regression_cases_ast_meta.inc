@@ -432,20 +432,97 @@ static int test_ast_records_zero_arg_void_function_valued_parameter_metadata(voi
     return 1;
 }
 
-static int test_ast_rejects_deeply_nested_function_valued_parameter_metadata_for_now(void) {
-    return expect_translation_unit_parse_failure(
-        "int apply(int f(int g(int)), int x);\n",
-        "deeply-nested-function-valued-parameter",
-        "Nested function-typed parameters currently support only one level of function signature",
-        NULL);
+static int test_ast_accepts_deeply_nested_function_valued_parameter_metadata(void) {
+    const char *source = "int apply(int f(int g(int)), int x);\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+    AstFunctionSignatureView f_view;
+    AstFunctionSignatureView g_view;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for deeply-nested function-valued parameter AST input\n");
+        return 0;
+    }
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for deeply-nested function-valued parameter input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+    if (program.count != 1 ||
+        !ast_external_get_parameter_function_signature_view(&program.externals[0], 0u, &f_view) ||
+        f_view.parameter_count != 1u ||
+        !f_view.parameter_value_kinds ||
+        f_view.parameter_value_kinds[0] != AST_PARAMETER_VALUE_FUNCTION ||
+        !ast_function_signature_view_get_parameter_function_signature_view(&f_view, 0u, &g_view) ||
+        g_view.parameter_count != 1u ||
+        !g_view.parameter_value_kinds ||
+        g_view.parameter_value_kinds[0] != AST_PARAMETER_VALUE_INT) {
+        fprintf(stderr, "[parser-reg] FAIL: deeply-nested function-valued parameter metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
 }
 
-static int test_ast_rejects_deeply_nested_function_valued_return_metadata_for_now(void) {
-    return expect_translation_unit_parse_failure(
-        "int make(int f(int g(int)))(int);\n",
-        "deeply-nested-function-valued-return",
-        "Nested function-typed parameters currently support only one level of function signature",
-        NULL);
+static int test_ast_accepts_deeply_nested_function_valued_return_metadata(void) {
+    const char *source = "int make(int f(int g(int)))(int);\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+    AstFunctionSignatureView ret_view;
+    AstFunctionSignatureView f_view;
+    AstFunctionSignatureView g_view;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for deeply-nested function-valued return AST input\n");
+        return 0;
+    }
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for deeply-nested function-valued return input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+    if (program.count != 1 ||
+        !ast_external_get_function_return_signature_view(&program.externals[0], &ret_view) ||
+        ret_view.parameter_count != 1u ||
+        !ast_external_get_parameter_function_signature_view(&program.externals[0], 0u, &f_view) ||
+        f_view.parameter_count != 1u ||
+        !f_view.parameter_value_kinds ||
+        f_view.parameter_value_kinds[0] != AST_PARAMETER_VALUE_FUNCTION ||
+        !ast_function_signature_view_get_parameter_function_signature_view(&f_view, 0u, &g_view) ||
+        g_view.parameter_count != 1u ||
+        !g_view.parameter_value_kinds ||
+        g_view.parameter_value_kinds[0] != AST_PARAMETER_VALUE_INT) {
+        fprintf(stderr, "[parser-reg] FAIL: deeply-nested function-valued return metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
 }
 
 static int test_ast_rejects_non_int_inner_function_valued_parameter_for_now(void) {

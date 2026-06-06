@@ -513,6 +513,14 @@ int make(int x)(int) { return closure [x] int (int y) { return x + y; }; }
 int main(){ int f(int)=make(3); return apply(f, 4); }
 EOF
 
+run_case "mixed_returned_closure_function_args_runtime" "" "8" <<'EOF'
+int compose(int f(int), int g(int), int x){ return f(g(x)); }
+int pick(int c, int f(int))(int){ int a(int)=closure [f] int (int y){ return f(y); }; int b(int)=closure [f] int (int y){ return f(f(y)); }; if(c) a=b; return a; }
+int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }
+int add1(int x){ return x+1; }
+int main(){ return compose(pick(0, add1), make(3), 4); }
+EOF
+
 run_case "returned_closure_zero_arg_forward_into_function_param" "" "3" <<'EOF'
 int apply0(int f()){ return f(); }
 int make(int x)() { return closure [x] int () { return x; }; }

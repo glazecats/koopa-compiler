@@ -3035,6 +3035,29 @@ static int test_semantic_accepts_third_order_function_value_parameter_forwarding
         "int main(){ return relay(pass, apply, add1, 41); }\n");
 }
 
+static int test_semantic_accepts_fourth_order_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "fourth-order-function-value-parameter-forward-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int relay(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return q(h, f, x); }\n"
+        "int meta(int r(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x), int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return r(q, h, f, x); }\n"
+        "int main(){ return meta(relay, pass, apply, add1, 41); }\n");
+}
+
+static int test_semantic_accepts_fifth_order_function_value_parameter_forwarding_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "fifth-order-function-value-parameter-forward-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+        "int relay(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return q(h, f, x); }\n"
+        "int meta(int r(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x), int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return r(q, h, f, x); }\n"
+        "int ultra(int s(int r(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x), int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x), int r(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x), int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return s(r, q, h, f, x); }\n"
+        "int main(){ return ultra(meta, relay, pass, apply, add1, 41); }\n");
+}
+
 static int test_semantic_accepts_dynamic_returned_function_value_parameter_immediate_call_under_extension(void) {
     return run_extension_semantic_expect_accepts(
         "dynamic-returned-function-value-parameter-immediate-call-pass",
@@ -4188,6 +4211,55 @@ static int test_semantic_accepts_local_function_value_reassignment_under_extensi
         "int main(){ int f(int)=add1; f=add2; return f(40); }\n");
 }
 
+static int test_semantic_accepts_declaration_only_local_function_value_assignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "decl-only-local-function-value-assignment-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int f(int); f=add1; return f(41); }\n");
+}
+
+static int test_semantic_accepts_declaration_only_local_closure_assignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "decl-only-local-closure-assignment-pass",
+        "int main(){ int y=3; int f(int); f=closure [y] int (int x) { return y + x; }; return f(5); }\n");
+}
+
+static int test_semantic_accepts_declaration_only_local_returned_function_value_assignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "decl-only-local-returned-function-value-assignment-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int pick()(int){ return add1; }\n"
+        "int main(){ int f(int); f=pick(); return f(41); }\n");
+}
+
+static int test_semantic_accepts_declaration_only_local_returned_closure_assignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "decl-only-local-returned-closure-assignment-pass",
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int main(){ int f(int); f=make(3); return f(5); }\n");
+}
+
+static int test_semantic_accepts_declaration_only_local_ternary_function_value_assignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "decl-only-local-ternary-function-value-assignment-pass",
+        "int add1(int x){ return x+1; }\n"
+        "int add2(int x){ return x+2; }\n"
+        "int main(){ int c=getint(); int f(int); f=(c?add1:add2); return f(40); }\n");
+}
+
+static int test_semantic_accepts_declaration_only_local_closure_alias_assignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "decl-only-local-closure-alias-assignment-pass",
+        "int main(){ int y=3; int g(int)=closure [y] int (int x){ return y+x; }; int f(int); f=g; return f(5); }\n");
+}
+
+static int test_semantic_accepts_declaration_only_local_returned_closure_alias_assignment_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "decl-only-local-returned-closure-alias-assignment-pass",
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int main(){ int g(int)=make(3); int f(int); f=g; return f(5); }\n");
+}
+
 static int test_semantic_accepts_returned_function_value_reassignment_under_extension(void) {
     return run_extension_semantic_expect_accepts(
         "returned-function-value-reassignment-pass",
@@ -4452,11 +4524,10 @@ static int test_semantic_rejects_comma_wrapped_closure_forward_into_function_val
         "SEMA-TYPE-003");
 }
 
-static int test_semantic_rejects_assignment_of_closure_literal_after_function_local_declaration_under_extension(void) {
-    return run_extension_semantic_expect_rejects(
-        "closure-assignment-after-local-decl-ext-reject",
-        "int main(){ int y=3; int f(int); f = closure [y] int (int z) { return y + z; }; return 0; }\n",
-        "SEMA-EXT-019");
+static int test_semantic_accepts_assignment_of_closure_literal_after_closure_local_declaration_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "closure-assignment-after-closure-local-decl-ext-pass",
+        "int main(){ int y=3; int z=4; int f(int)=closure [y] int (int x) { return y + x; }; f = closure [z] int (int x) { return z + x; }; return f(5); }\n");
 }
 
 static int test_semantic_accepts_zero_arg_closure_direct_local_call_under_extension(void) {

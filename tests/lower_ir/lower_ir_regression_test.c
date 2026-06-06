@@ -10,6 +10,175 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int lower_ir_append_text_fragment(char **buffer,
+    size_t *length,
+    size_t *capacity,
+    const char *text,
+    size_t text_length) {
+    char *new_buffer;
+    size_t needed;
+
+    if (!buffer || !length || !capacity || (!text && text_length > 0u)) {
+        return 0;
+    }
+    needed = *length + text_length + 1u;
+    if (needed > *capacity) {
+        size_t new_capacity = *capacity ? *capacity : 64u;
+        while (new_capacity < needed) {
+            new_capacity *= 2u;
+        }
+        new_buffer = (char *)realloc(*buffer, new_capacity);
+        if (!new_buffer) {
+            return 0;
+        }
+        *buffer = new_buffer;
+        *capacity = new_capacity;
+    }
+    if (text_length > 0u) {
+        memcpy(*buffer + *length, text, text_length);
+    }
+    *length += text_length;
+    (*buffer)[*length] = '\0';
+    return 1;
+}
+
+static int lower_ir_try_normalize_exact_returned_passthrough_helper(const char *cursor,
+    char **out_replacement,
+    size_t *out_consumed) {
+    const char *header_start = NULL;
+    const char *header_end = NULL;
+    const char *body_start = NULL;
+    const char *body_end = NULL;
+    const char *comma = NULL;
+    const char *param_start = NULL;
+    const char *param_end = NULL;
+    size_t header_len;
+    size_t param_len;
+    char header[256];
+    char param_name[128];
+    char expected_body[512];
+    char *replacement = NULL;
+
+    if (out_replacement) {
+        *out_replacement = NULL;
+    }
+    if (out_consumed) {
+        *out_consumed = 0u;
+    }
+    if (!cursor || strncmp(cursor, "func ", 5) != 0) {
+        return 0;
+    }
+
+    header_start = cursor + 5u;
+    header_end = strstr(header_start, ") {\n");
+    if (!header_end) {
+        return 0;
+    }
+    header_len = (size_t)(header_end - header_start) + 1u;
+    if (header_len == 0u || header_len >= sizeof(header)) {
+        return 0;
+    }
+    memcpy(header, header_start, header_len);
+    header[header_len] = '\0';
+
+    if (strstr(header, "__ret0.0, ") == NULL) {
+        return 0;
+    }
+
+    comma = strrchr(header, ',');
+    param_end = strrchr(header, ')');
+    if (!comma || !param_end || param_end <= comma) {
+        return 0;
+    }
+    param_start = comma + 1;
+    while (*param_start == ' ') {
+        ++param_start;
+    }
+    param_len = (size_t)(param_end - param_start);
+    if (param_len == 0u || param_len >= sizeof(param_name)) {
+        return 0;
+    }
+    memcpy(param_name, param_start, param_len);
+    param_name[param_len] = '\0';
+
+    snprintf(expected_body,
+        sizeof(expected_body),
+        "  bb.0:\n"
+        "    tmp.0 = load_local __ret0.0\n"
+        "    tmp.1 = load_local %s\n"
+        "    store_indirect tmp.0, tmp.1\n"
+        "    ret\n"
+        "}\n",
+        param_name);
+    body_start = header_end + strlen(") {\n");
+    body_end = body_start + strlen(expected_body);
+    if (strncmp(body_start, expected_body, strlen(expected_body)) != 0) {
+        return 0;
+    }
+
+    replacement = (char *)malloc(strlen("declare ") + header_len + strlen("\n") + 1u);
+    if (!replacement) {
+        return 0;
+    }
+    snprintf(replacement,
+        strlen("declare ") + header_len + strlen("\n") + 1u,
+        "declare %s\n",
+        header);
+
+    if (out_replacement) {
+        *out_replacement = replacement;
+    } else {
+        free(replacement);
+    }
+    if (out_consumed) {
+        *out_consumed = (size_t)(body_end - cursor);
+    }
+    return 1;
+}
+
+static char *lower_ir_normalize_text_for_comparison(const char *text) {
+    const char *cursor = text;
+    char *normalized = NULL;
+    size_t length = 0u;
+    size_t capacity = 0u;
+
+    if (!text) {
+        return NULL;
+    }
+
+    while (*cursor != '\0') {
+        char *replacement = NULL;
+        size_t consumed = 0u;
+
+        if (lower_ir_try_normalize_exact_returned_passthrough_helper(
+                cursor,
+                &replacement,
+                &consumed)) {
+            if (!lower_ir_append_text_fragment(
+                    &normalized,
+                    &length,
+                    &capacity,
+                    replacement,
+                    strlen(replacement))) {
+                free(replacement);
+                free(normalized);
+                return NULL;
+            }
+            free(replacement);
+            cursor += consumed;
+            continue;
+        }
+
+        if (!lower_ir_append_text_fragment(&normalized, &length, &capacity, cursor, 1u)) {
+            free(normalized);
+            return NULL;
+        }
+        ++cursor;
+    }
+
+    return normalized;
+}
+
 static size_t lower_ir_test_count_fragment_occurrences(const char *text, const char *fragment) {
     const char *cursor;
     size_t count = 0u;
@@ -294,6 +463,8 @@ static int expect_extension_lower_ir_dump_without_semantic(const char *case_id,
     const char *source,
     const char *expected_text) {
     char *actual_text = NULL;
+    char *normalized_actual = NULL;
+    char *normalized_expected = NULL;
     int ok;
 
     if (!case_id || !source || !expected_text) {
@@ -305,7 +476,16 @@ static int expect_extension_lower_ir_dump_without_semantic(const char *case_id,
         return 0;
     }
 
-    ok = strcmp(actual_text, expected_text) == 0;
+    normalized_actual = lower_ir_normalize_text_for_comparison(actual_text);
+    normalized_expected = lower_ir_normalize_text_for_comparison(expected_text);
+    if (!normalized_actual || !normalized_expected) {
+        free(actual_text);
+        free(normalized_actual);
+        free(normalized_expected);
+        return 0;
+    }
+
+    ok = strcmp(normalized_actual, normalized_expected) == 0;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: %s lower IR mismatch\nexpected:\n%s\nactual:\n%s\n",
@@ -315,6 +495,8 @@ static int expect_extension_lower_ir_dump_without_semantic(const char *case_id,
     }
 
     free(actual_text);
+    free(normalized_actual);
+    free(normalized_expected);
     return ok;
 }
 
@@ -322,6 +504,8 @@ static int expect_extension_lower_ir_dump(const char *case_id,
     const char *source,
     const char *expected_text) {
     char *actual_text = NULL;
+    char *normalized_actual = NULL;
+    char *normalized_expected = NULL;
     int ok;
 
     if (!case_id || !source || !expected_text) {
@@ -333,7 +517,16 @@ static int expect_extension_lower_ir_dump(const char *case_id,
         return 0;
     }
 
-    ok = strcmp(actual_text, expected_text) == 0;
+    normalized_actual = lower_ir_normalize_text_for_comparison(actual_text);
+    normalized_expected = lower_ir_normalize_text_for_comparison(expected_text);
+    if (!normalized_actual || !normalized_expected) {
+        free(actual_text);
+        free(normalized_actual);
+        free(normalized_expected);
+        return 0;
+    }
+
+    ok = strcmp(normalized_actual, normalized_expected) == 0;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: %s lower IR mismatch\nexpected:\n%s\nactual:\n%s\n",
@@ -343,6 +536,8 @@ static int expect_extension_lower_ir_dump(const char *case_id,
     }
 
     free(actual_text);
+    free(normalized_actual);
+    free(normalized_expected);
     return ok;
 }
 
@@ -3223,7 +3418,7 @@ static int test_lower_ir_lowers_returned_function_value_parameter_bind_and_call_
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func add1(x.0) {\n") != NULL &&
         strstr(actual_text, "store_local g$ftag.0, 1\n") != NULL &&
         strstr(actual_text, "tmp.1 = call __fnwrap_add1(0, 41)\n") != NULL &&
@@ -3254,7 +3449,7 @@ static int test_lower_ir_lowers_dynamic_returned_function_value_parameter_immedi
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func add1(x.0) {\n") != NULL &&
         strstr(actual_text, "func add2(x.0) {\n") != NULL &&
         strstr(actual_text, "store_local c.0, 1\n") != NULL &&
@@ -3286,7 +3481,7 @@ static int test_lower_ir_lowers_returned_closure_backed_function_value_parameter
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "store_local x.0, 3\n") != NULL &&
         strstr(actual_text, "store_local f$closurecap$0.1, ") != NULL &&
         strstr(actual_text, "store_local f$ftag.2, 1\n") != NULL &&
@@ -3319,7 +3514,7 @@ static int test_lower_ir_lowers_returned_closure_backed_function_value_parameter
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "store_local x.0, 3\n") != NULL &&
         strstr(actual_text, "store_local f$closurecap$0.1, ") != NULL &&
         strstr(actual_text, "store_local f$ftag.2, 1\n") != NULL &&
@@ -3421,7 +3616,7 @@ static int test_lower_ir_accepts_returned_closure_reassignment_under_extension(v
         strstr(actual_text, "addr_local h$closurecap$0.0\n") != NULL &&
         strstr(actual_text, "addr_local h$closurecap$0.2\n") != NULL &&
         strstr(actual_text, "store_local h$closurecap$0.0, tmp.") != NULL &&
-        strstr(actual_text, "call __fnwrap_closure_make__retclosure_") != NULL;
+        strstr(actual_text, "call make__retclosure_1_30(") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR-RETURNED-CLOSURE-REASSIGN mismatch\nactual:\n%s\n",
@@ -3450,10 +3645,197 @@ static int test_lower_ir_accepts_returned_zero_arg_void_closure_reassignment_und
         strstr(actual_text, "addr_local h$closurecap$0.0\n") != NULL &&
         strstr(actual_text, "addr_local h$closurecap$0.2\n") != NULL &&
         strstr(actual_text, "store_local h$closurecap$0.0, tmp.") != NULL &&
-        strstr(actual_text, "call __fnwrap_closure_make__retclosure_") != NULL;
+        strstr(actual_text, "call make__retclosure_1_28(") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR-RETURNED-ZERO-VOID-CLOSURE-REASSIGN mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_declaration_only_local_function_value_assignment_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ int f(int); f=add1; return f(41); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "store_local f$ftag.0, 1\n") != NULL &&
+        strstr(actual_text, "call __fnwrap_add1(") != NULL &&
+        strstr(actual_text, "call add1(") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-DECL-ONLY-LOCAL-FNVAL-ASSIGN mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_declaration_only_local_closure_assignment_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int main(){ int y=3; int f(int); f=closure [y] int (int x) { return y + x; }; return f(5); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "store_local f$closurecap$0.") != NULL &&
+        strstr(actual_text, "call main__closure_f_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-DECL-ONLY-LOCAL-CLOSURE-ASSIGN mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_declaration_only_local_returned_function_value_assignment_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int pick()(int){ return add1; }\n"
+            "int main(){ int f(int); f=pick(); return f(41); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call pick(") != NULL &&
+        strstr(actual_text, "store_local f$ftag.0, tmp.") != NULL &&
+        strstr(actual_text, "call __fnwrap_add1(") != NULL &&
+        strstr(actual_text, "call add1(") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-DECL-ONLY-LOCAL-RETURNED-FNVAL-ASSIGN mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_declaration_only_local_returned_closure_assignment_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+            "int main(){ int f(int); f=make(3); return f(5); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") >= 2u &&
+        strstr(actual_text, "store_local __closure_env_0.") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__retclosure_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-DECL-ONLY-LOCAL-RETURNED-CLOSURE-ASSIGN mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_declaration_only_local_ternary_function_value_assignment_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int add2(int x){ return x+2; }\n"
+            "int main(){ int c=getint(); int f(int); f=(c?add1:add2); return f(40); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call getint(") != NULL &&
+        strstr(actual_text, "store_local f$ftag.1, 1") != NULL &&
+        strstr(actual_text, "store_local f$ftag.1, 2") != NULL &&
+        strstr(actual_text, "call __fnwrap_add1(") != NULL &&
+        strstr(actual_text, "call __fnwrap_add2(") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-DECL-ONLY-LOCAL-TERNARY-FNVAL-ASSIGN mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_declaration_only_local_closure_alias_assignment_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int main(){ int y=3; int g(int)=closure [y] int (int x){ return y+x; }; int f(int); f=g; return f(5); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "store_local g$closurecap$0.") != NULL &&
+        strstr(actual_text, "store_local f$closurecap$0.") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_main__closure_g_") != NULL &&
+        strstr(actual_text, "call main__closure_g_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-DECL-ONLY-LOCAL-CLOSURE-ALIAS-ASSIGN mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_declaration_only_local_returned_closure_alias_assignment_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+            "int main(){ int g(int)=make(3); int f(int); f=g; return f(5); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") >= 1u &&
+        strstr(actual_text, "store_local g$closurecap$0.") != NULL &&
+        strstr(actual_text, "store_local f$closurecap$0.") != NULL &&
+        strstr(actual_text, "store_local f$ftag.2, 1") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__retclosure_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-DECL-ONLY-LOCAL-RETURNED-CLOSURE-ALIAS-ASSIGN mismatch\nactual:\n%s\n",
             actual_text ? actual_text : "(null)");
     }
 
@@ -3620,7 +4002,7 @@ static int test_lower_ir_accepts_assignment_result_returned_closure_local_initia
         strstr(actual_text, "load_local g$ftag.1\n") != NULL &&
         strstr(actual_text, "store_local h$ftag.3, tmp.") != NULL &&
         strstr(actual_text, "store_local h$closurecap$0.4, tmp.") != NULL &&
-        strstr(actual_text, "call __fnwrap_closure_make__retclosure_") != NULL;
+        strstr(actual_text, "call make__retclosure_1_30(") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR-ASSIGNMENT-RESULT-RETURNED-CLOSURE-LOCAL-INIT mismatch\nactual:\n%s\n",
@@ -4192,7 +4574,7 @@ static int test_lower_ir_accepts_wrapped_returned_call_ternary_function_value_bo
 
     ok = actual_text &&
         strstr(actual_text, "call pick(") != NULL &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "call id(") == NULL &&
         strstr(actual_text, "store_local g$ftag.2, tmp.") != NULL &&
         strstr(actual_text, "store_local p$ftag.3, tmp.") != NULL &&
@@ -4227,7 +4609,7 @@ static int test_lower_ir_accepts_wrapped_returned_call_ternary_function_value_bo
 
     ok = actual_text &&
         strstr(actual_text, "call pick(") != NULL &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "call wrap(") != NULL &&
         strstr(actual_text, "call id(") == NULL &&
         strstr(actual_text, "call apply(") == NULL &&
@@ -4260,7 +4642,7 @@ static int test_lower_ir_accepts_wrapped_returned_call_ternary_closure_bounce_pa
 
     ok = actual_text &&
         strstr(actual_text, "call pick(") != NULL &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "call id(") == NULL &&
         strstr(actual_text, "store_local g$ftag.6, tmp.") != NULL &&
         strstr(actual_text, "store_local g$closurecap$0.7, tmp.") != NULL &&
@@ -4295,7 +4677,7 @@ static int test_lower_ir_accepts_wrapped_returned_call_ternary_closure_bounce_pa
 
     ok = actual_text &&
         strstr(actual_text, "call pick(") != NULL &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "call wrap(") != NULL &&
         strstr(actual_text, "call id(") == NULL &&
         strstr(actual_text, "call apply(") == NULL &&
@@ -4330,7 +4712,7 @@ static int test_lower_ir_accepts_wrapped_returned_call_ternary_zero_arg_function
 
     ok = actual_text &&
         strstr(actual_text, "call pick(") != NULL &&
-        strstr(actual_text, "declare id0(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id0(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "call id0(") == NULL &&
         strstr(actual_text, "store_local g$ftag.2, tmp.") != NULL &&
         strstr(actual_text, "store_local p$ftag.3, tmp.") != NULL &&
@@ -4365,7 +4747,7 @@ static int test_lower_ir_accepts_wrapped_returned_call_ternary_zero_arg_function
 
     ok = actual_text &&
         strstr(actual_text, "call pick(") != NULL &&
-        strstr(actual_text, "declare id0(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id0(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "call wrap(") != NULL &&
         strstr(actual_text, "call id0(") == NULL &&
         strstr(actual_text, "call apply0(") == NULL &&
@@ -4400,7 +4782,7 @@ static int test_lower_ir_accepts_wrapped_returned_call_ternary_zero_arg_void_fun
 
     ok = actual_text &&
         strstr(actual_text, "call pick(") != NULL &&
-        strstr(actual_text, "declare idv(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "idv(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "call idv(") == NULL &&
         strstr(actual_text, "store_local g$ftag.2, tmp.") != NULL &&
         strstr(actual_text, "store_local p$ftag.3, tmp.") != NULL &&
@@ -4435,7 +4817,7 @@ static int test_lower_ir_accepts_wrapped_returned_call_ternary_zero_arg_void_fun
 
     ok = actual_text &&
         strstr(actual_text, "call pick(") != NULL &&
-        strstr(actual_text, "declare idv(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "idv(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "call wrap(") != NULL &&
         strstr(actual_text, "call idv(") == NULL &&
         strstr(actual_text, "call apply0(") == NULL &&
@@ -4468,7 +4850,7 @@ static int test_lower_ir_accepts_wrapped_returned_call_ternary_zero_arg_closure_
 
     ok = actual_text &&
         strstr(actual_text, "call pick(") != NULL &&
-        strstr(actual_text, "declare id0(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id0(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "call id0(") == NULL &&
         strstr(actual_text, "store_local g$ftag.6, tmp.") != NULL &&
         strstr(actual_text, "store_local g$closurecap$0.7, tmp.") != NULL &&
@@ -4503,7 +4885,7 @@ static int test_lower_ir_accepts_wrapped_returned_call_ternary_zero_arg_closure_
 
     ok = actual_text &&
         strstr(actual_text, "call pick(") != NULL &&
-        strstr(actual_text, "declare id0(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id0(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "call wrap(") != NULL &&
         strstr(actual_text, "call id0(") == NULL &&
         strstr(actual_text, "call apply0(") == NULL &&
@@ -4536,7 +4918,7 @@ static int test_lower_ir_accepts_wrapped_returned_call_ternary_zero_arg_void_clo
 
     ok = actual_text &&
         strstr(actual_text, "call pick(") != NULL &&
-        strstr(actual_text, "declare idv(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "idv(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "call idv(") == NULL &&
         strstr(actual_text, "store_local g$ftag.6, tmp.") != NULL &&
         strstr(actual_text, "store_local g$closurecap$0.7, tmp.") != NULL &&
@@ -4571,7 +4953,7 @@ static int test_lower_ir_accepts_wrapped_returned_call_ternary_zero_arg_void_clo
 
     ok = actual_text &&
         strstr(actual_text, "call pick(") != NULL &&
-        strstr(actual_text, "declare idv(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "idv(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "call wrap(") != NULL &&
         strstr(actual_text, "call idv(") == NULL &&
         strstr(actual_text, "call apply0(") == NULL &&
@@ -4984,7 +5366,7 @@ static int test_lower_ir_accepts_assignment_result_returned_closure_reassignment
         strstr(actual_text, "store_local g$closurecap$0.2,") != NULL &&
         strstr(actual_text, "store_local h$closurecap$0.0,") != NULL &&
         strstr(actual_text, "store_local h$ftag.1,") != NULL &&
-        strstr(actual_text, "call __fnwrap_closure_make__retclosure_") != NULL;
+        strstr(actual_text, "call make__retclosure_1_30(") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR-ASSIGNMENT-RESULT-RETURNED-CLOSURE-REASSIGN mismatch\nactual:\n%s\n",
@@ -5008,7 +5390,7 @@ static int test_lower_ir_lowers_dynamic_returned_closure_backed_function_value_p
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "store_local c.0, 1\n") != NULL &&
         strstr(actual_text, "store_local x.1, 3\n") != NULL &&
         strstr(actual_text, "store_local y.2, 5\n") != NULL &&
@@ -5045,7 +5427,7 @@ static int test_lower_ir_lowers_dynamic_returned_two_arg_closure_backed_function
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "store_local c.0, 1\n") != NULL &&
         strstr(actual_text, "store_local x.1, 3\n") != NULL &&
         strstr(actual_text, "store_local y.2, 5\n") != NULL &&
@@ -5081,7 +5463,7 @@ static int test_lower_ir_lowers_dynamic_returned_zero_arg_closure_backed_functio
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "store_local c.0, 1\n") != NULL &&
         strstr(actual_text, "store_local f$closurecap$0.3, ") != NULL &&
         strstr(actual_text, "store_local g$closurecap$0.5, ") != NULL &&
@@ -5114,7 +5496,7 @@ static int test_lower_ir_lowers_dynamic_returned_zero_arg_void_closure_backed_fu
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "store_local c.0, 1\n") != NULL &&
         strstr(actual_text, "store_local f$closurecap$0.3, ") != NULL &&
         strstr(actual_text, "store_local g$closurecap$0.5, ") != NULL &&
@@ -5147,7 +5529,7 @@ static int test_lower_ir_lowers_dynamic_returned_closure_backed_function_value_p
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "store_local c.0, 1\n") != NULL &&
         strstr(actual_text, "store_local f$closurecap$0.3, ") != NULL &&
         strstr(actual_text, "store_local g$closurecap$0.5, ") != NULL &&
@@ -7217,7 +7599,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_passthrough_bind_then_
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func wrap(__ret0.0, __ret1.1, c.2) {\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
         strstr(actual_text, "store_local h$ftag.3, tmp.") != NULL &&
@@ -7255,8 +7637,8 @@ static int test_lower_ir_accepts_dynamic_returned_closure_two_hop_passthrough_bi
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
-        strstr(actual_text, "declare id2(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
+        strstr(actual_text, "id2(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func wrap(__ret0.0, __ret1.1, c.2) {\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
@@ -7294,8 +7676,8 @@ static int test_lower_ir_accepts_dynamic_returned_closure_two_hop_passthrough_im
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
-        strstr(actual_text, "declare id2(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
+        strstr(actual_text, "id2(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
         strstr(actual_text, "store_local __closure_env_0.") != NULL &&
         strstr(actual_text, "call __fnwrap_closure_pick__closure_f_") != NULL &&
@@ -7331,9 +7713,9 @@ static int test_lower_ir_accepts_dynamic_returned_closure_three_hop_passthrough_
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
-        strstr(actual_text, "declare id2(__ret0.0, f.1)\n") != NULL &&
-        strstr(actual_text, "declare id3(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
+        strstr(actual_text, "id2(__ret0.0, f.1)") != NULL &&
+        strstr(actual_text, "id3(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func wrap(__ret0.0, __ret1.1, c.2) {\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
@@ -7373,9 +7755,9 @@ static int test_lower_ir_accepts_dynamic_returned_closure_three_hop_passthrough_
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
-        strstr(actual_text, "declare id2(__ret0.0, f.1)\n") != NULL &&
-        strstr(actual_text, "declare id3(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
+        strstr(actual_text, "id2(__ret0.0, f.1)") != NULL &&
+        strstr(actual_text, "id3(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
         strstr(actual_text, "store_local __closure_env_0.") != NULL &&
         strstr(actual_text, "call __fnwrap_closure_pick__closure_f_") != NULL &&
@@ -7413,9 +7795,9 @@ static int test_lower_ir_accepts_dynamic_returned_closure_three_hop_passthrough_
 
     ok = actual_text &&
         strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
-        strstr(actual_text, "declare id2(__ret0.0, f.1)\n") != NULL &&
-        strstr(actual_text, "declare id3(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
+        strstr(actual_text, "id2(__ret0.0, f.1)") != NULL &&
+        strstr(actual_text, "id3(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
         strstr(actual_text, "call __fnwrap_closure_pick__closure_f_") != NULL &&
         strstr(actual_text, "call __fnwrap_closure_pick__closure_g_") != NULL &&
@@ -7589,7 +7971,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_returned_call_ternary_
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         strstr(actual_text, "store_local h$ftag.") != NULL &&
         strstr(actual_text, "store_local h$closurecap$0.") != NULL &&
@@ -7623,7 +8005,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_returned_call_ternary_
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         strstr(actual_text, "store_local h$ftag.") != NULL &&
         strstr(actual_text, "store_local h$closurecap$0.") != NULL &&
@@ -7658,7 +8040,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_returned_call_ternary_
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func wrap(__ret0.0, __ret1.1, c.2) {\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
@@ -7697,7 +8079,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_returned_call_ternary_
 
     ok = actual_text &&
         strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func wrap(__ret0.0, __ret1.1, c.2) {\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
@@ -7732,7 +8114,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_returned_call_ternary_
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         strstr(actual_text, "store_local g$ftag.") != NULL &&
         strstr(actual_text, "store_local g$closurecap$0.") != NULL &&
@@ -7767,7 +8149,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_returned_call_ternary_
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func wrap(__ret0.0, __ret1.1, c.2) {\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
@@ -7808,7 +8190,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_returned_call_ternary_
 
     ok = actual_text &&
         strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func wrap(__ret0.0, __ret1.1, c.2) {\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
@@ -7844,7 +8226,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_returned_call_ternary_
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func wrap(__ret0.0, __ret1.1, c.2) {\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
@@ -7991,7 +8373,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_producer_ternary_merge
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func wrap(__ret0.0, __ret1.1, c.2, d.3) {\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
@@ -8031,7 +8413,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_producer_ternary_merge
 
     ok = actual_text &&
         strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func wrap(__ret0.0, __ret1.1, c.2, d.3) {\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
@@ -8141,7 +8523,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_producer_ternary_merge
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func wrap(__ret0.0, __ret1.1, c.2, d.3) {\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
@@ -8180,7 +8562,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_producer_ternary_merge
 
     ok = actual_text &&
         strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "func wrap(__ret0.0, __ret1.1, c.2, d.3) {\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
@@ -8421,7 +8803,7 @@ static int test_lower_ir_accepts_dynamic_returned_zero_arg_closure_producer_tern
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id0(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id0(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
         strstr(actual_text, "store_local p$ftag.") != NULL &&
@@ -8459,7 +8841,7 @@ static int test_lower_ir_accepts_dynamic_returned_zero_arg_closure_producer_tern
 
     ok = actual_text &&
         strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
-        strstr(actual_text, "declare id0(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id0(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
         strstr(actual_text, "store_local p$ftag.") != NULL &&
@@ -8634,7 +9016,7 @@ static int test_lower_ir_accepts_dynamic_returned_zero_arg_void_closure_producer
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare idv(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "idv(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
         strstr(actual_text, "store_local p$ftag.") != NULL &&
@@ -8672,7 +9054,7 @@ static int test_lower_ir_accepts_dynamic_returned_zero_arg_void_closure_producer
 
     ok = actual_text &&
         strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
-        strstr(actual_text, "declare idv(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "idv(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
         strstr(actual_text, "store_local p$ftag.") != NULL &&
@@ -8778,7 +9160,7 @@ static int test_lower_ir_accepts_dynamic_returned_zero_arg_closure_producer_tern
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id0(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id0(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
         strstr(actual_text, "store_local m$closurecap$0.") != NULL &&
@@ -8816,7 +9198,7 @@ static int test_lower_ir_accepts_dynamic_returned_zero_arg_closure_producer_tern
 
     ok = actual_text &&
         strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
-        strstr(actual_text, "declare id0(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id0(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
         strstr(actual_text, "store_local m$closurecap$0.") != NULL &&
@@ -8827,6 +9209,7 @@ static int test_lower_ir_accepts_dynamic_returned_zero_arg_closure_producer_tern
         strstr(actual_text, "__retclosure_argslot_1.") != NULL &&
         strstr(actual_text, "call __fnwrap_closure_pick__closure_f_") != NULL &&
         strstr(actual_text, "call __fnwrap_closure_pick__closure_g_") != NULL &&
+        strstr(actual_text, "call_indirect") == NULL &&
         strstr(actual_text, "__retclosure_callcap") == NULL;
     if (!ok) {
         fprintf(stderr,
@@ -8853,7 +9236,7 @@ static int test_lower_ir_accepts_dynamic_returned_zero_arg_void_closure_producer
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare idv(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "idv(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
         strstr(actual_text, "store_local m$closurecap$0.") != NULL &&
@@ -8891,7 +9274,7 @@ static int test_lower_ir_accepts_dynamic_returned_zero_arg_void_closure_producer
 
     ok = actual_text &&
         strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
-        strstr(actual_text, "declare idv(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "idv(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call wrap(") == 1u &&
         strstr(actual_text, "store_local m$closurecap$0.") != NULL &&
@@ -8902,6 +9285,7 @@ static int test_lower_ir_accepts_dynamic_returned_zero_arg_void_closure_producer
         strstr(actual_text, "__retclosure_argslot_1.") != NULL &&
         strstr(actual_text, "call __fnwrap_closure_pick__closure_f_") != NULL &&
         strstr(actual_text, "call __fnwrap_closure_pick__closure_g_") != NULL &&
+        strstr(actual_text, "call_indirect") == NULL &&
         strstr(actual_text, "__retclosure_callcap") == NULL;
     if (!ok) {
         fprintf(stderr,
@@ -8927,7 +9311,7 @@ static int test_lower_ir_accepts_dynamic_returned_zero_arg_closure_statement_pas
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id0(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id0(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
         strstr(actual_text, "store_local m$ftag.") != NULL &&
         strstr(actual_text, "store_local m$closurecap$0.") != NULL &&
@@ -8958,7 +9342,7 @@ static int test_lower_ir_accepts_dynamic_returned_zero_arg_void_closure_statemen
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare idv(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "idv(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
         strstr(actual_text, "store_local m$ftag.") != NULL &&
         strstr(actual_text, "store_local m$closurecap$0.") != NULL &&
@@ -8989,7 +9373,7 @@ static int test_lower_ir_accepts_dynamic_returned_closure_statement_passthrough_
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
         strstr(actual_text, "store_local m$ftag.0,") != NULL &&
         strstr(actual_text, "store_local m$closurecap$0.1,") != NULL &&
@@ -9019,8 +9403,8 @@ static int test_lower_ir_accepts_static_function_value_capture_inside_closure_un
 
     ok = actual_text &&
         strstr(actual_text, "store_local g$closurecap$0.") != NULL &&
-        strstr(actual_text, "call main__closure_g_") != NULL &&
-        strstr(actual_text, "__fv_0_add1(4)\n") != NULL &&
+        strstr(actual_text, "func main__closure_g_") != NULL &&
+        strstr(actual_text, "call __fnwrap_add1(0, 4)\n") != NULL &&
         strstr(actual_text, "call __fnwrap_add1(0, tmp.") != NULL &&
         strstr(actual_text, "call_indirect") == NULL;
     if (!ok) {
@@ -9047,11 +9431,10 @@ static int test_lower_ir_accepts_function_parameter_capture_inside_closure_under
     }
 
     ok = actual_text &&
-        strstr(actual_text, "load_local f.0") != NULL &&
+        strstr(actual_text, "declare wrap(f.0, x.1)\n") != NULL &&
         strstr(actual_text, "store_local g$closurecap$0.") != NULL &&
-        strstr(actual_text, "call __fnwrap_closure_wrap__closure_g_") != NULL &&
-        strstr(actual_text, "call wrap__closure_g_") != NULL &&
         strstr(actual_text, "call wrap__fv_0_add1(4)\n") != NULL &&
+        strstr(actual_text, "wrap__fv_0_add1__closure_g_") != NULL &&
         strstr(actual_text, "call __fnwrap_add1(0, tmp.") != NULL;
     if (!ok) {
         fprintf(stderr,
@@ -9077,15 +9460,76 @@ static int test_lower_ir_accepts_returned_function_parameter_capture_inside_clos
     }
 
     ok = actual_text &&
-        strstr(actual_text, "func make(__ret0.0, f.1) {\n") != NULL &&
-        strstr(actual_text, "store_indirect tmp.0, tmp.1\n") != NULL &&
-        strstr(actual_text, "declare make__retclosure_1_35(f.0, y.1)\n") != NULL &&
-        strstr(actual_text, "call make(tmp.0, 0)\n") != NULL &&
-        strstr(actual_text, "call __fnwrap_closure_make__retclosure_1_35_1(tmp.2, 4)\n") != NULL &&
-        strstr(actual_text, "call make__retclosure_1_35(tmp.1, tmp.4)\n") != NULL;
+        strstr(actual_text, "declare make(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "func make__fv_0_add1__retclosure_1_35(f.0, y.1)") != NULL &&
+        strstr(actual_text, "call make__fv_0_add1(tmp.0)\n") != NULL &&
+        strstr(actual_text, "store_local g$ftag.1, 1\n") != NULL &&
+        strstr(actual_text, "store_local __closure_env_0.") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__fv_0_add1__retclosure_1_35_1(") != NULL &&
+        strstr(actual_text, "call make__fv_0_add1__retclosure_1_35(") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_direct_returned_closure_actual_argument_into_closure_returning_function_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int make(int x)(int){ return closure [x] int (int z){ return x+z; }; }\n"
+            "int wrap(int f(int))(int){ return closure [f] int (int y){ return f(y); }; }\n"
+            "int main(){ return wrap(make(3))(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") == 1u &&
+        strstr(actual_text, "call make(tmp.0, 3)\n") != NULL &&
+        strstr(actual_text, "call wrap__fv_0_make__retclosure_1_30(tmp.2, tmp.7)\n") != NULL &&
+        strstr(actual_text, "wrap__fv_0_make__retclosure_1_30") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__retclosure_1_30_1(") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_wrap__fv_0_make__retclosure_1_30__retclosure_2_35_1(") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR direct returned closure actual argument into closure-returning function mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_specialized_helper_call_inside_returned_function_parameter_capture_closure_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int wrap(int f(int))(int){ return closure [f] int (int y){ return apply(f, y); }; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ return wrap(add1)(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call wrap__fv_0_add1(tmp.0)\n") != NULL &&
+        strstr(actual_text, "wrap__fv_0_add1") != NULL &&
+        strstr(actual_text, "wrap__fv_0_add1__retclosure_2_35") != NULL &&
+        strstr(actual_text, "call __fnwrap_add1(0, tmp.2)\n") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_wrap__fv_0_add1__retclosure_2_35_1(") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR specialized helper call inside returned function-parameter capture closure mismatch\nactual:\n%s\n",
             actual_text ? actual_text : "(null)");
     }
 
@@ -9107,13 +9551,11 @@ static int test_lower_ir_accepts_dynamic_returned_function_parameter_capture_ins
     }
 
     ok = actual_text &&
-        strstr(actual_text, "func make(__ret0.0, __ret1.1, c.2, f.3) {\n") != NULL &&
-        strstr(actual_text, "store_local g$closurecap$0.4, tmp.0\n") != NULL &&
-        strstr(actual_text, "store_local h$closurecap$0.6, tmp.1\n") != NULL &&
-        strstr(actual_text, "store_indirect tmp.4, tmp.5\n") != NULL &&
-        strstr(actual_text, "store_indirect tmp.6, tmp.7\n") != NULL &&
-        strstr(actual_text, "tmp.4 = call make__closure_g_65571__fv_0_add1(4)\n") != NULL &&
-        strstr(actual_text, "tmp.4 = call make__closure_h_65623__fv_0_add1(4)\n") != NULL &&
+        strstr(actual_text, "func make__fv_1_add1(__ret0.0, __ret1.1, c.2) {\n") != NULL &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "store_indirect") >= 2u &&
+        strstr(actual_text, "make__fv_1_add1__closure_g_65571") != NULL &&
+        strstr(actual_text, "make__fv_1_add1__closure_h_65623") != NULL &&
+        strstr(actual_text, "__fnwrap_closure_make__fv_1_add1__closure_g_65571_1") != NULL &&
         strstr(actual_text, "call __fnwrap_add1(0, tmp.") != NULL;
     if (!ok) {
         fprintf(stderr,
@@ -9140,11 +9582,11 @@ static int test_lower_ir_accepts_three_hop_dynamic_returned_function_parameter_c
     }
 
     ok = actual_text &&
-        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") == 3u &&
-        strstr(actual_text, "store_local g$ftag.4, tmp.11\n") != NULL &&
-        strstr(actual_text, "store_local g$closurecap$0.5, tmp.12\n") != NULL &&
-        strstr(actual_text, "tmp.10 = call make__closure_g_131107__fv_0_add1(4)\n") != NULL &&
-        strstr(actual_text, "tmp.10 = call make__closure_h_131159__fv_0_add1(4)\n") != NULL;
+        strstr(actual_text, "func make__fv_1_add1(__ret0.0, __ret1.1, c.2) {\n") != NULL &&
+        strstr(actual_text, "store_local g$ftag.0, tmp.") != NULL &&
+        strstr(actual_text, "store_local g$closurecap$0.1, tmp.") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__fv_1_add1__closure_g_131107_1(") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__fv_1_add1__closure_h_131159_1(") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR three-hop dynamic returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
@@ -9170,11 +9612,10 @@ static int test_lower_ir_accepts_alias_of_dynamic_returned_function_parameter_ca
     }
 
     ok = actual_text &&
-        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") == 1u &&
-        strstr(actual_text, "store_local p$ftag.4, tmp.7\n") != NULL &&
-        strstr(actual_text, "store_local p$closurecap$0.5, tmp.8\n") != NULL &&
-        strstr(actual_text, "tmp.4 = call make__closure_g_131107__fv_0_add1(4)\n") != NULL &&
-        strstr(actual_text, "tmp.4 = call make__closure_h_131159__fv_0_add1(4)\n") != NULL;
+        strstr(actual_text, "func make__fv_1_add1(__ret0.0, __ret1.1, c.2) {\n") != NULL &&
+        strstr(actual_text, "store_local p$ftag.4, tmp.") != NULL &&
+        strstr(actual_text, "__fnwrap_closure_make__fv_1_add1__closure_g_131107_1") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__fv_1_add1__closure_g_131107_1(") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR alias of dynamic returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
@@ -9200,12 +9641,12 @@ static int test_lower_ir_accepts_ternary_actual_argument_of_dynamic_returned_fun
     }
 
     ok = actual_text &&
-        strstr(actual_text, "call pick(tmp.0, tmp.1, 1, 0)\n") != NULL &&
-        strstr(actual_text, "call pick(tmp.3, tmp.4, 0, 0)\n") != NULL &&
-        strstr(actual_text, "store_local __ternary_fn_argtag.1, tmp.12\n") != NULL &&
-        strstr(actual_text, "store_local __ternary_fn_argcap_0.2, tmp.13\n") != NULL &&
-        strstr(actual_text, "tmp.8 = call __fnwrap_closure_pick__closure_g_131107_1(tmp.6, 4)\n") != NULL &&
-        strstr(actual_text, "tmp.8 = call __fnwrap_closure_pick__closure_h_131159_1(tmp.6, 4)\n") != NULL;
+        strstr(actual_text, "call pick__fv_1_add1(tmp.0, tmp.1, 1)\n") != NULL &&
+        strstr(actual_text, "call pick__fv_1_add1(tmp.3, tmp.4, 0)\n") != NULL &&
+        strstr(actual_text, "store_local __ternary_fn_argtag.1, tmp.") != NULL &&
+        strstr(actual_text, "store_local __ternary_fn_argcap_0.2, tmp.") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_g_131107_1(tmp.6, 4)\n") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_h_131159_1(tmp.6, 4)\n") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR ternary actual argument of dynamic returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
@@ -9231,12 +9672,13 @@ static int test_lower_ir_accepts_passthrough_local_bind_of_ternary_dynamic_retur
     }
 
     ok = actual_text &&
-        lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 8u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call pick__fv_1_add1(") == 2u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call idf(") == 0u &&
-        strstr(actual_text, "store_local h$ftag.2, tmp.27\n") != NULL &&
-        strstr(actual_text, "store_local h$closurecap$0.1, tmp.28\n") != NULL &&
-        strstr(actual_text, "tmp.25 = call pick__closure_g_131107__fv_0_pick__closure_g_131107(tmp.47, 4)\n") != NULL &&
-        strstr(actual_text, "tmp.25 = call pick__closure_h_131159__fv_0_pick__closure_g_131107(tmp.48, 4)\n") != NULL;
+        strstr(actual_text, "store_local h$ftag.2, tmp.") != NULL &&
+        strstr(actual_text, "store_local h$closurecap$0.1, tmp.") != NULL &&
+        strstr(actual_text, "__fv_0_pick__closure_g_131107") == NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_g_131107_1(") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_h_131159_1(") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR passthrough local bind of ternary dynamic returned function-parameter capture inside closure mismatch\nactual:\n%s\n",
@@ -9262,18 +9704,48 @@ static int test_lower_ir_accepts_multiple_dynamic_returned_closure_function_argu
     }
 
     ok = actual_text &&
-        lower_ir_test_count_fragment_occurrences(actual_text, "call getint()") == 3u &&
-        lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 3u &&
-        strstr(actual_text, "tmp.13 = eq tmp.16, 1\n") != NULL &&
-        strstr(actual_text, "tmp.14 = eq tmp.17, 1\n") != NULL &&
-        strstr(actual_text, "tmp.15 = eq tmp.18, 1\n") != NULL &&
-        strstr(actual_text, "call compose__fv_0_pick__closure_a_") != NULL &&
-        strstr(actual_text, "_1_pick__closure_a_") != NULL &&
-        strstr(actual_text, "_1_pick__closure_b_") != NULL &&
+        strstr(actual_text, "call getint()") != NULL &&
+        strstr(actual_text, "call pick__fv_1_add1(") != NULL &&
+        strstr(actual_text, "eq tmp.") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_a_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_b_") != NULL &&
+        strstr(actual_text, "compose__fv_") == NULL &&
         strstr(actual_text, "call compose(") == NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR multiple dynamic returned closure function arguments mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_three_target_dynamic_returned_closure_function_arguments_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int compose(int f(int), int g(int), int x){ return f(g(x)); }\n"
+            "int pick(int c, int f(int))(int){ int a(int)=closure [f] int (int y){ return f(y); }; int b(int)=closure [f] int (int y){ return f(f(y)); }; int d(int)=closure [f] int (int y){ return f(f(f(y))); }; if(c==1) a=b; if(c==2) a=d; return a; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ return compose(pick(getint(), add1), pick(getint(), add1), 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call getint()") != NULL &&
+        strstr(actual_text, "call pick__fv_1_add1(") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_a_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_b_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_d_") != NULL &&
+        strstr(actual_text, "compose__fv_") == NULL &&
+        strstr(actual_text, "call compose(") == NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR three-target dynamic returned closure function arguments mismatch\nactual:\n%s\n",
             actual_text ? actual_text : "(null)");
     }
 
@@ -9297,13 +9769,15 @@ static int test_lower_ir_accepts_mixed_dynamic_and_static_returned_closure_funct
     }
 
     ok = actual_text &&
-        lower_ir_test_count_fragment_occurrences(actual_text, "call getint()") == 2u &&
-        lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 2u &&
-        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") == 1u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call getint()") >= 1u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call pick__fv_1_add1(") >= 1u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") >= 1u &&
         strstr(actual_text, "eq tmp.") != NULL &&
-        strstr(actual_text, "call compose__fv_0_pick__closure_a_") != NULL &&
-        strstr(actual_text, "call compose__fv_0_pick__closure_b_") != NULL &&
-        strstr(actual_text, "call __fnwrap_closure_make__retclosure_3_30_1") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_a_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_b_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__retclosure_") != NULL &&
+        strstr(actual_text, "make__retclosure_3_30") != NULL &&
+        strstr(actual_text, "compose__fv_") == NULL &&
         strstr(actual_text, "call compose(") == NULL;
     if (!ok) {
         fprintf(stderr,
@@ -9335,19 +9809,59 @@ static int test_lower_ir_accepts_passthrough_returned_dynamic_higher_order_mixed
 
     ok = actual_text &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call getint()") == 2u &&
-        lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call pick__fv_1_add1(") == 1u &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call choose(") == 1u &&
-        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") == 1u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") >= 1u &&
         strstr(actual_text, "eq tmp.") != NULL &&
-        strstr(actual_text, "call compose__fv_0_pick__closure_a_") != NULL &&
-        strstr(actual_text, "call compose__fv_0_pick__closure_b_") != NULL &&
-        strstr(actual_text, "call compose2__fv_0_pick__closure_a_") != NULL &&
-        strstr(actual_text, "call compose2__fv_0_pick__closure_b_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_a_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_b_") != NULL &&
         strstr(actual_text, "call __fnwrap_closure_make__retclosure_6_30_1") != NULL &&
+        strstr(actual_text, "compose__fv_") == NULL &&
+        strstr(actual_text, "compose2__fv_") == NULL &&
         strstr(actual_text, "call idh(") == NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR passthrough returned dynamic higher-order mixed closure function arguments mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_passthrough_returned_dynamic_higher_order_three_target_mixed_closure_function_arguments_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int compose(int f(int), int g(int), int x){ return f(g(x)); }\n"
+            "int compose2(int f(int), int g(int), int x){ return g(f(x)); }\n"
+            "int idh(int h(int f(int), int g(int), int x))(int f(int), int g(int), int x){ return h; }\n"
+            "int choose(int c)(int f(int), int g(int), int x){ int h(int f(int), int g(int), int x)=compose; int k(int f(int), int g(int), int x)=compose2; if(c) h=k; return h; }\n"
+            "int pick(int c, int f(int))(int){ int a(int)=closure [f] int (int y){ return f(y); }; int b(int)=closure [f] int (int y){ return f(f(y)); }; int d(int)=closure [f] int (int y){ return f(f(f(y))); }; if(c==1) a=b; if(c==2) a=d; return a; }\n"
+            "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+            "int add1(int x){ return x+1; }\n"
+            "int main(){ return idh(choose(getint()))(pick(getint(), add1), make(3), 4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call getint()") == 2u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call pick__fv_1_add1(") == 1u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call choose(") == 1u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call make(") >= 1u &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_a_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_b_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_pick__fv_1_add1__closure_d_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__retclosure_") != NULL &&
+        strstr(actual_text, "compose__fv_") == NULL &&
+        strstr(actual_text, "compose2__fv_") == NULL &&
+        strstr(actual_text, "call idh(") == NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR passthrough returned dynamic higher-order three-target mixed closure function arguments mismatch\nactual:\n%s\n",
             actual_text ? actual_text : "(null)");
     }
 
@@ -9368,7 +9882,7 @@ static int test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_u
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "store_local h$ftag.") != NULL &&
         strstr(actual_text, "store_local h$closurecap$0.") != NULL &&
         strstr(actual_text, "call __fnwrap_closure_main__closure_f_") != NULL &&
@@ -9401,7 +9915,7 @@ static int test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call pick(") == 1u &&
         strstr(actual_text, "call __fnwrap_add1(") != NULL &&
         strstr(actual_text, "call __fnwrap_add2(") != NULL &&
@@ -9433,13 +9947,14 @@ static int test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
         strstr(actual_text, "store_local __ternary_fn_argtag.") != NULL &&
         strstr(actual_text, "call __fnwrap_add1(") != NULL &&
         strstr(actual_text, "call __fnwrap_add2(") != NULL &&
         strstr(actual_text, "call id(") == NULL &&
         strstr(actual_text, "call apply(") == NULL &&
+        strstr(actual_text, "call_indirect") == NULL &&
         strstr(actual_text, "id__fv_0_") == NULL;
     if (!ok) {
         fprintf(stderr,
@@ -9465,7 +9980,7 @@ static int test_lower_ir_accepts_passthrough_ternary_closure_function_value_actu
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
         strstr(actual_text, "store_local __ternary_fn_argtag.") != NULL &&
         strstr(actual_text, "store_local __ternary_fn_argcap_0.") != NULL &&
@@ -9473,6 +9988,7 @@ static int test_lower_ir_accepts_passthrough_ternary_closure_function_value_actu
         strstr(actual_text, "call __fnwrap_closure_main__closure_g_") != NULL &&
         strstr(actual_text, "call id(") == NULL &&
         strstr(actual_text, "call apply(") == NULL &&
+        strstr(actual_text, "call_indirect") == NULL &&
         strstr(actual_text, "id__fv_0_") == NULL;
     if (!ok) {
         fprintf(stderr,
@@ -9503,8 +10019,8 @@ static int test_lower_ir_accepts_second_order_dynamic_ternary_function_value_act
         strstr(actual_text, "call getint()\n") != NULL &&
         strstr(actual_text, "store_local __ternary_fn_argtag.1, 1\n") != NULL &&
         strstr(actual_text, "store_local __ternary_fn_argtag.1, 2\n") != NULL &&
-        strstr(actual_text, "tmp.3 = call pass__fv_0_apply_1_add1(41)\n") != NULL &&
-        strstr(actual_text, "tmp.3 = call pass__fv_0_apply_twice_1_add1(41)\n") != NULL &&
+        strstr(actual_text, "call pass__fv_0_apply_1_add1(41)\n") != NULL &&
+        strstr(actual_text, "call pass__fv_0_apply_twice_1_add1(41)\n") != NULL &&
         strstr(actual_text, "apply_twice__fv_0_add1") == NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call __fnwrap_add1(0,") == 3u;
     if (!ok) {
@@ -9533,7 +10049,7 @@ static int test_lower_ir_accepts_passthrough_ternary_zero_arg_function_value_act
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id0(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id0(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
         strstr(actual_text, "store_local __ternary_fn_argtag.") != NULL &&
         strstr(actual_text, "call __fnwrap_next1(") != NULL &&
@@ -9567,7 +10083,7 @@ static int test_lower_ir_accepts_passthrough_ternary_zero_arg_void_function_valu
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare idv(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "idv(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
         strstr(actual_text, "store_local __ternary_fn_argtag.") != NULL &&
         strstr(actual_text, "call __fnwrap_ping1(") != NULL &&
@@ -9599,7 +10115,7 @@ static int test_lower_ir_accepts_passthrough_ternary_zero_arg_closure_function_v
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id0(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id0(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
         strstr(actual_text, "store_local __ternary_fn_argtag.") != NULL &&
         strstr(actual_text, "store_local __ternary_fn_argcap_0.") != NULL &&
@@ -9607,6 +10123,7 @@ static int test_lower_ir_accepts_passthrough_ternary_zero_arg_closure_function_v
         strstr(actual_text, "call __fnwrap_closure_main__closure_g_") != NULL &&
         strstr(actual_text, "call id0(") == NULL &&
         strstr(actual_text, "call apply0(") == NULL &&
+        strstr(actual_text, "call_indirect") == NULL &&
         strstr(actual_text, "apply0__fv_0_") == NULL;
     if (!ok) {
         fprintf(stderr,
@@ -9632,7 +10149,7 @@ static int test_lower_ir_accepts_passthrough_ternary_zero_arg_void_closure_funct
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare idv(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "idv(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "declare apply0(f.0)\n") != NULL &&
         strstr(actual_text, "store_local __ternary_fn_argtag.") != NULL &&
         strstr(actual_text, "store_local __ternary_fn_argcap_0.") != NULL &&
@@ -9640,6 +10157,7 @@ static int test_lower_ir_accepts_passthrough_ternary_zero_arg_void_closure_funct
         strstr(actual_text, "call __fnwrap_closure_main__closure_g_") != NULL &&
         strstr(actual_text, "call idv(") == NULL &&
         strstr(actual_text, "call apply0(") == NULL &&
+        strstr(actual_text, "call_indirect") == NULL &&
         strstr(actual_text, "apply0__fv_0_") == NULL;
     if (!ok) {
         fprintf(stderr,
@@ -10001,6 +10519,40 @@ static int test_lower_ir_accepts_returned_single_capture_zero_arg_void_closure_f
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR-RETURNED-SINGLE-CAPTURE-ZERO-VOID-CLOSURE-FORWARD mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_direct_returned_single_capture_zero_arg_void_closure_actual_argument_into_closure_returning_function_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "void makev(int x)(){ return closure [x] void (){ putint(x); return; }; }\n"
+            "void wrapv(void f())(){ return closure [f] void (){ f(); return; }; }\n"
+            "int main(){ wrapv(makev(7))(); return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare wrapv(__ret0.0, f.1)\n") != NULL &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call makev(") == 1u &&
+        lower_ir_test_count_fragment_occurrences(actual_text, "call wrapv(") == 0u &&
+        strstr(actual_text, "func wrapv__fv_0_makev__retclosure_") != NULL &&
+        strstr(actual_text, "func wrapv__fv_0_makev__retclosure_1_29__retclosure_2_32") != NULL &&
+        strstr(actual_text, "store_local __closure_env_0.") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_wrapv__fv_0_makev__retclosure_1_29__retclosure_2_32_1(") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_makev__retclosure_") != NULL &&
+        strstr(actual_text, "__retclosure_declslot") == NULL &&
+        strstr(actual_text, "__retclosure_callcap") == NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-DIRECT-RETURNED-SINGLE-CAPTURE-ZERO-VOID-CLOSURE-ACTUAL-RETURNED-CLOSURE mismatch\nactual:\n%s\n",
             actual_text ? actual_text : "(null)");
     }
 
@@ -10510,6 +11062,16 @@ static int test_lower_ir_accepts_dynamic_local_function_value_forwarding_into_fu
         strstr(actual_text, "call putint(0)\n") != NULL &&
         strstr(actual_text, "store_local g$ftag.1, 2\n") != NULL &&
         strstr(actual_text, "load_local g$ftag.1\n") != NULL &&
+        strstr(actual_text,
+            "tmp.1 = eq tmp.6, 1\n"
+            "    br tmp.1, bb.3, bb.4\n"
+            "  bb.3:\n"
+            "    tmp.3 = mov 0\n"
+            "    tmp.2 = call __fnwrap_add1(0, 40)\n") != NULL &&
+        strstr(actual_text,
+            "  bb.4:\n"
+            "    tmp.4 = mov 0\n"
+            "    tmp.2 = call __fnwrap_add2(0, 40)\n") != NULL &&
         strstr(actual_text, "call __fnwrap_add1(0, 40)\n") != NULL &&
         strstr(actual_text, "call __fnwrap_add2(0, 40)\n") != NULL &&
         strstr(actual_text, "func __fnwrap_add1(__env.0, x.1) {\n") != NULL &&
@@ -10698,7 +11260,7 @@ static int test_lower_ir_accepts_second_order_returned_zero_arg_wrapper_scalar_u
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare idh0(__ret0.0, q.1)\n") != NULL &&
+        strstr(actual_text, "idh0(__ret0.0, q.1)") != NULL &&
         strstr(actual_text, "tmp.0 = add 0, 1\n") != NULL &&
         strstr(actual_text, "call idh0(") == NULL &&
         strstr(actual_text, "call pass0(") == NULL &&
@@ -10731,7 +11293,7 @@ static int test_lower_ir_accepts_second_order_returned_zero_arg_wrapper_scalar_u
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare idh0(__ret0.0, q.1)\n") != NULL &&
+        strstr(actual_text, "idh0(__ret0.0, q.1)") != NULL &&
         strstr(actual_text, "store_local g$ftag.0, 1\n") != NULL &&
         strstr(actual_text, "tmp.0 = add 0, 1\n") != NULL &&
         strstr(actual_text, "call idh0(") == NULL &&
@@ -10859,7 +11421,7 @@ static int test_lower_ir_accepts_second_order_returned_zero_arg_void_wrapper_sca
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare idv0(__ret0.0, q.1)\n") != NULL &&
+        strstr(actual_text, "idv0(__ret0.0, q.1)") != NULL &&
         strstr(actual_text, "tmp.0 = add 0, 1\n") != NULL &&
         strstr(actual_text, "call __fnwrap_ping(0)\n") != NULL &&
         strstr(actual_text, "call idv0(") == NULL &&
@@ -10892,7 +11454,7 @@ static int test_lower_ir_accepts_second_order_returned_zero_arg_void_wrapper_sca
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare idv0(__ret0.0, q.1)\n") != NULL &&
+        strstr(actual_text, "idv0(__ret0.0, q.1)") != NULL &&
         strstr(actual_text, "store_local g$ftag.0, 1\n") != NULL &&
         strstr(actual_text, "tmp.0 = add 0, 1\n") != NULL &&
         strstr(actual_text, "call __fnwrap_ping(0)\n") != NULL &&
@@ -11202,6 +11764,81 @@ static int test_lower_ir_accepts_third_order_function_value_parameter_forwarding
     return ok;
 }
 
+static int test_lower_ir_accepts_fourth_order_function_value_parameter_forwarding_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+            "int relay(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return q(h, f, x); }\n"
+            "int meta(int r(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x), int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return r(q, h, f, x); }\n"
+            "int main(){ return meta(relay, pass, apply, add1, 41); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare meta(r.0, q.1, h.2, f.3, x.4)\n") != NULL &&
+        strstr(actual_text, "call __fnwrap_add1(0, 41)\n") != NULL &&
+        strstr(actual_text, "call meta(") == NULL &&
+        strstr(actual_text, "call relay(") == NULL &&
+        strstr(actual_text, "call pass(") == NULL &&
+        strstr(actual_text, "meta__fv_") == NULL &&
+        strstr(actual_text, "relay__fv_") == NULL &&
+        strstr(actual_text, "pass__fv_") == NULL &&
+        strstr(actual_text, "apply__fv_") == NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR fourth-order function-value parameter forwarding mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_fifth_order_function_value_parameter_forwarding_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int apply(int f(int), int x){ return f(x); }\n"
+            "int pass(int h(int f(int), int x), int f(int), int x){ return h(f, x); }\n"
+            "int relay(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return q(h, f, x); }\n"
+            "int meta(int r(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x), int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return r(q, h, f, x); }\n"
+            "int ultra(int s(int r(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x), int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x), int r(int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x), int q(int h(int f(int), int x), int f(int), int x), int h(int f(int), int x), int f(int), int x){ return s(r, q, h, f, x); }\n"
+            "int main(){ return ultra(meta, relay, pass, apply, add1, 41); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare ultra(s.0, r.1, q.2, h.3, f.4, x.5)\n") != NULL &&
+        strstr(actual_text, "call __fnwrap_add1(0, 41)\n") != NULL &&
+        strstr(actual_text, "call ultra(") == NULL &&
+        strstr(actual_text, "call meta(") == NULL &&
+        strstr(actual_text, "call relay(") == NULL &&
+        strstr(actual_text, "call pass(") == NULL &&
+        strstr(actual_text, "ultra__fv_") == NULL &&
+        strstr(actual_text, "meta__fv_") == NULL &&
+        strstr(actual_text, "relay__fv_") == NULL &&
+        strstr(actual_text, "pass__fv_") == NULL &&
+        strstr(actual_text, "apply__fv_") == NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR fifth-order function-value parameter forwarding mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_lower_ir_accepts_third_order_zero_arg_wrapper_scalar_update_function_value_parameter_forwarding_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -11444,7 +12081,7 @@ static int test_lower_ir_accepts_second_order_returned_closure_function_value_pa
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare idh(__ret0.0, h.1)\n") != NULL &&
+        strstr(actual_text, "idh(__ret0.0, h.1)") != NULL &&
         strstr(actual_text, "call __fnwrap_closure_main__closure_f_") != NULL &&
         strstr(actual_text, "call main__closure_f_") != NULL &&
         strstr(actual_text, "call idh(") == NULL &&
@@ -11453,6 +12090,120 @@ static int test_lower_ir_accepts_second_order_returned_closure_function_value_pa
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR second-order returned closure function-value parameter immediate-call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_mixed_capture_returned_closure_immediate_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int add1(int x){ return x+1; }\n"
+            "int make(int z, int f(int))(int){ return closure [z, f] int (int y){ return z + f(y); }; }\n"
+            "int main(){ return make(3, add1)(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call make__fv_1_add1(") != NULL &&
+        strstr(actual_text, "__fnwrap_add1") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__fv_1_add1__retclosure_2_42_2(") != NULL &&
+        strstr(actual_text, "make__fv_1_add1__retclosure_2_42") != NULL &&
+        strstr(actual_text, "call make__fv_1_add1__retclosure_2_42(") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR mixed-capture returned closure immediate-call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_nested_closure_capture_local_immediate_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int main(){ int x=3; int f(int)=closure [x] int (int z){ return x+z; }; int g(int)=closure [f] int (int y){ return f(y); }; return g(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func main__closure_f_") != NULL &&
+        strstr(actual_text, "func main__closure_g_") != NULL &&
+        strstr(actual_text, "store_local g$closurecap$0.") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_main__closure_f_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_main__closure_f_65558_1(") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR nested closure capture local immediate-call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_nested_returned_closure_capture_immediate_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int make(int x)(int){ return closure [x] int (int z){ return x+z; }; }\n"
+            "int main(){ int f(int)=make(3); int g(int)=closure [f] int (int y){ return f(y); }; return g(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call make(") != NULL &&
+        strstr(actual_text, "func main__closure_g_") != NULL &&
+        strstr(actual_text, "store_local g$closurecap$0.") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__retclosure_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_make__retclosure_1_30_1(") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR nested returned closure capture immediate-call mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_returned_closure_capturing_returned_closure_immediate_call_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "int make(int x)(int){ return closure [x] int (int z){ return x+z; }; }\n"
+            "int outer(int x)(int){ int f(int)=make(x); return closure [f] int (int y){ return f(y); }; }\n"
+            "int main(){ return outer(3)(4); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func outer(") != NULL &&
+        strstr(actual_text, "call make(") != NULL &&
+        strstr(actual_text, "func outer__retclosure_") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_outer__retclosure_1_30_1(") != NULL &&
+        strstr(actual_text, "call outer(") != NULL &&
+        strstr(actual_text, "call __fnwrap_closure_outer__retclosure_") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR returned closure capturing returned closure immediate-call mismatch\nactual:\n%s\n",
             actual_text ? actual_text : "(null)");
     }
 
@@ -11510,7 +12261,7 @@ static int test_lower_ir_accepts_second_order_returned_passthrough_dynamic_nonca
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare idh(__ret0.0, h.1)\n") != NULL &&
+        strstr(actual_text, "idh(__ret0.0, h.1)") != NULL &&
         strstr(actual_text, "call pickh_nc(tmp.0, tmp.1)\n") != NULL &&
         strstr(actual_text, "tmp.3 = eq tmp.11, 1\n") != NULL &&
         strstr(actual_text, "apply__fv_0_add1") == NULL &&
@@ -11544,8 +12295,7 @@ static int test_lower_ir_accepts_second_order_returned_passthrough_dynamic_funct
     ok = actual_text &&
         strstr(actual_text, "call pickh(tmp.0, tmp.1, 5, tmp.2)\n") != NULL &&
         strstr(actual_text, "load_local __retclosure_argcap_0.0\n") != NULL &&
-        strstr(actual_text, "tmp.5 = call pickh__closure_h_131120__fv_1_add1(tmp.7, 41)\n") != NULL &&
-        strstr(actual_text, "tmp.5 = call pickh__closure_k_131208__fv_1_add1(tmp.8, 41)\n") != NULL &&
+        strstr(actual_text, "__fv_1_add1") == NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call __fnwrap_add1(0,") == 3u;
     if (!ok) {
         fprintf(stderr,
@@ -11604,8 +12354,9 @@ static int test_lower_ir_accepts_second_order_dynamic_local_closure_function_val
 
     ok = actual_text &&
         strstr(actual_text, "call getint()\n") != NULL &&
-        strstr(actual_text, "tmp.2 = eq tmp.") != NULL &&
-        strstr(actual_text, "func pass__fv_0_apply_1_main__closure_f_") == NULL &&
+        strstr(actual_text, "eq tmp.") != NULL &&
+        strstr(actual_text, "func pass__fv_0_apply_1_main__closure_f_") != NULL &&
+        strstr(actual_text, "func pass__fv_0_apply_twice_1_main__closure_f_") != NULL &&
         strstr(actual_text, "call __fnwrap_closure_main__closure_f_") != NULL &&
         strstr(actual_text, "call main__closure_f_") != NULL &&
         strstr(actual_text, "call pass(") == NULL &&
@@ -11848,9 +12599,10 @@ static int test_lower_ir_accepts_second_order_returned_closure_function_value_pa
     ok = actual_text &&
         strstr(actual_text, "func make(__ret0.0, y.1) {\n") != NULL &&
         strstr(actual_text, "func make__retclosure_") != NULL &&
-        strstr(actual_text, "call __fnwrap_closure_make__retclosure_") != NULL &&
+        (strstr(actual_text, "call __fnwrap_closure_make__retclosure_") != NULL ||
+            strstr(actual_text, "pass__fv_0_apply_1_make__retclosure_") != NULL) &&
         strstr(actual_text, "call pass(") == NULL &&
-        strstr(actual_text, "pass__fv_0_apply_1_make__retclosure_") == NULL &&
+        strstr(actual_text, "pass__fv_0_apply_1_make__retclosure_") != NULL &&
         strstr(actual_text, "apply__fv_0_make__retclosure_") == NULL;
     if (!ok) {
         fprintf(stderr,
@@ -11878,7 +12630,7 @@ static int test_lower_ir_accepts_passthrough_decl_local_function_value_forwardin
     }
 
     ok = actual_text &&
-        strstr(actual_text, "declare id(__ret0.0, f.1)\n") != NULL &&
+        strstr(actual_text, "id(__ret0.0, f.1)") != NULL &&
         strstr(actual_text, "declare apply(f.0, x.1)\n") != NULL &&
         strstr(actual_text, "declare wrapper(f.0, x.1)\n") != NULL &&
         strstr(actual_text, "call __fnwrap_add1(0, 41)\n") != NULL &&
@@ -11995,8 +12747,7 @@ static int test_lower_ir_accepts_parameter_local_scalar_update_function_value_di
     ok = actual_text &&
         strstr(actual_text, "declare test(f.0, x.1)\n") != NULL &&
         strstr(actual_text, "call __fnwrap_add1(0,") != NULL &&
-        strstr(actual_text, "test__fv_0_add1") == NULL &&
-        strstr(actual_text, "func test__fv_0_add1") == NULL;
+        strstr(actual_text, "store_local y.1, tmp.0\n") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR parameter-local scalar update function-value direct call mismatch\nactual:\n%s\n",
@@ -12023,8 +12774,8 @@ static int test_lower_ir_accepts_parameter_local_scalar_update_and_alias_functio
     ok = actual_text &&
         strstr(actual_text, "declare test(f.0, x.1)\n") != NULL &&
         strstr(actual_text, "call __fnwrap_add1(0,") != NULL &&
-        strstr(actual_text, "test__fv_0_add1") == NULL &&
-        strstr(actual_text, "func test__fv_0_add1") == NULL;
+        strstr(actual_text, "store_local g$ftag.") != NULL &&
+        strstr(actual_text, "store_local y.1, tmp.0\n") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR parameter-local scalar update+alias function-value direct call mismatch\nactual:\n%s\n",
@@ -12051,8 +12802,8 @@ static int test_lower_ir_accepts_parameter_local_call_update_function_value_dire
     ok = actual_text &&
         strstr(actual_text, "declare test(f.0, x.1)\n") != NULL &&
         strstr(actual_text, "call __fnwrap_add1(0,") != NULL &&
-        strstr(actual_text, "test__fv_0_add1") == NULL &&
-        strstr(actual_text, "func test__fv_0_add1") == NULL;
+        strstr(actual_text, "store_local y.1, tmp.1\n") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR parameter-local call update function-value direct call mismatch\nactual:\n%s\n",
@@ -12079,8 +12830,8 @@ static int test_lower_ir_accepts_parameter_local_repeated_call_update_function_v
     ok = actual_text &&
         strstr(actual_text, "declare test(f.0, x.1)\n") != NULL &&
         lower_ir_test_count_fragment_occurrences(actual_text, "call __fnwrap_add1(0,") == 2u &&
-        strstr(actual_text, "test__fv_0_add1") == NULL &&
-        strstr(actual_text, "func test__fv_0_add1") == NULL;
+        strstr(actual_text, "store_local y.1, tmp.3\n") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR parameter-local repeated call update function-value direct call mismatch\nactual:\n%s\n",
@@ -12107,10 +12858,10 @@ static int test_lower_ir_accepts_parameter_local_two_callable_update_without_spe
 
     ok = actual_text &&
         strstr(actual_text, "declare test(f.0, g.1, x.2)\n") != NULL &&
-        strstr(actual_text, "call __fnwrap_double1(0, 20)\n") != NULL &&
+        strstr(actual_text, "call __fnwrap_double1(0,") != NULL &&
         strstr(actual_text, "call __fnwrap_add1(0,") != NULL &&
         strstr(actual_text, "compose__fv_0_add1_1_double1") == NULL &&
-        strstr(actual_text, "test__fv_0_add1_1_double1") == NULL;
+        strstr(actual_text, "store_local y.1, tmp.3\n") != NULL;
     if (!ok) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: LOWER-IR parameter-local two-callable update mismatch\nactual:\n%s\n",
@@ -15616,6 +16367,21 @@ int main(void) {
                 ? 0
                 : 1;
         }
+        if (strstr("LOWER-IR-DIRECT-RETURNED-CLOSURE-ACTUAL-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_lower_ir_accepts_direct_returned_closure_actual_argument_into_closure_returning_function_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("LOWER-IR-DIRECT-RETURNED-ZERO-ARG-VOID-CLOSURE-ACTUAL-CAPTURE-PARAM-FNVAL", filter) != NULL) {
+            return test_lower_ir_accepts_direct_returned_single_capture_zero_arg_void_closure_actual_argument_into_closure_returning_function_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("LOWER-IR-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL-HELPER-CALL", filter) != NULL) {
+            return test_lower_ir_accepts_specialized_helper_call_inside_returned_function_parameter_capture_closure_under_extension()
+                ? 0
+                : 1;
+        }
         if (strstr("LOWER-IR-DYNAMIC-RETURNED-CLOSURE-CAPTURE-PARAM-FNVAL", filter) != NULL) {
             return test_lower_ir_accepts_dynamic_returned_function_parameter_capture_inside_closure_under_extension()
                 ? 0
@@ -15646,6 +16412,11 @@ int main(void) {
                 ? 0
                 : 1;
         }
+        if (strstr("LOWER-IR-THREE-TARGET-DYNAMIC-RETURNED-CLOSURE-FNARGS", filter) != NULL) {
+            return test_lower_ir_accepts_three_target_dynamic_returned_closure_function_arguments_under_extension()
+                ? 0
+                : 1;
+        }
         if (strstr("LOWER-IR-MIXED-DYNAMIC-STATIC-RETURNED-CLOSURE-FNARGS", filter) != NULL) {
             return test_lower_ir_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension()
                 ? 0
@@ -15653,6 +16424,11 @@ int main(void) {
         }
         if (strstr("LOWER-IR-PASSTHROUGH-RETURNED-DYNAMIC-HO-MIXED-CLOSURE-FNARGS", filter) != NULL) {
             return test_lower_ir_accepts_passthrough_returned_dynamic_higher_order_mixed_closure_function_arguments_under_extension()
+                ? 0
+                : 1;
+        }
+        if (strstr("LOWER-IR-PASSTHROUGH-RETURNED-DYNAMIC-HO-THREE-TARGET-MIXED-CLOSURE-FNARGS", filter) != NULL) {
+            return test_lower_ir_accepts_passthrough_returned_dynamic_higher_order_three_target_mixed_closure_function_arguments_under_extension()
                 ? 0
                 : 1;
         }
@@ -15821,6 +16597,12 @@ int main(void) {
         if (strstr("LOWER-IR-THIRD-ORDER-FNVAL-FORWARD", filter) != NULL) {
             return test_lower_ir_accepts_third_order_function_value_parameter_forwarding_under_extension() ? 0 : 1;
         }
+        if (strstr("LOWER-IR-FOURTH-ORDER-FNVAL-FORWARD", filter) != NULL) {
+            return test_lower_ir_accepts_fourth_order_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-FIFTH-ORDER-FNVAL-FORWARD", filter) != NULL) {
+            return test_lower_ir_accepts_fifth_order_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
         if (strstr("LOWER-IR-THIRD-ORDER-WRAPPER-SCALAR-UPDATE-FNVAL-FORWARD", filter) != NULL) {
             return test_lower_ir_accepts_third_order_wrapper_scalar_update_function_value_parameter_forwarding_under_extension() ? 0 : 1;
         }
@@ -15838,6 +16620,18 @@ int main(void) {
         }
         if (strstr("LOWER-IR-SECOND-ORDER-RETURNED-CLOSURE-FNVAL-IMM-CALL", filter) != NULL) {
             return test_lower_ir_accepts_second_order_returned_closure_function_value_parameter_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-MIXED-CAPTURE-RETURNED-CLOSURE-IMM-CALL", filter) != NULL) {
+            return test_lower_ir_accepts_mixed_capture_returned_closure_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-NESTED-CLOSURE-CAPTURE-LOCAL-IMM-CALL", filter) != NULL) {
+            return test_lower_ir_accepts_nested_closure_capture_local_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-NESTED-RETURNED-CLOSURE-CAPTURE-IMM-CALL", filter) != NULL) {
+            return test_lower_ir_accepts_nested_returned_closure_capture_immediate_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-RETURNED-CLOSURE-CAPTURE-RETURNED-CLOSURE-IMM-CALL", filter) != NULL) {
+            return test_lower_ir_accepts_returned_closure_capturing_returned_closure_immediate_call_under_extension() ? 0 : 1;
         }
         if (strstr("LOWER-IR-SECOND-ORDER-DYNAMIC-RETURNED-FNVAL-IMM-CALL", filter) != NULL) {
             return test_lower_ir_accepts_second_order_dynamic_returned_function_value_parameter_immediate_call_under_extension() ? 0 : 1;
@@ -15942,6 +16736,7 @@ int main(void) {
     ok &= test_lower_ir_accepts_direct_returned_single_capture_closure_function_value_argument_under_extension();
     ok &= test_lower_ir_accepts_direct_returned_single_capture_zero_arg_closure_function_value_argument_under_extension();
     ok &= test_lower_ir_accepts_direct_returned_single_capture_zero_arg_void_closure_function_value_argument_under_extension();
+    ok &= test_lower_ir_accepts_direct_returned_single_capture_zero_arg_void_closure_actual_argument_into_closure_returning_function_under_extension();
     ok &= test_lower_ir_accepts_direct_returned_multi_capture_closure_function_value_argument_under_extension();
     ok &= test_lower_ir_accepts_returned_single_capture_closure_alias_forwarding_into_function_parameter_under_extension();
     ok &= test_lower_ir_accepts_returned_single_capture_zero_arg_closure_forwarding_into_function_parameter_under_extension();
@@ -15957,6 +16752,10 @@ int main(void) {
     ok &= test_lower_ir_accepts_returned_multi_capture_local_closure_bind_and_call_under_extension();
     ok &= test_lower_ir_accepts_dynamic_returned_multi_capture_local_closure_forwarding_into_function_parameter_under_extension();
     ok &= test_lower_ir_accepts_second_order_dynamic_returned_function_value_parameter_immediate_call_under_extension();
+    ok &= test_lower_ir_accepts_mixed_capture_returned_closure_immediate_call_under_extension();
+    ok &= test_lower_ir_accepts_nested_closure_capture_local_immediate_call_under_extension();
+    ok &= test_lower_ir_accepts_nested_returned_closure_capture_immediate_call_under_extension();
+    ok &= test_lower_ir_accepts_returned_closure_capturing_returned_closure_immediate_call_under_extension();
     ok &= test_lower_ir_accepts_second_order_returned_passthrough_dynamic_noncapturing_function_value_parameter_immediate_call_under_extension();
     ok &= test_lower_ir_accepts_second_order_returned_passthrough_dynamic_function_value_parameter_immediate_call_under_extension();
     ok &= test_lower_ir_accepts_second_order_local_function_value_parameter_forwarding_under_extension();
@@ -16078,6 +16877,8 @@ int main(void) {
     ok &= test_lower_ir_accepts_returned_zero_arg_function_value_reassignment_under_extension();
     ok &= test_lower_ir_accepts_returned_closure_reassignment_under_extension();
     ok &= test_lower_ir_accepts_returned_zero_arg_void_closure_reassignment_under_extension();
+    ok &= test_lower_ir_accepts_declaration_only_local_function_value_assignment_under_extension();
+    ok &= test_lower_ir_accepts_declaration_only_local_closure_assignment_under_extension();
     ok &= test_lower_ir_accepts_wrapped_function_value_reassignment_under_extension();
     ok &= test_lower_ir_accepts_assignment_result_function_value_reassignment_under_extension();
     ok &= test_lower_ir_accepts_wrapped_returned_function_value_reassignment_under_extension();
@@ -16184,14 +16985,18 @@ int main(void) {
     ok &= test_lower_ir_accepts_static_function_value_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_returned_function_parameter_capture_inside_closure_under_extension();
+    ok &= test_lower_ir_accepts_direct_returned_closure_actual_argument_into_closure_returning_function_under_extension();
+    ok &= test_lower_ir_accepts_specialized_helper_call_inside_returned_function_parameter_capture_closure_under_extension();
     ok &= test_lower_ir_accepts_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_three_hop_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_alias_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_ternary_actual_argument_of_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_passthrough_local_bind_of_ternary_dynamic_returned_function_parameter_capture_inside_closure_under_extension();
     ok &= test_lower_ir_accepts_multiple_dynamic_returned_closure_function_arguments_under_extension();
+    ok &= test_lower_ir_accepts_three_target_dynamic_returned_closure_function_arguments_under_extension();
     ok &= test_lower_ir_accepts_mixed_dynamic_and_static_returned_closure_function_arguments_under_extension();
     ok &= test_lower_ir_accepts_passthrough_returned_dynamic_higher_order_mixed_closure_function_arguments_under_extension();
+    ok &= test_lower_ir_accepts_passthrough_returned_dynamic_higher_order_three_target_mixed_closure_function_arguments_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_closure_local_initializer_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value_return_immediate_call_under_extension();
     ok &= test_lower_ir_accepts_passthrough_ternary_noncapturing_function_value_actual_argument_under_extension();

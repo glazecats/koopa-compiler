@@ -312,6 +312,87 @@ static int ir_builtin_function_matches_signature(const char *name,
         builtin->return_type == expected_return_type;
 }
 
+static int ir_try_populate_function_capture_signature_from_target(
+    const IrLowerContext *ctx,
+    const char *target_name,
+    size_t hidden_prefix_count,
+    AstFunctionReturnType *out_return_type,
+    size_t *out_parameter_count,
+    int **out_parameter_value_kinds,
+    AstFunctionReturnType **out_parameter_return_types,
+    size_t **out_parameter_parameter_counts) {
+    const AstExternal *external = NULL;
+    const IrBuiltinFunctionInfo *builtin = NULL;
+    IrFunction *function = NULL;
+    size_t visible_parameter_count = 0u;
+
+    if (out_return_type) {
+        *out_return_type = AST_FUNCTION_RETURN_INT;
+    }
+    if (out_parameter_count) {
+        *out_parameter_count = 0u;
+    }
+    if (out_parameter_value_kinds) {
+        *out_parameter_value_kinds = NULL;
+    }
+    if (out_parameter_return_types) {
+        *out_parameter_return_types = NULL;
+    }
+    if (out_parameter_parameter_counts) {
+        *out_parameter_parameter_counts = NULL;
+    }
+    if (!ctx || !target_name || target_name[0] == '\0' ||
+        !out_return_type || !out_parameter_count ||
+        !out_parameter_value_kinds || !out_parameter_return_types ||
+        !out_parameter_parameter_counts) {
+        return 0;
+    }
+
+    external = ir_program_find_function_external_ref(ctx->program, target_name);
+    if (!external && ctx->ast_program) {
+        external = ir_find_named_function_external_prefer_definition(ctx->ast_program, target_name);
+    }
+    if (external) {
+        if (external->parameter_count < hidden_prefix_count) {
+            return 0;
+        }
+        visible_parameter_count = external->parameter_count - hidden_prefix_count;
+        *out_return_type = external->function_return_type;
+        *out_parameter_count = visible_parameter_count;
+        *out_parameter_value_kinds =
+            external->parameter_value_kinds
+                ? &external->parameter_value_kinds[hidden_prefix_count]
+                : NULL;
+        *out_parameter_return_types =
+            external->parameter_function_return_types
+                ? &external->parameter_function_return_types[hidden_prefix_count]
+                : NULL;
+        *out_parameter_parameter_counts =
+            external->parameter_function_parameter_counts
+                ? &external->parameter_function_parameter_counts[hidden_prefix_count]
+                : NULL;
+        return 1;
+    }
+
+    builtin = ir_find_builtin_function_info(target_name);
+    if (builtin) {
+        if (builtin->parameter_count < hidden_prefix_count) {
+            return 0;
+        }
+        *out_return_type = builtin->return_type;
+        *out_parameter_count = builtin->parameter_count - hidden_prefix_count;
+        return 1;
+    }
+
+    function = ctx->program ? ir_program_find_function_mut(ctx->program, target_name) : NULL;
+    if (!function || function->parameter_count < hidden_prefix_count) {
+        return 0;
+    }
+    *out_return_type = function->return_type;
+    *out_parameter_count = function->parameter_count - hidden_prefix_count;
+    return 1;
+}
+
 static int ir_predeclare_builtin_calls_in_statement(IrProgram *program,
     const AstStatement *stmt,
     IrError *error);
@@ -908,6 +989,220 @@ static int ir_builtin_function_name_exists(const char *name) {
     return 0;
 }
 
+static int ir_returned_closure_capture_payload_slot_count(
+    const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const AstExpression *closure_expr,
+    size_t *out_slot_count);
+
+static int ir_function_value_capture_payload_slot_count_in_external(
+    const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const char *capture_name,
+    size_t *out_slot_count) {
+    size_t parameter_index = (size_t)-1;
+    const AstExpression *init_expr = NULL;
+    const AstExpression *init_base = NULL;
+
+    if (out_slot_count) {
+        *out_slot_count = 1u;
+    }
+    if (!ast_program || !external || !capture_name || capture_name[0] == '\0' || !out_slot_count) {
+        return 0;
+    }
+
+    if (ir_find_external_parameter_index_by_name(external, capture_name, 1, &parameter_index)) {
+        *out_slot_count = 1u;
+        return 1;
+    }
+
+    init_expr =
+        ir_find_resolved_local_function_value_initializer_expr(
+            ast_program,
+            external,
+            capture_name);
+    init_base = ir_unwrap_function_value_wrapper_expression(init_expr);
+    if (!init_base) {
+        *out_slot_count = 1u;
+        return 1;
+    }
+
+    if (init_base->kind == AST_EXPR_IDENTIFIER &&
+        init_base->as.identifier.name &&
+        strcmp(init_base->as.identifier.name, capture_name) != 0) {
+        return ir_function_value_capture_payload_slot_count_in_external(
+            ast_program,
+            program,
+            external,
+            init_base->as.identifier.name,
+            out_slot_count);
+    }
+
+    if (init_base->kind == AST_EXPR_CLOSURE) {
+        return ir_returned_closure_capture_payload_slot_count(
+            ast_program,
+            program,
+            external,
+            init_base,
+            out_slot_count);
+    }
+
+    if (init_base->kind == AST_EXPR_CALL) {
+        const AstExpression *passthrough_arg_expr = NULL;
+        const AstExpression *callee_base = NULL;
+        const AstExternal *callee_external = NULL;
+        int return_is_closure_family = 0;
+
+        if (ir_try_resolve_passthrough_function_value_argument_expr(
+                ast_program,
+                init_base,
+                &passthrough_arg_expr) &&
+            passthrough_arg_expr) {
+            const AstExpression *resolved_base =
+                ir_unwrap_function_value_wrapper_expression(passthrough_arg_expr);
+
+            if (resolved_base && resolved_base->kind == AST_EXPR_IDENTIFIER &&
+                resolved_base->as.identifier.name) {
+                return ir_function_value_capture_payload_slot_count_in_external(
+                    ast_program,
+                    program,
+                    external,
+                    resolved_base->as.identifier.name,
+                    out_slot_count);
+            }
+            if (resolved_base && resolved_base->kind == AST_EXPR_CLOSURE) {
+                return ir_returned_closure_capture_payload_slot_count(
+                    ast_program,
+                    program,
+                    external,
+                    resolved_base,
+                    out_slot_count);
+            }
+        }
+
+        callee_base = ir_unwrap_function_value_wrapper_expression(init_base->as.call.callee);
+        if (callee_base && callee_base->kind == AST_EXPR_IDENTIFIER &&
+            callee_base->as.identifier.name) {
+            callee_external =
+                ir_find_named_function_external_prefer_definition(ast_program, callee_base->as.identifier.name);
+            if (callee_external && callee_external->has_function_return_signature) {
+                if (!ir_function_value_return_is_closure_family(
+                        ast_program,
+                        callee_external,
+                        &return_is_closure_family)) {
+                    return 0;
+                }
+                if (return_is_closure_family) {
+                    return ir_function_returned_closure_payload_slot_count(
+                        ast_program,
+                        program,
+                        callee_external,
+                        out_slot_count);
+                }
+            }
+        }
+    }
+
+    if (init_base->kind == AST_EXPR_TERNARY) {
+        const AstExpression *then_base =
+            ir_unwrap_function_value_wrapper_expression(init_base->as.ternary.then_expr);
+        const AstExpression *else_base =
+            ir_unwrap_function_value_wrapper_expression(init_base->as.ternary.else_expr);
+        size_t then_slot_count = 1u;
+        size_t else_slot_count = 1u;
+
+        if (then_base && then_base->kind == AST_EXPR_IDENTIFIER && then_base->as.identifier.name) {
+            if (!ir_function_value_capture_payload_slot_count_in_external(
+                    ast_program,
+                    program,
+                    external,
+                    then_base->as.identifier.name,
+                    &then_slot_count)) {
+                return 0;
+            }
+        } else if (then_base && then_base->kind == AST_EXPR_CLOSURE) {
+            if (!ir_returned_closure_capture_payload_slot_count(
+                    ast_program,
+                    program,
+                    external,
+                    then_base,
+                    &then_slot_count)) {
+                return 0;
+            }
+        }
+
+        if (else_base && else_base->kind == AST_EXPR_IDENTIFIER && else_base->as.identifier.name) {
+            if (!ir_function_value_capture_payload_slot_count_in_external(
+                    ast_program,
+                    program,
+                    external,
+                    else_base->as.identifier.name,
+                    &else_slot_count)) {
+                return 0;
+            }
+        } else if (else_base && else_base->kind == AST_EXPR_CLOSURE) {
+            if (!ir_returned_closure_capture_payload_slot_count(
+                    ast_program,
+                    program,
+                    external,
+                    else_base,
+                    &else_slot_count)) {
+                return 0;
+            }
+        }
+
+        *out_slot_count = then_slot_count >= else_slot_count ? then_slot_count : else_slot_count;
+        return 1;
+    }
+
+    *out_slot_count = 1u;
+    return 1;
+}
+
+static int ir_returned_closure_capture_payload_slot_count(
+    const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const AstExpression *closure_expr,
+    size_t *out_slot_count) {
+    size_t slot_count = 0u;
+    size_t capture_index;
+
+    if (out_slot_count) {
+        *out_slot_count = 0u;
+    }
+    if (!ast_program || !external || !closure_expr ||
+        closure_expr->kind != AST_EXPR_CLOSURE || !out_slot_count) {
+        return 0;
+    }
+
+    for (capture_index = 0u;
+         capture_index < closure_expr->as.closure.capture_name_count;
+         ++capture_index) {
+        const char *capture_name =
+            closure_expr->as.closure.capture_names
+                ? closure_expr->as.closure.capture_names[capture_index]
+                : NULL;
+        size_t capture_slot_count = 1u;
+
+        if (!capture_name || capture_name[0] == '\0' ||
+            !ir_function_value_capture_payload_slot_count_in_external(
+                ast_program,
+                program,
+                external,
+                capture_name,
+                &capture_slot_count)) {
+            return 0;
+        }
+        slot_count += capture_slot_count;
+    }
+
+    *out_slot_count = slot_count;
+    return 1;
+}
+
 static int ir_function_returned_closure_payload_slot_count(const AstProgram *ast_program,
     IrProgram *program,
     const AstExternal *external,
@@ -957,8 +1252,16 @@ retry_return_expr_shape:
         }
         if (resolved_init_base) {
             if (resolved_init_base->kind == AST_EXPR_CLOSURE) {
-                size_t slot_count = resolved_init_base->as.closure.capture_name_count;
+                size_t slot_count = 0u;
 
+                if (!ir_returned_closure_capture_payload_slot_count(
+                        ast_program,
+                        program,
+                        resolved_external,
+                        resolved_init_base,
+                        &slot_count)) {
+                    return 0;
+                }
                 if (program) {
                     const char **returned_target_names = NULL;
                     size_t returned_target_count = 0u;
@@ -994,8 +1297,16 @@ retry_return_expr_shape:
                     passthrough_arg_expr) {
                     resolved_init_base = ir_unwrap_function_value_wrapper_expression(passthrough_arg_expr);
                     if (resolved_init_base && resolved_init_base->kind == AST_EXPR_CLOSURE) {
-                        size_t slot_count = resolved_init_base->as.closure.capture_name_count;
+                        size_t slot_count = 0u;
 
+                        if (!ir_returned_closure_capture_payload_slot_count(
+                                ast_program,
+                                program,
+                                resolved_external,
+                                resolved_init_base,
+                                &slot_count)) {
+                            return 0;
+                        }
                         if (program) {
                             const char **returned_target_names = NULL;
                             size_t returned_target_count = 0u;
@@ -1059,8 +1370,16 @@ retry_return_expr_shape:
                         return_expr = recursive_init_base;
                         goto retry_return_expr_shape;
                     } else if (recursive_init_base->kind == AST_EXPR_CLOSURE) {
-                        size_t slot_count = recursive_init_base->as.closure.capture_name_count;
+                        size_t slot_count = 0u;
 
+                        if (!ir_returned_closure_capture_payload_slot_count(
+                                ast_program,
+                                program,
+                                resolved_external,
+                                recursive_init_base,
+                                &slot_count)) {
+                            return 0;
+                        }
                         if (program) {
                             const char **returned_target_names = NULL;
                             size_t returned_target_count = 0u;
@@ -1129,9 +1448,22 @@ retry_return_expr_shape:
             else_init_base &&
             then_init_base->kind == AST_EXPR_CLOSURE &&
             else_init_base->kind == AST_EXPR_CLOSURE) {
-            size_t slot_count = then_init_base->as.closure.capture_name_count;
+            size_t slot_count = 0u;
+            size_t else_slot_count = 0u;
 
-            if (else_init_base->as.closure.capture_name_count != slot_count) {
+            if (!ir_returned_closure_capture_payload_slot_count(
+                    ast_program,
+                    program,
+                    resolved_external,
+                    then_init_base,
+                    &slot_count) ||
+                !ir_returned_closure_capture_payload_slot_count(
+                    ast_program,
+                    program,
+                    resolved_external,
+                    else_init_base,
+                    &else_slot_count) ||
+                else_slot_count != slot_count) {
                 return 0;
             }
             if (program) {
@@ -1218,9 +1550,22 @@ retry_return_expr_shape:
 
             if (then_resolved_base->kind == AST_EXPR_CLOSURE &&
                 else_resolved_base->kind == AST_EXPR_CLOSURE) {
-                size_t slot_count = then_resolved_base->as.closure.capture_name_count;
+                size_t slot_count = 0u;
+                size_t else_slot_count = 0u;
 
-                if (else_resolved_base->as.closure.capture_name_count != slot_count) {
+                if (!ir_returned_closure_capture_payload_slot_count(
+                        ast_program,
+                        program,
+                        resolved_external,
+                        then_resolved_base,
+                        &slot_count) ||
+                    !ir_returned_closure_capture_payload_slot_count(
+                        ast_program,
+                        program,
+                        resolved_external,
+                        else_resolved_base,
+                        &else_slot_count) ||
+                    else_slot_count != slot_count) {
                     return 0;
                 }
                 if (program) {
@@ -1307,8 +1652,16 @@ retry_return_expr_shape:
                         goto retry_return_expr_shape;
                     }
                     if (resolved_init_base->kind == AST_EXPR_CLOSURE) {
-                        size_t slot_count = resolved_init_base->as.closure.capture_name_count;
+                        size_t slot_count = 0u;
 
+                        if (!ir_returned_closure_capture_payload_slot_count(
+                                ast_program,
+                                program,
+                                resolved_external,
+                                resolved_init_base,
+                                &slot_count)) {
+                            return 0;
+                        }
                         if (program) {
                             const char **returned_target_names = NULL;
                             size_t returned_target_count = 0u;
@@ -1339,8 +1692,16 @@ retry_return_expr_shape:
                 }
             } else if (resolved_passthrough_base &&
                 resolved_passthrough_base->kind == AST_EXPR_CLOSURE) {
-                size_t slot_count = resolved_passthrough_base->as.closure.capture_name_count;
+                size_t slot_count = 0u;
 
+                if (!ir_returned_closure_capture_payload_slot_count(
+                        ast_program,
+                        program,
+                        resolved_external,
+                        resolved_passthrough_base,
+                        &slot_count)) {
+                    return 0;
+                }
                 if (program) {
                     const char **returned_target_names = NULL;
                     size_t returned_target_count = 0u;
@@ -1389,8 +1750,12 @@ retry_return_expr_shape:
         return 1;
     }
 
-    *out_slot_count = return_expr->as.closure.capture_name_count;
-    return 1;
+    return ir_returned_closure_capture_payload_slot_count(
+        ast_program,
+        program,
+        resolved_external,
+        return_expr,
+        out_slot_count);
     if (return_expr->kind == AST_EXPR_TERNARY) {
         const AstExpression *then_expr =
             ir_unwrap_function_value_wrapper_expression(return_expr->as.ternary.then_expr);
@@ -1426,9 +1791,22 @@ retry_return_expr_shape:
             else_init_base &&
             then_init_base->kind == AST_EXPR_CLOSURE &&
             else_init_base->kind == AST_EXPR_CLOSURE) {
-            size_t slot_count = then_init_base->as.closure.capture_name_count;
+            size_t slot_count = 0u;
+            size_t else_slot_count = 0u;
 
-            if (else_init_base->as.closure.capture_name_count != slot_count) {
+            if (!ir_returned_closure_capture_payload_slot_count(
+                    ast_program,
+                    program,
+                    resolved_external,
+                    then_init_base,
+                    &slot_count) ||
+                !ir_returned_closure_capture_payload_slot_count(
+                    ast_program,
+                    program,
+                    resolved_external,
+                    else_init_base,
+                    &else_slot_count) ||
+                else_slot_count != slot_count) {
                 return 0;
             }
             if (program) {
@@ -1615,6 +1993,103 @@ static int ir_try_populate_closure_capture_from_function_parameter(
     return 1;
 }
 
+static int ir_try_populate_closure_capture_from_return_local_binding(
+    const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const char *current_function_name_override,
+    const char *capture_name,
+    const char **out_bound_target,
+    const size_t **out_bound_capture_local_ids,
+    size_t *out_bound_capture_count) {
+    const AstExpression *resolved_init_expr = NULL;
+    const AstExpression *resolved_init_base = NULL;
+    const AstExpression *passthrough_arg_expr = NULL;
+    const char *target_name = NULL;
+
+    if (out_bound_target) {
+        *out_bound_target = NULL;
+    }
+    if (out_bound_capture_local_ids) {
+        *out_bound_capture_local_ids = NULL;
+    }
+    if (out_bound_capture_count) {
+        *out_bound_capture_count = 0u;
+    }
+    if (!ast_program || !program || !external || !capture_name || capture_name[0] == '\0') {
+        return 0;
+    }
+
+    resolved_init_expr =
+        ir_find_resolved_local_function_value_initializer_expr(
+            ast_program,
+            external,
+            capture_name);
+    resolved_init_base = ir_unwrap_function_value_wrapper_expression(resolved_init_expr);
+    if (resolved_init_base &&
+        resolved_init_base->kind == AST_EXPR_CALL &&
+        ir_try_resolve_returned_function_value_passthrough_argument_expr(
+            ast_program,
+            resolved_init_base,
+            &passthrough_arg_expr) &&
+        passthrough_arg_expr) {
+        resolved_init_base =
+            ir_unwrap_function_value_wrapper_expression(passthrough_arg_expr);
+    }
+    if (!resolved_init_base) {
+        return 0;
+    }
+
+    if (resolved_init_base->kind == AST_EXPR_CALL) {
+        const AstExpression *callee_base =
+            ir_unwrap_function_value_wrapper_expression(resolved_init_base->as.call.callee);
+        const AstExternal *callee_external = NULL;
+        int is_closure_return = 0;
+
+        if (!callee_base ||
+            callee_base->kind != AST_EXPR_IDENTIFIER ||
+            !callee_base->as.identifier.name) {
+            return 0;
+        }
+        callee_external =
+            ir_find_named_function_external_prefer_definition(
+                ast_program,
+                callee_base->as.identifier.name);
+        if (!callee_external ||
+            !callee_external->has_function_return_signature ||
+            !ir_function_value_return_is_closure_family(
+                ast_program,
+                callee_external,
+                &is_closure_return) ||
+            !is_closure_return ||
+            !ir_resolve_function_value_return_target_name(
+                ast_program,
+                program,
+                callee_external,
+                current_function_name_override,
+                &target_name,
+                NULL)) {
+            return 0;
+        }
+        if (out_bound_target) {
+            *out_bound_target = target_name;
+        }
+        if (out_bound_capture_count) {
+            *out_bound_capture_count =
+                ir_function_returned_closure_payload_slot_count(
+                    ast_program,
+                    program,
+                    callee_external,
+                    out_bound_capture_count)
+                    ? *out_bound_capture_count
+                    : 0u;
+        }
+        return out_bound_capture_count && *out_bound_capture_count > 0u;
+    }
+
+    return 0;
+}
+
 static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
     const AstExpression *closure_expr,
     const char *helper_name,
@@ -1624,6 +2099,7 @@ static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
     IrError *error) {
     AstExternal synthetic_external;
     AstExternal *registered_external = NULL;
+    const AstExternal *current_external = NULL;
     IrFunction *function = NULL;
     char **parameter_names = NULL;
     int *parameter_value_kinds = NULL;
@@ -1645,6 +2121,17 @@ static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
         closure_expr->kind != AST_EXPR_CLOSURE || !helper_name || helper_name[0] == '\0') {
         ir_set_error(error, 0, 0, "IR-INT-094: invalid direct closure helper lowering contract");
         return 0;
+    }
+
+    if (ctx->function && ctx->function->name) {
+        current_external =
+            ir_program_find_function_external_ref(ctx->program, ctx->function->name);
+        if (!current_external) {
+            current_external =
+                ir_find_named_function_external_prefer_definition(
+                    ctx->ast_program,
+                    ctx->function->name);
+        }
     }
 
     parameter_count = capture_count + closure_expr->as.closure.parameter_count;
@@ -1686,21 +2173,68 @@ static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
     for (parameter_index = 0u; parameter_index < capture_count; ++parameter_index) {
         parameter_names[parameter_index] = (char *)(capture_names ? capture_names[parameter_index] : NULL);
         parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_INT;
+        parameter_function_return_types[parameter_index] = AST_FUNCTION_RETURN_INT;
+        parameter_function_parameter_counts[parameter_index] = 0u;
+        parameter_function_parameter_value_kinds[parameter_index] = NULL;
+        parameter_function_parameter_return_types[parameter_index] = NULL;
+        parameter_function_parameter_parameter_counts[parameter_index] = NULL;
         parameter_name_lines[parameter_index] = closure_expr->line;
         parameter_name_columns[parameter_index] = closure_expr->column;
         if (capture_names && capture_names[parameter_index]) {
             IrLowerFunctionObjectDescriptor capture_descriptor;
+            const IrFunctionValueTargetSet *capture_target_set = NULL;
             long long capture_tag_value = 0;
+            int capture_descriptor_resolved = 0;
+            int capture_is_effectively_static_family = 0;
 
             ir_init_function_object_descriptor(&capture_descriptor);
-            if (ir_resolve_identifier_function_value_descriptor(
-                    ctx,
-                    capture_names[parameter_index],
-                    &capture_descriptor) &&
+            capture_target_set = ir_lower_find_function_value_target_set(
+                ctx,
+                capture_names[parameter_index]);
+            capture_descriptor_resolved = ir_resolve_identifier_function_value_descriptor(
+                ctx,
+                capture_names[parameter_index],
+                &capture_descriptor);
+            capture_is_effectively_static_family =
+                !capture_descriptor_resolved ||
+                !capture_descriptor.has_dynamic_family ||
+                !capture_target_set ||
+                capture_target_set->target_count <= 1u;
+            if (capture_descriptor_resolved &&
+                capture_descriptor.direct_target_name &&
+                capture_descriptor.direct_target_name[0] != '\0' &&
+                capture_is_effectively_static_family &&
+                capture_descriptor.capture_count > 0u) {
+                parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_FUNCTION;
+                if (!ir_try_populate_function_capture_signature_from_target(
+                        ctx,
+                        capture_descriptor.direct_target_name,
+                        capture_descriptor.capture_count,
+                        &parameter_function_return_types[parameter_index],
+                        &parameter_function_parameter_counts[parameter_index],
+                        &parameter_function_parameter_value_kinds[parameter_index],
+                        &parameter_function_parameter_return_types[parameter_index],
+                        &parameter_function_parameter_parameter_counts[parameter_index])) {
+                    ir_set_error(error,
+                        closure_expr->line,
+                        closure_expr->column,
+                        "IR-INT-147: failed to recover closure capture helper signature for '%s' via target '%s'",
+                        capture_names[parameter_index],
+                        capture_descriptor.direct_target_name);
+                    goto cleanup;
+                }
+                bound_function_targets[parameter_index] = capture_descriptor.direct_target_name;
+                bound_function_capture_local_ids[parameter_index] =
+                    capture_descriptor.capture_local_ids;
+                bound_function_capture_counts[parameter_index] =
+                    capture_descriptor.capture_count;
+                continue;
+            }
+            if (capture_descriptor_resolved &&
                 capture_descriptor.direct_target_name &&
                 capture_descriptor.direct_target_name[0] != '\0' &&
                 !capture_descriptor.is_closure_family &&
-                !capture_descriptor.has_dynamic_family &&
+                capture_is_effectively_static_family &&
                 (ir_program_find_function_mut(ctx->program, capture_descriptor.direct_target_name) ||
                     ir_program_find_function_external_ref(ctx->program, capture_descriptor.direct_target_name) ||
                     ir_builtin_function_name_exists(capture_descriptor.direct_target_name)) &&
@@ -1710,11 +2244,54 @@ static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
                     capture_descriptor.direct_target_name,
                     &capture_tag_value)) {
                 parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_FUNCTION;
-                parameter_function_return_types[parameter_index] = AST_FUNCTION_RETURN_INT;
-                parameter_function_parameter_counts[parameter_index] = 1u;
+                if (!ir_try_populate_function_capture_signature_from_target(
+                        ctx,
+                        capture_descriptor.direct_target_name,
+                        0u,
+                        &parameter_function_return_types[parameter_index],
+                        &parameter_function_parameter_counts[parameter_index],
+                        &parameter_function_parameter_value_kinds[parameter_index],
+                        &parameter_function_parameter_return_types[parameter_index],
+                        &parameter_function_parameter_parameter_counts[parameter_index])) {
+                    ir_set_error(error,
+                        closure_expr->line,
+                        closure_expr->column,
+                        "IR-INT-148: failed to recover static function capture helper signature for '%s' via target '%s'",
+                        capture_names[parameter_index],
+                        capture_descriptor.direct_target_name);
+                    goto cleanup;
+                }
                 bound_function_targets[parameter_index] = capture_descriptor.direct_target_name;
                 bound_function_capture_local_ids[parameter_index] = NULL;
                 bound_function_capture_counts[parameter_index] = 0u;
+            } else if (current_external &&
+                    ir_try_populate_closure_capture_from_return_local_binding(
+                        ctx->ast_program,
+                        ctx->program,
+                        current_external,
+                        ctx->current_function_name,
+                        capture_names[parameter_index],
+                        &bound_function_targets[parameter_index],
+                        &bound_function_capture_local_ids[parameter_index],
+                        &bound_function_capture_counts[parameter_index])) {
+                parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_FUNCTION;
+                if (!ir_try_populate_function_capture_signature_from_target(
+                        ctx,
+                        bound_function_targets[parameter_index],
+                        bound_function_capture_counts[parameter_index],
+                        &parameter_function_return_types[parameter_index],
+                        &parameter_function_parameter_counts[parameter_index],
+                        &parameter_function_parameter_value_kinds[parameter_index],
+                        &parameter_function_parameter_return_types[parameter_index],
+                        &parameter_function_parameter_parameter_counts[parameter_index])) {
+                    ir_set_error(error,
+                        closure_expr->line,
+                        closure_expr->column,
+                        "IR-INT-149: failed to recover returned function capture helper signature for '%s' via target '%s'",
+                        capture_names[parameter_index],
+                        bound_function_targets[parameter_index] ? bound_function_targets[parameter_index] : "<null>");
+                    goto cleanup;
+                }
             } else if (ir_try_populate_closure_capture_from_function_parameter(
                     ctx,
                     capture_names[parameter_index],
@@ -1844,8 +2421,21 @@ static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
             ctx->ast_program,
             &synthetic_external,
             synthetic_external.function_body)) {
-        ok = 1;
-        goto cleanup;
+        int all_function_params_bound = 1;
+
+        for (parameter_index = 0u; parameter_index < parameter_count; ++parameter_index) {
+            if (synthetic_external.parameter_value_kinds &&
+                synthetic_external.parameter_value_kinds[parameter_index] == AST_PARAMETER_VALUE_FUNCTION &&
+                (!bound_function_targets[parameter_index] ||
+                    bound_function_targets[parameter_index][0] == '\0')) {
+                all_function_params_bound = 0;
+                break;
+            }
+        }
+        if (!all_function_params_bound) {
+            ok = 1;
+            goto cleanup;
+        }
     }
     ok = ir_lower_function_core(
         ctx->ast_program,
@@ -1857,9 +2447,25 @@ static int ir_lower_closure_helper_function_from_expr(IrLowerContext *ctx,
         (const size_t *const *)bound_function_capture_local_ids,
         bound_function_capture_counts,
         error);
+    if (!ok && error && error->message[0] == '\0') {
+        ir_set_error(error,
+            closure_expr->line,
+            closure_expr->column,
+            "IR-INT-145: closure helper '%s' failed to lower without diagnostic (captures=%zu, params=%zu)",
+            helper_name ? helper_name : "<unnamed>",
+            capture_count,
+            closure_expr->as.closure.parameter_count);
+    }
     (void)capture_local_ids;
 
 cleanup:
+    if (!ok && error && error->message[0] == '\0') {
+        ir_set_error(error,
+            closure_expr ? closure_expr->line : 0,
+            closure_expr ? closure_expr->column : 0,
+            "IR-INT-158: direct closure helper '%s' failed before body registration/lowering diagnostic",
+            helper_name ? helper_name : "<unnamed>");
+    }
     free(parameter_names);
     free(parameter_value_kinds);
     free(parameter_function_return_types);
@@ -1882,6 +2488,7 @@ static int ir_ensure_returned_closure_helper_function(const AstProgram *ast_prog
     const char **out_target_name,
     IrError *error) {
     const AstExpression *closure_expr = NULL;
+    const AstExpression *return_value_expr = NULL;
     IrLowerContext helper_ctx;
     char *helper_name = NULL;
     int ok = 0;
@@ -1895,6 +2502,7 @@ static int ir_ensure_returned_closure_helper_function(const AstProgram *ast_prog
     }
 
     closure_expr = ir_find_function_returned_closure_expr(external->function_body);
+    return_value_expr = ir_find_function_returned_value_expr(external->function_body);
     if (!closure_expr) {
         ir_set_error(error, external->line, external->column,
             "IR-INT-097: returned-closure helper ensure requires a closure return expression");
@@ -1921,6 +2529,19 @@ static int ir_ensure_returned_closure_helper_function(const AstProgram *ast_prog
         helper_ctx.function =
             ir_program_find_function_mut(program, external->name);
     }
+    helper_ctx.current_function_name =
+        helper_ctx.function && helper_ctx.function->name
+            ? helper_ctx.function->name
+            : ((current_function_name_override && current_function_name_override[0] != '\0')
+                ? current_function_name_override
+                : (external ? external->name : NULL));
+    if (return_value_expr &&
+        return_value_expr->kind == AST_EXPR_IDENTIFIER &&
+        return_value_expr->as.identifier.name &&
+        strcmp(return_value_expr->as.identifier.name, "f") != 0) {
+        /* no-op placeholder to keep the returned-value AST available for
+           later local-binding-sensitive helper setup */
+    }
     ok = ir_lower_closure_helper_function_from_expr(
         &helper_ctx,
         closure_expr,
@@ -1936,12 +2557,124 @@ static int ir_ensure_returned_closure_helper_function(const AstProgram *ast_prog
                 "IR-INT-098: returned-closure helper disappeared after lowering");
             ok = 0;
         } else {
+            helper_ctx.function = helper_function;
+            helper_ctx.current_function_name = helper_function->name;
             *out_target_name = helper_function->name;
         }
     }
 
     free(helper_name);
     return ok;
+}
+
+static int ir_ensure_specialized_returned_closure_helper_function(
+    const AstProgram *ast_program,
+    IrProgram *program,
+    const AstExternal *external,
+    const char *specialized_function_name,
+    const char *const *bound_function_targets,
+    const size_t *const *bound_function_capture_local_ids,
+    const size_t *bound_function_capture_counts,
+    const char **out_target_name,
+    IrError *error) {
+    const AstExpression *closure_expr = NULL;
+    IrLowerContext helper_ctx;
+    char *helper_name = NULL;
+    int ok = 0;
+    const char *ignored_target_name = NULL;
+
+    if (out_target_name) {
+        *out_target_name = NULL;
+    } else {
+        out_target_name = &ignored_target_name;
+    }
+    if (!ast_program || !program || !external || !external->function_body ||
+        !specialized_function_name || specialized_function_name[0] == '\0') {
+        ir_set_error(error, 0, 0,
+            "IR-INT-096: invalid specialized returned-closure helper ensure contract");
+        return 0;
+    }
+
+    closure_expr = ir_find_function_returned_closure_expr(external->function_body);
+    if (!closure_expr) {
+        return 1;
+    }
+    if (!ir_build_returned_closure_helper_name_for_owner(
+            external,
+            specialized_function_name,
+            &helper_name,
+            error)) {
+        return 0;
+    }
+
+    memset(&helper_ctx, 0, sizeof(helper_ctx));
+    helper_ctx.ast_program = ast_program;
+    helper_ctx.program = program;
+    helper_ctx.function = ir_program_find_function_mut(program, specialized_function_name);
+    helper_ctx.current_function_name =
+        helper_ctx.function && helper_ctx.function->name
+            ? helper_ctx.function->name
+            : specialized_function_name;
+    helper_ctx.error = error;
+    helper_ctx.function_value_parameter_names =
+        external->parameter_names ? (const char **)external->parameter_names : NULL;
+    helper_ctx.function_value_parameter_targets = bound_function_targets;
+    helper_ctx.function_value_parameter_capture_local_ids = bound_function_capture_local_ids;
+    helper_ctx.function_value_parameter_capture_counts = bound_function_capture_counts;
+    helper_ctx.function_value_parameter_count = external->parameter_count;
+
+    ok = ir_lower_closure_helper_function_from_expr(
+        &helper_ctx,
+        closure_expr,
+        helper_name,
+        (const char *const *)closure_expr->as.closure.capture_names,
+        NULL,
+        closure_expr->as.closure.capture_name_count,
+        error);
+    if (ok) {
+        IrFunction *helper_function = ir_program_find_function_mut(program, helper_name);
+        if (!helper_function || !helper_function->name) {
+            ir_set_error(error,
+                external->line,
+                external->column,
+                "IR-INT-098: specialized returned-closure helper disappeared after lowering");
+            ok = 0;
+        } else {
+            *out_target_name = helper_function->name;
+        }
+    }
+
+    free(helper_name);
+    return ok;
+}
+
+static void ir_reset_function_partial_lowering_state(IrFunction *function) {
+    size_t local_index;
+    size_t block_index;
+
+    if (!function) {
+        return;
+    }
+
+    for (local_index = 0u; local_index < function->local_count; ++local_index) {
+        free(function->locals[local_index].source_name);
+    }
+    free(function->locals);
+    function->locals = NULL;
+    function->local_count = 0u;
+    function->local_capacity = 0u;
+
+    for (block_index = 0u; block_index < function->block_count; ++block_index) {
+        ir_basic_block_free(&function->blocks[block_index]);
+    }
+    free(function->blocks);
+    function->blocks = NULL;
+    function->block_count = 0u;
+    function->block_capacity = 0u;
+
+    function->parameter_count = 0u;
+    function->next_temp_id = 0u;
+    function->has_body = 0;
 }
 
 static int ir_resolve_local_function_value_declaration_target_name(
@@ -2004,6 +2737,10 @@ static int ir_resolve_local_function_value_declaration_target_name(
             external && external->name
                 ? ir_program_find_function_mut(program, external->name)
                 : NULL;
+        helper_ctx.current_function_name =
+            helper_ctx.function && helper_ctx.function->name
+                ? helper_ctx.function->name
+                : (external ? external->name : NULL);
         ok = ir_lower_closure_helper_function_from_expr(
             &helper_ctx,
             base,
@@ -2126,6 +2863,26 @@ static int ir_resolve_function_value_return_target_name(const AstProgram *ast_pr
         return 0;
     }
     if (return_expr->kind == AST_EXPR_CLOSURE) {
+        if (current_function_name_override && current_function_name_override[0] != '\0') {
+            char *specialized_helper_name = NULL;
+            IrFunction *specialized_helper_function = NULL;
+
+            if (!ir_build_returned_closure_helper_name_for_owner(
+                    resolved_external,
+                    current_function_name_override,
+                    &specialized_helper_name,
+                    error)) {
+                return 0;
+            }
+            specialized_helper_function =
+                ir_program_find_function_mut(program, specialized_helper_name);
+            if (specialized_helper_function && specialized_helper_function->name) {
+                *out_target_name = specialized_helper_function->name;
+                free(specialized_helper_name);
+                return 1;
+            }
+            free(specialized_helper_name);
+        }
         return ir_ensure_returned_closure_helper_function(
             ast_program,
             program,
@@ -2148,6 +2905,16 @@ static int ir_resolve_function_value_return_target_name(const AstProgram *ast_pr
             const AstExpression *passthrough_base =
                 ir_unwrap_function_value_wrapper_expression(passthrough_arg_expr);
 
+            if (passthrough_base &&
+                passthrough_base->kind == AST_EXPR_IDENTIFIER &&
+                passthrough_base->as.identifier.name &&
+                ir_function_parameter_name_is_compatible_function_value(
+                    resolved_external,
+                    passthrough_base->as.identifier.name,
+                    resolved_external->function_return_function_return_type,
+                    resolved_external->function_return_function_parameter_count)) {
+                return 1;
+            }
             if (passthrough_base &&
                 passthrough_base->kind == AST_EXPR_IDENTIFIER &&
                 passthrough_base->as.identifier.name &&
@@ -4692,6 +5459,10 @@ static int ir_emit_runtime_initializer_assignment(IrProgram *program,
         memset(&ctx, 0, sizeof(ctx));
         ctx.program = program;
         ctx.function = runtime_init_function;
+        ctx.current_function_name =
+            runtime_init_function && runtime_init_function->name
+                ? runtime_init_function->name
+                : NULL;
         ctx.block_id = append_block_id;
         ctx.has_block = 1;
         ctx.error = error;
@@ -4759,6 +5530,10 @@ static int ir_emit_runtime_initializer_assignment(IrProgram *program,
     memset(&ctx, 0, sizeof(ctx));
     ctx.program = program;
     ctx.function = runtime_init_function;
+    ctx.current_function_name =
+        runtime_init_function && runtime_init_function->name
+            ? runtime_init_function->name
+            : NULL;
     ctx.block_id = append_block_id;
     ctx.has_block = 1;
     ctx.error = error;
@@ -5403,6 +6178,82 @@ static int ir_expression_contains_function_parameter_callee_call(
     }
 }
 
+static int ir_expression_contains_closure_capture_of_function_parameter(
+    const AstExternal *current_external,
+    const AstExpression *expr) {
+    const AstExpression *base = ir_unwrap_paren_expression(expr);
+
+    if (!current_external || !base) {
+        return 0;
+    }
+    if (base->kind == AST_EXPR_CLOSURE) {
+        size_t capture_index;
+        size_t param_index;
+
+        for (capture_index = 0u; capture_index < base->as.closure.capture_name_count; ++capture_index) {
+            const char *capture_name =
+                base->as.closure.capture_names
+                    ? base->as.closure.capture_names[capture_index]
+                    : NULL;
+            if (!capture_name || capture_name[0] == '\0') {
+                continue;
+            }
+            for (param_index = 0u; param_index < current_external->parameter_count; ++param_index) {
+                if (current_external->parameter_value_kinds &&
+                    current_external->parameter_value_kinds[param_index] == AST_PARAMETER_VALUE_FUNCTION &&
+                    current_external->parameter_names &&
+                    current_external->parameter_names[param_index] &&
+                    strcmp(current_external->parameter_names[param_index], capture_name) == 0) {
+                    return 1;
+                }
+            }
+        }
+        return 0;
+    }
+    if (base->kind == AST_EXPR_BINARY) {
+        return ir_expression_contains_closure_capture_of_function_parameter(
+                   current_external,
+                   base->as.binary.left) ||
+            ir_expression_contains_closure_capture_of_function_parameter(
+                   current_external,
+                   base->as.binary.right);
+    }
+    if (base->kind == AST_EXPR_CALL) {
+        size_t arg_index;
+
+        if (ir_expression_contains_closure_capture_of_function_parameter(
+                current_external,
+                base->as.call.callee)) {
+            return 1;
+        }
+        for (arg_index = 0u; arg_index < base->as.call.arg_count; ++arg_index) {
+            if (ir_expression_contains_closure_capture_of_function_parameter(
+                    current_external,
+                    base->as.call.args ? base->as.call.args[arg_index] : NULL)) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    if (base->kind == AST_EXPR_TERNARY) {
+        return ir_expression_contains_closure_capture_of_function_parameter(
+                   current_external,
+                   base->as.ternary.condition) ||
+            ir_expression_contains_closure_capture_of_function_parameter(
+                   current_external,
+                   base->as.ternary.then_expr) ||
+            ir_expression_contains_closure_capture_of_function_parameter(
+                   current_external,
+                   base->as.ternary.else_expr);
+    }
+    if (base->kind == AST_EXPR_UNARY) {
+        return ir_expression_contains_closure_capture_of_function_parameter(
+            current_external,
+            base->as.unary.operand);
+    }
+    return 0;
+}
+
 static int ir_external_body_needs_function_value_specialization(const AstProgram *program,
     const AstExternal *current_external,
     const AstStatement *stmt) {
@@ -5433,7 +6284,7 @@ static int ir_external_body_needs_function_value_specialization(const AstProgram
                 return_expr->as.identifier.name,
                 current_external->function_return_function_return_type,
                 current_external->function_return_function_parameter_count)) {
-            return 1;
+            return 0;
         }
         if (return_expr &&
             return_expr->kind == AST_EXPR_CALL &&
@@ -5453,7 +6304,7 @@ static int ir_external_body_needs_function_value_specialization(const AstProgram
                     passthrough_base->as.identifier.name,
                     current_external->function_return_function_return_type,
                     current_external->function_return_function_parameter_count)) {
-                return 1;
+                return 0;
             }
         }
     }
@@ -5470,6 +6321,11 @@ static int ir_external_body_needs_function_value_specialization(const AstProgram
         }
 
         if (ir_expression_contains_function_parameter_callee_call(current_external, expr)) {
+            return 1;
+        }
+        if (ir_expression_contains_closure_capture_of_function_parameter(
+                current_external,
+                expr)) {
             return 1;
         }
 
@@ -6018,6 +6874,7 @@ static int ir_lower_function_core(const AstProgram *ast_program,
     ctx.program = program;
     ctx.ast_program = ast_program;
     ctx.function = function;
+    ctx.current_function_name = function ? function->name : NULL;
     ctx.function_return_type = external->function_return_type;
     ctx.hidden_return_aggregate_kind = AST_DECLARATION_VALUE_INT;
     ctx.hidden_return_type_name = external->function_return_type_name;
@@ -6050,38 +6907,92 @@ static int ir_lower_function_core(const AstProgram *ast_program,
 
     {
         size_t physical_cursor = 0u;
+        size_t exact_return_passthrough_param_index = (size_t)-1;
 
         failure_stage = "parameter-binding";
 
-        if (!ir_function_lowered_return_slot_count(ast_program, program, external, &ctx.hidden_return_slot_count)) {
-            ir_set_error(error,
-                external->line,
-                external->column,
-                "IR-LOWER-020: function '%s' return lowering shape is unsupported",
-                external->name);
-            goto cleanup;
-        }
         if (ctx.has_function_value_return_payload &&
-            !ir_function_value_return_is_closure_family(
+            ir_function_value_return_exact_parameter_passthrough_index(
                 ast_program,
                 external,
-                &ctx.function_value_return_is_closure_family)) {
-            goto cleanup;
-        }
-        if (ctx.has_function_value_return_payload &&
-            !ir_resolve_function_value_return_target_name(
-                ast_program,
-                program,
-                external,
-                current_function_name,
-                &ctx.function_value_return_target_name,
-                error)) {
-            goto cleanup;
+                &exact_return_passthrough_param_index) &&
+            exact_return_passthrough_param_index != (size_t)-1 &&
+            bound_function_targets &&
+            exact_return_passthrough_param_index < external->parameter_count &&
+            bound_function_targets[exact_return_passthrough_param_index] &&
+            bound_function_targets[exact_return_passthrough_param_index][0] != '\0') {
+            size_t specialized_capture_count =
+                bound_function_capture_counts
+                    ? bound_function_capture_counts[exact_return_passthrough_param_index]
+                    : 0u;
+
+            ctx.hidden_return_slot_count =
+                specialized_capture_count > 0u ? specialized_capture_count : 1u;
+            ctx.function_value_return_is_closure_family =
+                specialized_capture_count > 0u ? 1 : 0;
+            ctx.function_value_return_target_name =
+                bound_function_targets[exact_return_passthrough_param_index];
+        } else {
+            if (!ir_function_lowered_return_slot_count(ast_program, program, external, &ctx.hidden_return_slot_count)) {
+                if (error && error->message[0] == '\0') {
+                    ir_set_error(error,
+                        external->line,
+                        external->column,
+                        "IR-LOWER-020: function '%s' return lowering shape is unsupported",
+                        external->name);
+                }
+                goto cleanup;
+            }
+            if (ctx.has_function_value_return_payload &&
+                !ir_function_value_return_is_closure_family(
+                    ast_program,
+                    external,
+                    &ctx.function_value_return_is_closure_family)) {
+                if (error && error->message[0] == '\0') {
+                    ir_set_error(error,
+                        external->line,
+                        external->column,
+                        "IR-INT-116: function '%s' failed while classifying function-value return payload shape",
+                        external->name);
+                }
+                goto cleanup;
+            }
+            if (ctx.has_function_value_return_payload &&
+                !ir_resolve_function_value_return_target_name(
+                    ast_program,
+                    program,
+                    external,
+                    current_function_name,
+                    &ctx.function_value_return_target_name,
+                    error)) {
+                if (error && error->message[0] == '\0') {
+                    ir_set_error(error,
+                        external->line,
+                        external->column,
+                        "IR-INT-117: function '%s' failed while resolving function-value return target",
+                        external->name);
+                }
+                goto cleanup;
+            }
         }
         if (ctx.hidden_return_slot_count > 0u) {
             ctx.hidden_return_first_local_id = 0u;
             (void)ir_function_return_type_as_aggregate_kind(external, &ctx.hidden_return_aggregate_kind);
             physical_cursor = ctx.hidden_return_slot_count;
+        }
+
+        if (current_function_name && current_function_name[0] != '\0') {
+            function = ir_program_find_function_mut(program, current_function_name);
+            if (!function) {
+                ir_set_error(error,
+                    external->line,
+                    external->column,
+                    "IR-INT-084: current function '%s' disappeared during return-target preparation",
+                    current_function_name);
+                goto cleanup;
+            }
+            ctx.function = function;
+            ctx.current_function_name = function ? function->name : NULL;
         }
 
         for (i = 0u; i < external->parameter_count; ++i) {
@@ -6102,11 +7013,13 @@ static int ir_lower_function_core(const AstProgram *ast_program,
             AstDeclarationValueKind aggregate_kind = AST_DECLARATION_VALUE_INT;
 
             if (!ir_function_source_parameter_slot_count(ast_program, external, i, &parameter_slot_count)) {
-                ir_set_error(error,
-                    external->line,
-                    external->column,
-                    "IR-LOWER-020: function '%s' parameter lowering shape is unsupported",
-                    external->name);
+                if (error && error->message[0] == '\0') {
+                    ir_set_error(error,
+                        external->line,
+                        external->column,
+                        "IR-LOWER-020: function '%s' parameter lowering shape is unsupported",
+                        external->name);
+                }
                 goto cleanup;
             }
             if (!parameter_name || parameter_name[0] == '\0') {
@@ -6118,7 +7031,6 @@ static int ir_lower_function_core(const AstProgram *ast_program,
                     i);
                 goto cleanup;
             }
-
             if (parameter_array_rank > 0u &&
                 !ir_compute_array_extents(&ctx,
                     external->parameter_array_extent_exprs
@@ -6128,6 +7040,13 @@ static int ir_lower_function_core(const AstProgram *ast_program,
                     1,
                     &parameter_array_extents,
                     &ignored_element_count)) {
+                if (error && error->message[0] == '\0') {
+                    ir_set_error(error,
+                        external->line,
+                        external->column,
+                        "IR-INT-118: function '%s' failed while materializing parameter array extents",
+                        external->name);
+                }
                 goto cleanup;
             }
 
@@ -6171,6 +7090,7 @@ static int ir_lower_function_core(const AstProgram *ast_program,
                     bound_function_targets[i][0] != '\0') {
                 size_t capture_count =
                     bound_function_capture_counts ? bound_function_capture_counts[i] : 0u;
+                size_t consumed_slot_count = capture_count;
                 size_t *specialized_capture_local_ids = NULL;
                 size_t capture_index;
 
@@ -6189,6 +7109,14 @@ static int ir_lower_function_core(const AstProgram *ast_program,
                     for (capture_index = 0u; capture_index < capture_count; ++capture_index) {
                         specialized_capture_local_ids[capture_index] = physical_cursor + capture_index;
                     }
+                }
+                if (consumed_slot_count == 0u &&
+                    parameter_slot_count > 0u &&
+                    function->locals &&
+                    physical_cursor < function->local_count &&
+                    function->locals[physical_cursor].source_name &&
+                    strcmp(function->locals[physical_cursor].source_name, parameter_name) == 0) {
+                    consumed_slot_count = parameter_slot_count;
                 }
                 if (!ir_lower_scope_add_binding_with_metadata(&ctx.scopes,
                         parameter_name,
@@ -6218,7 +7146,7 @@ static int ir_lower_function_core(const AstProgram *ast_program,
                 }
                 free(specialized_capture_local_ids);
                 free(parameter_array_extents);
-                physical_cursor += capture_count;
+                physical_cursor += consumed_slot_count;
                 continue;
             } else if (external->parameter_value_kinds &&
                     external->parameter_value_kinds[i] == AST_PARAMETER_VALUE_FUNCTION) {
@@ -6342,8 +7270,10 @@ static int ir_lower_function_core(const AstProgram *ast_program,
             ir_set_error(error,
                 external->function_body ? external->function_body->line : external->line,
                 external->function_body ? external->function_body->column : external->column,
-                "IR-INT-117: function '%s' failed while lowering function body statement tree",
-                external->name);
+                "IR-INT-117: function '%s' failed while lowering function body statement tree (stage=%s, current=%s)",
+                external->name,
+                failure_stage ? failure_stage : "body-lowering",
+                ctx.current_function_name ? ctx.current_function_name : "<null>");
         }
         goto cleanup;
     }
@@ -6360,6 +7290,7 @@ static int ir_lower_function_core(const AstProgram *ast_program,
             goto cleanup;
         }
         ctx.function = function;
+        ctx.current_function_name = function ? function->name : NULL;
     }
 
     failure_stage = "post-body-block-check";
@@ -6476,6 +7407,9 @@ cleanup:
     ir_lower_function_value_target_sets_free(
         ctx.function_value_target_sets,
         ctx.function_value_target_set_count);
+    ir_lower_returned_call_materializations_free(
+        ctx.returned_call_materializations,
+        ctx.returned_call_materialization_count);
     return ok;
 }
 
@@ -6577,6 +7511,7 @@ static int ir_lower_closure_helper_function(IrLowerContext *ctx,
     const AstExpression *closure_expr = NULL;
     AstExternal synthetic_external;
     AstExternal *registered_external = NULL;
+    const AstExternal *current_external = NULL;
     IrFunction *function = NULL;
     char **parameter_names = NULL;
     int *parameter_value_kinds = NULL;
@@ -6600,6 +7535,17 @@ static int ir_lower_closure_helper_function(IrLowerContext *ctx,
         !decl_stmt->expressions || declaration_index >= decl_stmt->expression_count) {
         ir_set_error(error, 0, 0, "IR-INT-086: invalid closure helper lowering contract");
         return 0;
+    }
+
+    if (ctx->function && ctx->function->name) {
+        current_external =
+            ir_program_find_function_external_ref(ctx->program, ctx->function->name);
+        if (!current_external) {
+            current_external =
+                ir_find_named_function_external_prefer_definition(
+                    ctx->ast_program,
+                    ctx->function->name);
+        }
     }
 
     initializer_expr = decl_stmt->expressions[declaration_index];
@@ -6649,21 +7595,68 @@ static int ir_lower_closure_helper_function(IrLowerContext *ctx,
     for (parameter_index = 0u; parameter_index < capture_count; ++parameter_index) {
         parameter_names[parameter_index] = (char *)(capture_names ? capture_names[parameter_index] : NULL);
         parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_INT;
+        parameter_function_return_types[parameter_index] = AST_FUNCTION_RETURN_INT;
+        parameter_function_parameter_counts[parameter_index] = 0u;
+        parameter_function_parameter_value_kinds[parameter_index] = NULL;
+        parameter_function_parameter_return_types[parameter_index] = NULL;
+        parameter_function_parameter_parameter_counts[parameter_index] = NULL;
         parameter_name_lines[parameter_index] = closure_expr->line;
         parameter_name_columns[parameter_index] = closure_expr->column;
         if (capture_names && capture_names[parameter_index]) {
             IrLowerFunctionObjectDescriptor capture_descriptor;
+            const IrFunctionValueTargetSet *capture_target_set = NULL;
             long long capture_tag_value = 0;
+            int capture_descriptor_resolved = 0;
+            int capture_is_effectively_static_family = 0;
 
             ir_init_function_object_descriptor(&capture_descriptor);
-            if (ir_resolve_identifier_function_value_descriptor(
-                    ctx,
-                    capture_names[parameter_index],
-                    &capture_descriptor) &&
+            capture_target_set = ir_lower_find_function_value_target_set(
+                ctx,
+                capture_names[parameter_index]);
+            capture_descriptor_resolved = ir_resolve_identifier_function_value_descriptor(
+                ctx,
+                capture_names[parameter_index],
+                &capture_descriptor);
+            capture_is_effectively_static_family =
+                !capture_descriptor_resolved ||
+                !capture_descriptor.has_dynamic_family ||
+                !capture_target_set ||
+                capture_target_set->target_count <= 1u;
+            if (capture_descriptor_resolved &&
+                capture_descriptor.direct_target_name &&
+                capture_descriptor.direct_target_name[0] != '\0' &&
+                capture_is_effectively_static_family &&
+                capture_descriptor.capture_count > 0u) {
+                parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_FUNCTION;
+                if (!ir_try_populate_function_capture_signature_from_target(
+                        ctx,
+                        capture_descriptor.direct_target_name,
+                        capture_descriptor.capture_count,
+                        &parameter_function_return_types[parameter_index],
+                        &parameter_function_parameter_counts[parameter_index],
+                        &parameter_function_parameter_value_kinds[parameter_index],
+                        &parameter_function_parameter_return_types[parameter_index],
+                        &parameter_function_parameter_parameter_counts[parameter_index])) {
+                    ir_set_error(error,
+                        decl_stmt->line,
+                        decl_stmt->column,
+                        "IR-INT-150: failed to recover statement closure capture helper signature for '%s' via target '%s'",
+                        capture_names[parameter_index],
+                        capture_descriptor.direct_target_name);
+                    goto cleanup;
+                }
+                bound_function_targets[parameter_index] = capture_descriptor.direct_target_name;
+                bound_function_capture_local_ids[parameter_index] =
+                    capture_descriptor.capture_local_ids;
+                bound_function_capture_counts[parameter_index] =
+                    capture_descriptor.capture_count;
+                continue;
+            }
+            if (capture_descriptor_resolved &&
                 capture_descriptor.direct_target_name &&
                 capture_descriptor.direct_target_name[0] != '\0' &&
                 !capture_descriptor.is_closure_family &&
-                !capture_descriptor.has_dynamic_family &&
+                capture_is_effectively_static_family &&
                 (ir_program_find_function_mut(ctx->program, capture_descriptor.direct_target_name) ||
                     ir_program_find_function_external_ref(ctx->program, capture_descriptor.direct_target_name) ||
                     ir_builtin_function_name_exists(capture_descriptor.direct_target_name)) &&
@@ -6673,11 +7666,54 @@ static int ir_lower_closure_helper_function(IrLowerContext *ctx,
                     capture_descriptor.direct_target_name,
                     &capture_tag_value)) {
                 parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_FUNCTION;
-                parameter_function_return_types[parameter_index] = AST_FUNCTION_RETURN_INT;
-                parameter_function_parameter_counts[parameter_index] = 1u;
+                if (!ir_try_populate_function_capture_signature_from_target(
+                        ctx,
+                        capture_descriptor.direct_target_name,
+                        0u,
+                        &parameter_function_return_types[parameter_index],
+                        &parameter_function_parameter_counts[parameter_index],
+                        &parameter_function_parameter_value_kinds[parameter_index],
+                        &parameter_function_parameter_return_types[parameter_index],
+                        &parameter_function_parameter_parameter_counts[parameter_index])) {
+                    ir_set_error(error,
+                        decl_stmt->line,
+                        decl_stmt->column,
+                        "IR-INT-151: failed to recover statement static function capture helper signature for '%s' via target '%s'",
+                        capture_names[parameter_index],
+                        capture_descriptor.direct_target_name);
+                    goto cleanup;
+                }
                 bound_function_targets[parameter_index] = capture_descriptor.direct_target_name;
                 bound_function_capture_local_ids[parameter_index] = NULL;
                 bound_function_capture_counts[parameter_index] = 0u;
+            } else if (current_external &&
+                    ir_try_populate_closure_capture_from_return_local_binding(
+                        ctx->ast_program,
+                        ctx->program,
+                        current_external,
+                        ctx->current_function_name,
+                        capture_names[parameter_index],
+                        &bound_function_targets[parameter_index],
+                        &bound_function_capture_local_ids[parameter_index],
+                        &bound_function_capture_counts[parameter_index])) {
+                parameter_value_kinds[parameter_index] = AST_PARAMETER_VALUE_FUNCTION;
+                if (!ir_try_populate_function_capture_signature_from_target(
+                        ctx,
+                        bound_function_targets[parameter_index],
+                        bound_function_capture_counts[parameter_index],
+                        &parameter_function_return_types[parameter_index],
+                        &parameter_function_parameter_counts[parameter_index],
+                        &parameter_function_parameter_value_kinds[parameter_index],
+                        &parameter_function_parameter_return_types[parameter_index],
+                        &parameter_function_parameter_parameter_counts[parameter_index])) {
+                    ir_set_error(error,
+                        decl_stmt->line,
+                        decl_stmt->column,
+                        "IR-INT-152: failed to recover statement returned function capture helper signature for '%s' via target '%s'",
+                        capture_names[parameter_index],
+                        bound_function_targets[parameter_index] ? bound_function_targets[parameter_index] : "<null>");
+                    goto cleanup;
+                }
             } else if (ir_try_populate_closure_capture_from_function_parameter(
                     ctx,
                     capture_names[parameter_index],
@@ -6807,8 +7843,21 @@ static int ir_lower_closure_helper_function(IrLowerContext *ctx,
             ctx->ast_program,
             &synthetic_external,
             synthetic_external.function_body)) {
-        ok = 1;
-        goto cleanup;
+        int all_function_params_bound = 1;
+
+        for (parameter_index = 0u; parameter_index < parameter_count; ++parameter_index) {
+            if (synthetic_external.parameter_value_kinds &&
+                synthetic_external.parameter_value_kinds[parameter_index] == AST_PARAMETER_VALUE_FUNCTION &&
+                (!bound_function_targets[parameter_index] ||
+                    bound_function_targets[parameter_index][0] == '\0')) {
+                all_function_params_bound = 0;
+                break;
+            }
+        }
+        if (!all_function_params_bound) {
+            ok = 1;
+            goto cleanup;
+        }
     }
     ok = ir_lower_function_core(
         ctx->ast_program,
@@ -6820,9 +7869,25 @@ static int ir_lower_closure_helper_function(IrLowerContext *ctx,
         (const size_t *const *)bound_function_capture_local_ids,
         bound_function_capture_counts,
         error);
+    if (!ok && error && error->message[0] == '\0') {
+        ir_set_error(error,
+            decl_stmt->line,
+            decl_stmt->column,
+            "IR-INT-146: statement closure helper '%s' failed to lower without diagnostic (captures=%zu, params=%zu)",
+            helper_name ? helper_name : "<unnamed>",
+            capture_count,
+            closure_expr ? closure_expr->as.closure.parameter_count : 0u);
+    }
     (void)capture_local_ids;
 
 cleanup:
+    if (!ok && error && error->message[0] == '\0') {
+        ir_set_error(error,
+            decl_stmt ? decl_stmt->line : 0,
+            decl_stmt ? decl_stmt->column : 0,
+            "IR-INT-159: statement closure helper '%s' failed before body registration/lowering diagnostic",
+            helper_name ? helper_name : "<unnamed>");
+    }
     free(parameter_names);
     free(parameter_value_kinds);
     free(parameter_function_return_types);
@@ -6866,14 +7931,32 @@ static int ir_lower_specialized_function_for_function_value_call(
 
     function = ir_program_find_function_mut(program, specialized_name);
     if (function) {
-        if (out_specialized_name) {
-            *out_specialized_name = function->name;
+        if (!function->has_body &&
+            (function->block_count > 0u ||
+                function->local_count > 0u ||
+                function->parameter_count > 0u ||
+                function->next_temp_id > 0u)) {
+            ir_reset_function_partial_lowering_state(function);
+        } else if (function->has_body) {
+            if (out_specialized_name) {
+                *out_specialized_name = function->name;
+            }
+            free(specialized_name);
+            return 1;
         }
-        free(specialized_name);
-        return 1;
     }
-
-    if (!ir_program_append_function(program, specialized_name, &function, error)) {
+    if (!function &&
+        !ir_program_append_function(program, specialized_name, &function, error)) {
+        free(specialized_name);
+        return 0;
+    }
+    function = ir_program_find_function_mut(program, specialized_name);
+    if (!function) {
+        ir_set_error(error,
+            external->line,
+            external->column,
+            "IR-INT-082: specialized function '%s' disappeared during signature lowering",
+            specialized_name);
         free(specialized_name);
         return 0;
     }
@@ -6957,6 +8040,31 @@ static int ir_lower_specialized_function_for_function_value_call(
             external->line,
             external->column,
             "IR-INT-082: specialized function '%s' disappeared before body lowering",
+            specialized_name);
+        free(specialized_name);
+        return 0;
+    }
+
+    if (!ir_ensure_specialized_returned_closure_helper_function(
+            ast_program,
+            program,
+            external,
+            specialized_name,
+            bound_function_targets,
+            bound_function_capture_local_ids,
+            bound_function_capture_counts,
+            NULL,
+            error)) {
+        free(specialized_name);
+        return 0;
+    }
+
+    function = ir_program_find_function_mut(program, specialized_name);
+    if (!function) {
+        ir_set_error(error,
+            external->line,
+            external->column,
+            "IR-INT-082: specialized function '%s' disappeared after helper preparation",
             specialized_name);
         free(specialized_name);
         return 0;
@@ -7122,6 +8230,7 @@ int ir_lower_program(const AstProgram *ast_program,
             memset(&ctx, 0, sizeof(ctx));
             ctx.program = out_program;
             ctx.function = program_init;
+            ctx.current_function_name = program_init ? program_init->name : NULL;
             ctx.block_id = 0;
             ctx.has_block = 1;
             ctx.error = error;

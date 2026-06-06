@@ -15025,6 +15025,54 @@ cleanup:
     return ok;
 }
 
+static int test_value_ssa_translation_only_preserves_mixed_dynamic_closure_function_argument_consumers(void) {
+    static const char *source =
+        "int compose(int f(int), int g(int), int x){ return f(g(x)); }\n"
+        "int compose2(int f(int), int g(int), int x){ return g(f(x)); }\n"
+        "int idh(int h(int f(int), int g(int), int x))(int f(int), int g(int), int x){ return h; }\n"
+        "int choose(int c)(int f(int), int g(int), int x){ int h(int f(int), int g(int), int x)=compose; int k(int f(int), int g(int), int x)=compose2; if(c) h=k; return h; }\n"
+        "int pick(int c, int f(int))(int){ int a(int)=closure [f] int (int y){ return f(y); }; int b(int)=closure [f] int (int y){ return f(f(y)); }; if(c) a=b; return a; }\n"
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(choose(getint()))(pick(getint(), add1), make(3), 4); }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    if (!build_value_ssa_translation_only_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-MIXED-DYNAMIC-CLOSURE-CONSUMERS setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-MIXED-DYNAMIC-CLOSURE-CONSUMERS dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "call choose(") ||
+        !strstr(actual_text, "call pick__fv_1_add1(") ||
+        !strstr(actual_text, "call make(") ||
+        !strstr(actual_text, "call __fnwrap_pick__fv_1_add1__closure_a_") ||
+        !strstr(actual_text, "call __fnwrap_pick__fv_1_add1__closure_b_") ||
+        !strstr(actual_text, "call __fnwrap_closure_make__retclosure_") ||
+        strstr(actual_text, "compose__fv_") ||
+        strstr(actual_text, "compose2__fv_")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-MIXED-DYNAMIC-CLOSURE-CONSUMERS dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_value_ssa_float_global_literal_analysis_surface(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -29351,7 +29399,13 @@ static int test_value_ssa_default_conversion_returned_function_value_parameter_b
     return expect_default_converted_dump(
         "VALUE-SSA-CONVERT-DEFAULT-RETURNED-FUNCTION-VALUE-PARAM-BIND",
         build_lower_ir_returned_function_value_parameter_bind_and_call_program,
-        "declare id(__ret0.0, f.1)\n"
+        "func id(__ret0.0, f.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local __ret0.0\n"
+        "    ssa.1 = load_local f.1\n"
+        "    store_indirect ssa.0, ssa.1\n"
+        "    ret\n"
+        "}\n"
         "\n"
         "func add1(x.0) {\n"
         "  bb.0:\n"
@@ -29377,7 +29431,13 @@ static int test_value_ssa_default_conversion_dynamic_returned_function_value_par
     return expect_default_converted_dump(
         "VALUE-SSA-CONVERT-DEFAULT-DYN-RETURNED-FUNCTION-VALUE-PARAM-IMM",
         build_lower_ir_dynamic_returned_function_value_parameter_immediate_call_program,
-        "declare id(__ret0.0, f.1)\n"
+        "func id(__ret0.0, f.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local __ret0.0\n"
+        "    ssa.1 = load_local f.1\n"
+        "    store_indirect ssa.0, ssa.1\n"
+        "    ret\n"
+        "}\n"
         "\n"
         "func add1(x.0) {\n"
         "  bb.0:\n"
@@ -29430,7 +29490,13 @@ static int test_value_ssa_default_conversion_returned_closure_backed_function_va
     return expect_default_converted_dump(
         "VALUE-SSA-CONVERT-DEFAULT-RETURNED-CLOSURE-BACKED-FUNCTION-VALUE-PARAM-IMM",
         build_lower_ir_returned_closure_backed_function_value_parameter_immediate_call_program,
-        "declare id(__ret0.0, f.1)\n"
+        "func id(__ret0.0, f.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local __ret0.0\n"
+        "    ssa.1 = load_local f.1\n"
+        "    store_indirect ssa.0, ssa.1\n"
+        "    ret\n"
+        "}\n"
         "\n"
         "func main() {\n"
         "  bb.0:\n"
@@ -29470,7 +29536,13 @@ static int test_value_ssa_default_conversion_returned_closure_backed_function_va
     return expect_default_converted_dump(
         "VALUE-SSA-CONVERT-DEFAULT-RETURNED-CLOSURE-BACKED-FUNCTION-VALUE-PARAM-BIND",
         build_lower_ir_returned_closure_backed_function_value_parameter_bind_and_call_program,
-        "declare id(__ret0.0, f.1)\n"
+        "func id(__ret0.0, f.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local __ret0.0\n"
+        "    ssa.1 = load_local f.1\n"
+        "    store_indirect ssa.0, ssa.1\n"
+        "    ret\n"
+        "}\n"
         "\n"
         "func main() {\n"
         "  bb.0:\n"
@@ -29532,7 +29604,13 @@ static int test_value_ssa_default_conversion_dynamic_returned_closure_backed_fun
     return expect_default_converted_dump(
         "VALUE-SSA-CONVERT-DEFAULT-DYN-RETURNED-CLOSURE-BACKED-FUNCTION-VALUE-PARAM-IMM",
         build_lower_ir_dynamic_returned_closure_backed_function_value_parameter_immediate_call_program,
-        "declare id(__ret0.0, f.1)\n"
+        "func id(__ret0.0, f.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local __ret0.0\n"
+        "    ssa.1 = load_local f.1\n"
+        "    store_indirect ssa.0, ssa.1\n"
+        "    ret\n"
+        "}\n"
         "\n"
         "func main() {\n"
         "  bb.0:\n"
@@ -29582,7 +29660,13 @@ static int test_value_ssa_default_conversion_dynamic_returned_closure_backed_fun
     return expect_default_converted_dump(
         "VALUE-SSA-CONVERT-DEFAULT-DYN-RETURNED-CLOSURE-BACKED-FUNCTION-VALUE-PARAM-BIND",
         build_lower_ir_dynamic_returned_closure_backed_function_value_parameter_bind_and_call_program,
-        "declare id(__ret0.0, f.1)\n"
+        "func id(__ret0.0, f.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local __ret0.0\n"
+        "    ssa.1 = load_local f.1\n"
+        "    store_indirect ssa.0, ssa.1\n"
+        "    ret\n"
+        "}\n"
         "\n"
         "func main() {\n"
         "  bb.0:\n"
@@ -30388,6 +30472,9 @@ int main(void) {
     if (filter && filter[0] != '\0') {
         if (strstr("VALUE-SSA-FLOAT-SOURCE-TRANSPORT", filter) != NULL) {
             return test_value_ssa_translation_only_lowers_extension_float_transport() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-MIXED-DYNAMIC-CLOSURE-CONSUMERS", filter) != NULL) {
+            return test_value_ssa_translation_only_preserves_mixed_dynamic_closure_function_argument_consumers() ? 0 : 1;
         }
         if (strstr("VALUE-SSA-FLOAT-GLOBAL-LITERAL-RUNTIME-INIT", filter) != NULL) {
             return test_value_ssa_translation_only_lowers_extension_float_global_literal_runtime_init() ? 0 : 1;

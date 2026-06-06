@@ -42,6 +42,7 @@ typedef struct {
 } IrLowerScope;
 
 typedef struct {
+    const char *name;
     size_t local_id;
     IrLowerBindingKind kind;
     size_t array_rank;
@@ -108,6 +109,7 @@ typedef struct {
 } IrFunctionDeferEntryStack;
 
 typedef struct {
+    const char *function_name;
     const char *binding_name;
     const char **target_names;
     size_t target_count;
@@ -115,9 +117,19 @@ typedef struct {
 } IrFunctionValueTargetSet;
 
 typedef struct {
+    const AstExpression *call_expr;
+    const AstExternal *producer_external;
+    const char *payload_local_name_prefix;
+    size_t *payload_local_ids;
+    size_t payload_slot_count;
+    int return_family_is_closure;
+} IrLowerReturnedCallMaterialization;
+
+typedef struct {
     IrProgram *program;
     const AstProgram *ast_program;
     IrFunction *function;
+    const char *current_function_name;
     AstFunctionReturnType function_return_type;
     AstDeclarationValueKind hidden_return_aggregate_kind;
     const char *hidden_return_type_name;
@@ -145,6 +157,9 @@ typedef struct {
     const size_t *const *function_value_parameter_capture_local_ids;
     const size_t *function_value_parameter_capture_counts;
     size_t function_value_parameter_count;
+    IrLowerReturnedCallMaterialization *returned_call_materializations;
+    size_t returned_call_materialization_count;
+    size_t returned_call_materialization_capacity;
     IrError *error;
 } IrLowerContext;
 
@@ -331,6 +346,16 @@ static int ir_init_function_object_descriptor_from_binding_info(
     return 1;
 }
 
+static const char *ir_lower_current_function_name(const IrLowerContext *ctx) {
+    if (!ctx) {
+        return NULL;
+    }
+    if (ctx->current_function_name && ctx->current_function_name[0] != '\0') {
+        return ctx->current_function_name;
+    }
+    return (ctx->function && ctx->function->name) ? ctx->function->name : NULL;
+}
+
 static int ir_init_function_object_descriptor_from_static_target(
     const char *target_name,
     int is_closure_family,
@@ -482,6 +507,29 @@ static int ir_lower_scope_stack_clone(const IrLowerScopeStack *src,
 static int ir_lower_scope_stack_merge_const_facts(IrLowerScopeStack *dest,
     const IrLowerScopeStack *lhs,
     const IrLowerScopeStack *rhs);
+static int ir_lower_function_value_target_sets_clone(
+    const IrLowerContext *ctx,
+    IrFunctionValueTargetSet **out_sets,
+    size_t *out_count,
+    size_t *out_capacity);
+static int ir_lower_function_value_target_sets_clone_raw(
+    const IrFunctionValueTargetSet *src_sets,
+    size_t src_count,
+    IrFunctionValueTargetSet **out_sets,
+    size_t *out_count,
+    size_t *out_capacity);
+static int ir_lower_function_value_target_sets_merge_union(
+    IrFunctionValueTargetSet **out_sets,
+    size_t *out_count,
+    size_t *out_capacity,
+    const IrFunctionValueTargetSet *lhs_sets,
+    size_t lhs_count,
+    const IrFunctionValueTargetSet *rhs_sets,
+    size_t rhs_count);
+static int ir_lower_register_function_value_target(IrLowerContext *ctx,
+    const char *binding_name,
+    const char *target_name,
+    long long *out_tag_value);
 static void ir_lower_defer_entry_stack_free(IrDeferEntryStack *stack);
 static int ir_lower_defer_entry_stack_push(IrDeferEntryStack *stack, const AstStatement *payload_stmt);
 static int ir_lower_defer_entry_stack_push_with_captures(IrDeferEntryStack *stack,
@@ -941,6 +989,133 @@ static int ir_next_growth_capacity(size_t current,
     }
 
     *out_next_capacity = next_capacity;
+    return 1;
+}
+
+static void ir_lower_returned_call_materializations_free(
+    IrLowerReturnedCallMaterialization *items,
+    size_t count) {
+    size_t index;
+
+    if (!items) {
+        return;
+    }
+    for (index = 0u; index < count; ++index) {
+        free(items[index].payload_local_ids);
+    }
+    free(items);
+}
+
+static const IrLowerReturnedCallMaterialization *
+ir_lower_find_returned_call_materialization(
+    const IrLowerContext *ctx,
+    const AstExpression *call_expr,
+    const char *payload_local_name_prefix) {
+    size_t index;
+
+    if (!ctx || !call_expr || !payload_local_name_prefix ||
+        payload_local_name_prefix[0] == '\0') {
+        return NULL;
+    }
+    for (index = 0u; index < ctx->returned_call_materialization_count; ++index) {
+        const IrLowerReturnedCallMaterialization *entry =
+            &ctx->returned_call_materializations[index];
+
+        if (entry->call_expr == call_expr &&
+            entry->payload_local_name_prefix &&
+            strcmp(entry->payload_local_name_prefix, payload_local_name_prefix) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static const IrLowerReturnedCallMaterialization *
+ir_lower_find_returned_call_materialization_any_prefix(
+    const IrLowerContext *ctx,
+    const AstExpression *call_expr) {
+    size_t index;
+
+    if (!ctx || !call_expr) {
+        return NULL;
+    }
+    for (index = 0u; index < ctx->returned_call_materialization_count; ++index) {
+        const IrLowerReturnedCallMaterialization *entry =
+            &ctx->returned_call_materializations[index];
+
+        if (entry->call_expr == call_expr) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static int ir_lower_record_returned_call_materialization(
+    IrLowerContext *ctx,
+    const AstExpression *call_expr,
+    const AstExternal *producer_external,
+    const char *payload_local_name_prefix,
+    const size_t *payload_local_ids,
+    size_t payload_slot_count,
+    int return_family_is_closure) {
+    IrLowerReturnedCallMaterialization *new_items;
+    size_t next_capacity;
+    size_t *payload_copy = NULL;
+    size_t index;
+
+    if (!ctx || !call_expr || !producer_external ||
+        !payload_local_name_prefix || payload_local_name_prefix[0] == '\0' ||
+        payload_slot_count == 0u || !payload_local_ids) {
+        return 0;
+    }
+
+    for (index = 0u; index < ctx->returned_call_materialization_count; ++index) {
+        IrLowerReturnedCallMaterialization *entry =
+            &ctx->returned_call_materializations[index];
+
+        if (entry->call_expr == call_expr &&
+            entry->payload_local_name_prefix &&
+            strcmp(entry->payload_local_name_prefix, payload_local_name_prefix) == 0) {
+            return 1;
+        }
+    }
+
+    payload_copy = (size_t *)malloc(payload_slot_count * sizeof(size_t));
+    if (!payload_copy) {
+        return 0;
+    }
+    memcpy(payload_copy, payload_local_ids, payload_slot_count * sizeof(size_t));
+
+    if (ctx->returned_call_materialization_count ==
+        ctx->returned_call_materialization_capacity) {
+        if (!ir_next_growth_capacity(
+                ctx->returned_call_materialization_capacity,
+                8u,
+                sizeof(IrLowerReturnedCallMaterialization),
+                &next_capacity)) {
+            free(payload_copy);
+            return 0;
+        }
+        new_items = (IrLowerReturnedCallMaterialization *)realloc(
+            ctx->returned_call_materializations,
+            next_capacity * sizeof(IrLowerReturnedCallMaterialization));
+        if (!new_items) {
+            free(payload_copy);
+            return 0;
+        }
+        ctx->returned_call_materializations = new_items;
+        ctx->returned_call_materialization_capacity = next_capacity;
+    }
+
+    index = ctx->returned_call_materialization_count++;
+    ctx->returned_call_materializations[index].call_expr = call_expr;
+    ctx->returned_call_materializations[index].producer_external = producer_external;
+    ctx->returned_call_materializations[index].payload_local_name_prefix =
+        payload_local_name_prefix;
+    ctx->returned_call_materializations[index].payload_local_ids = payload_copy;
+    ctx->returned_call_materializations[index].payload_slot_count = payload_slot_count;
+    ctx->returned_call_materializations[index].return_family_is_closure =
+        return_family_is_closure ? 1 : 0;
     return 1;
 }
 

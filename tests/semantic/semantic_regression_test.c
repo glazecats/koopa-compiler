@@ -156,6 +156,38 @@ static int run_extension_semantic_expect_rejects(const char *case_id,
     const char *source,
     const char *expected_code);
 
+static int test_semantic_accepts_static_function_value_capture_inside_closure_under_extension(void) {
+    const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ int f(int)=add1; int g(int)=closure [f] int (int y){ return f(y); }; return g(4); }\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    SemanticOptions options;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    memset(&options, 0, sizeof(options));
+    options.skip_all_paths_return_check = 1;
+    options.allow_extension_features = 1;
+
+    if (!semantic_analyze_program_with_options(&program, &options, &sema_err)) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: static function-value capture inside closure should pass under extension, got: %s\n",
+            sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 /* Split for maintainability: keep regression execution order in main, move case bodies to fragments. */
 #include "semantic_regression_callable_flow.inc"
 #include "semantic_regression_scope_cf.inc"
@@ -164,6 +196,9 @@ int main(void) {
     int ok = 1;
 
     if (filter && filter[0] != '\0') {
+        if (strstr("SEMANTIC-CLOSURE-FN-CAPTURE", filter) != NULL) {
+            return test_semantic_accepts_static_function_value_capture_inside_closure_under_extension() ? 0 : 1;
+        }
         if (strstr("SEMANTIC-FLOAT-TRANSPORT", filter) != NULL) {
             return test_semantic_accepts_float_function_signature_transport_under_extension() ? 0 : 1;
         }
@@ -271,6 +306,12 @@ int main(void) {
         }
         if (strstr("SEMANTIC-THIRD-ORDER-FNVAL-FORWARD", filter) != NULL) {
             return test_semantic_accepts_third_order_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FOURTH-ORDER-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_fourth_order_function_value_parameter_forwarding_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FIFTH-ORDER-FNVAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_fifth_order_function_value_parameter_forwarding_under_extension() ? 0 : 1;
         }
         if (strstr("SEMANTIC-THIRD-ORDER-RETURNED-FNVAL-BIND", filter) != NULL) {
             return test_semantic_accepts_third_order_returned_function_value_parameter_bind_under_extension() ? 0 : 1;
@@ -785,6 +826,8 @@ int main(void) {
     ok &= test_semantic_accepts_second_order_dynamic_local_closure_function_value_parameter_forwarding_under_extension();
     ok &= test_semantic_accepts_second_order_returned_closure_function_value_parameter_forwarding_under_extension();
     ok &= test_semantic_accepts_third_order_function_value_parameter_forwarding_under_extension();
+    ok &= test_semantic_accepts_fourth_order_function_value_parameter_forwarding_under_extension();
+    ok &= test_semantic_accepts_fifth_order_function_value_parameter_forwarding_under_extension();
     ok &= test_semantic_accepts_explicit_float_logical_condition_composition_under_extension();
     ok &= test_semantic_accepts_recursive_float_if_condition_under_extension();
     ok &= test_semantic_accepts_recursive_float_while_condition_under_extension();
@@ -1069,6 +1112,13 @@ int main(void) {
     ok &= test_semantic_rejects_local_function_value_alias_chain_expected_parameter_kind_mismatch_under_extension();
     ok &= test_semantic_rejects_local_function_value_assignment_parameter_kind_mismatch_under_extension();
     ok &= test_semantic_accepts_local_function_value_reassignment_under_extension();
+    ok &= test_semantic_accepts_declaration_only_local_function_value_assignment_under_extension();
+    ok &= test_semantic_accepts_declaration_only_local_closure_assignment_under_extension();
+    ok &= test_semantic_accepts_declaration_only_local_returned_function_value_assignment_under_extension();
+    ok &= test_semantic_accepts_declaration_only_local_returned_closure_assignment_under_extension();
+    ok &= test_semantic_accepts_declaration_only_local_ternary_function_value_assignment_under_extension();
+    ok &= test_semantic_accepts_declaration_only_local_closure_alias_assignment_under_extension();
+    ok &= test_semantic_accepts_declaration_only_local_returned_closure_alias_assignment_under_extension();
     ok &= test_semantic_accepts_returned_function_value_reassignment_under_extension();
     ok &= test_semantic_accepts_returned_zero_arg_function_value_reassignment_under_extension();
     ok &= test_semantic_accepts_returned_closure_reassignment_under_extension();
@@ -1110,7 +1160,7 @@ int main(void) {
     ok &= test_semantic_rejects_void_direct_closure_literal_argument_to_function_value_parameter_arity_mismatch_under_extension();
     ok &= test_semantic_accepts_comma_wrapped_closure_forward_into_function_value_parameter_under_extension();
     ok &= test_semantic_rejects_comma_wrapped_closure_forward_into_function_value_parameter_scalar_type_mismatch_under_extension();
-    ok &= test_semantic_rejects_assignment_of_closure_literal_after_function_local_declaration_under_extension();
+    ok &= test_semantic_accepts_assignment_of_closure_literal_after_closure_local_declaration_under_extension();
     ok &= test_semantic_accepts_int_closure_expression_statement_prefix_under_extension();
     ok &= test_semantic_rejects_int_closure_control_flow_prefix_under_extension();
     ok &= test_semantic_accepts_int_closure_local_decl_prefix_under_extension();
@@ -1210,6 +1260,7 @@ int main(void) {
     ok &= test_semantic_rejects_float_array_parameter_under_extension();
     ok &= test_semantic_rejects_pair_array_local_declaration_under_extension();
     ok &= test_semantic_rejects_struct_array_local_declaration_under_extension();
+    ok &= test_semantic_accepts_static_function_value_capture_inside_closure_under_extension();
     ok &= test_semantic_accepts_forwarding_function_valued_parameter_under_extension_for_now();
     ok &= test_semantic_accepts_multiple_function_valued_parameters_under_extension_for_now();
     ok &= test_semantic_accepts_void_function_valued_parameter_with_builtin_binding_under_extension();

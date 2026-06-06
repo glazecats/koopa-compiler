@@ -181,8 +181,8 @@ int main(void) {
     ok &= test_ast_records_void_function_valued_parameter_metadata();
     ok &= test_ast_records_zero_arg_function_valued_parameter_metadata();
     ok &= test_ast_records_zero_arg_void_function_valued_parameter_metadata();
-    ok &= test_ast_rejects_deeply_nested_function_valued_parameter_metadata_for_now();
-    ok &= test_ast_rejects_deeply_nested_function_valued_return_metadata_for_now();
+    ok &= test_ast_accepts_deeply_nested_function_valued_parameter_metadata();
+    ok &= test_ast_accepts_deeply_nested_function_valued_return_metadata();
     ok &= test_ast_rejects_non_int_inner_function_valued_parameter_for_now();
     ok &= test_ast_rejects_non_int_inner_function_valued_return_parameter_for_now();
     ok &= test_ast_records_function_valued_return_metadata();

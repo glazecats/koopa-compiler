@@ -1555,12 +1555,31 @@ static int ir_finalize_materialized_returned_closure_binding_descriptor(
     size_t expected_payload_slot_count,
     IrLowerFunctionObjectDescriptor *materialized_descriptor,
     IrLowerFunctionObjectDescriptor *out_descriptor) {
+    const char *effective_primary_target_name = NULL;
+    const char *const *effective_target_names = NULL;
+    size_t effective_target_count = 0u;
+
     if (!ctx || !producer_external ||
         !returned_primary_target_name || returned_primary_target_name[0] == '\0' ||
         !returned_target_names || returned_target_count == 0u ||
         !materialized_descriptor || !out_descriptor) {
         return 0;
     }
+
+    effective_primary_target_name =
+        (materialized_descriptor->direct_target_name &&
+            materialized_descriptor->direct_target_name[0] != '\0')
+            ? materialized_descriptor->direct_target_name
+            : returned_primary_target_name;
+    effective_target_names =
+        (materialized_descriptor->dynamic_target_names &&
+            materialized_descriptor->dynamic_target_count > 0u)
+            ? materialized_descriptor->dynamic_target_names
+            : returned_target_names;
+    effective_target_count =
+        materialized_descriptor->dynamic_target_count > 0u
+            ? materialized_descriptor->dynamic_target_count
+            : returned_target_count;
 
     if (!materialized_descriptor->owned_payload_local_ids ||
         materialized_descriptor->payload_slot_count != expected_payload_slot_count ||
@@ -1570,9 +1589,26 @@ static int ir_finalize_materialized_returned_closure_binding_descriptor(
             capture_local_ids,
             capture_count,
             materialized_descriptor->owned_payload_local_ids,
-            materialized_descriptor->payload_slot_count) ||
-        !ir_init_function_object_descriptor_from_static_target_with_payload(
-            returned_primary_target_name,
+            materialized_descriptor->payload_slot_count)) {
+        return 0;
+    }
+
+    if (!materialized_descriptor->is_closure_family &&
+        materialized_descriptor->dynamic_tag_local_id != (size_t)-1) {
+        if (!ir_init_function_object_descriptor_from_static_target_with_payload(
+                effective_primary_target_name,
+                0,
+                0,
+                0,
+                1,
+                NULL,
+                0u,
+                function_target_tag_local_id,
+                out_descriptor)) {
+            return 0;
+        }
+    } else if (!ir_init_function_object_descriptor_from_static_target_with_payload(
+            effective_primary_target_name,
             1,
             0,
             0,
@@ -1587,8 +1623,8 @@ static int ir_finalize_materialized_returned_closure_binding_descriptor(
     ir_finalize_returned_function_object_descriptor_metadata(
         out_descriptor,
         producer_external,
-        returned_target_names,
-        returned_target_count);
+        effective_target_names,
+        effective_target_count);
     return 1;
 }
 
@@ -1743,7 +1779,6 @@ static int ir_reset_and_register_function_value_binding_target_family(
                 return 0;
             }
         }
-        return 1;
     }
 
     return ir_lower_register_function_value_target(
@@ -2008,17 +2043,23 @@ static int ir_add_function_value_local_binding_transport_from_descriptor(
     int declaration_is_const,
     const IrLowerFunctionObjectDescriptor *descriptor) {
     size_t target_index;
+    long long ignored_tag_value = 0;
 
     if (!ctx || !binding_name || binding_name[0] == '\0' || !descriptor ||
         !descriptor->direct_target_name || descriptor->direct_target_name[0] == '\0') {
+        return 0;
+    }
+    if (!ir_lower_register_function_value_target(
+            ctx,
+            binding_name,
+            descriptor->direct_target_name,
+            &ignored_tag_value)) {
         return 0;
     }
 
     if (descriptor->dynamic_target_names &&
         descriptor->dynamic_target_count > 0u) {
         for (target_index = 0u; target_index < descriptor->dynamic_target_count; ++target_index) {
-            long long ignored_tag_value = 0;
-
             if (!descriptor->dynamic_target_names[target_index] ||
                 !ir_lower_register_function_value_target(
                     ctx,
@@ -2056,6 +2097,15 @@ static int ir_update_function_value_binding_transport_from_descriptor(
         return 0;
     }
 
+    if (!ir_reset_and_register_function_value_binding_target_family(
+            ctx,
+            binding_name,
+            descriptor->direct_target_name,
+            descriptor->dynamic_target_names,
+            descriptor->dynamic_target_count)) {
+        return 0;
+    }
+
     return ir_update_function_value_binding_transport(
         ctx,
         binding_name,
@@ -2067,6 +2117,152 @@ static int ir_update_function_value_binding_transport_from_descriptor(
         descriptor->has_const_tag_value,
         descriptor->const_tag_value,
         descriptor->from_returned_function_value_call);
+}
+
+static const IrFunctionValueTargetSet *ir_find_function_value_target_set_in_snapshot(
+    const char *function_name,
+    const IrFunctionValueTargetSet *sets,
+    size_t set_count,
+    const char *binding_name) {
+    size_t set_index;
+
+    if (!binding_name || binding_name[0] == '\0') {
+        return NULL;
+    }
+    for (set_index = 0u; set_index < set_count; ++set_index) {
+        const IrFunctionValueTargetSet *set = &sets[set_index];
+        int same_function =
+            ((!function_name || function_name[0] == '\0') &&
+                (!set->function_name || set->function_name[0] == '\0')) ||
+            (function_name && set->function_name &&
+                strcmp(function_name, set->function_name) == 0);
+
+        if (same_function &&
+            set->binding_name &&
+            strcmp(set->binding_name, binding_name) == 0) {
+            return set;
+        }
+    }
+    return NULL;
+}
+
+static const char *ir_resolve_function_value_binding_const_target_name_from_snapshot(
+    const char *function_name,
+    const IrLowerBinding *binding,
+    const IrFunctionValueTargetSet *sets,
+    size_t set_count) {
+    const IrFunctionValueTargetSet *target_set = NULL;
+    size_t target_index;
+
+    if (!binding ||
+        (binding->kind != IR_LOWER_BINDING_FUNCTION_LOCAL &&
+            binding->kind != IR_LOWER_BINDING_CLOSURE_LOCAL) ||
+        !binding->has_const_value) {
+        return NULL;
+    }
+
+    target_set = ir_find_function_value_target_set_in_snapshot(
+        function_name,
+        sets,
+        set_count,
+        binding->name);
+    if (target_set &&
+        binding->const_value >= 1 &&
+        (size_t)binding->const_value <= target_set->target_count &&
+        target_set->target_names) {
+        target_index = (size_t)binding->const_value - 1u;
+        if (target_set->target_names[target_index] &&
+            target_set->target_names[target_index][0] != '\0') {
+            return target_set->target_names[target_index];
+        }
+    }
+
+    return (binding->type_name && binding->type_name[0] != '\0')
+        ? binding->type_name
+        : NULL;
+}
+
+static int ir_reconcile_function_value_binding_const_facts_after_merge(
+    IrLowerContext *ctx,
+    IrLowerScopeStack *dest_scopes,
+    const IrLowerScopeStack *lhs_scopes,
+    const IrLowerScopeStack *rhs_scopes,
+    const IrFunctionValueTargetSet *lhs_target_sets,
+    size_t lhs_target_set_count,
+    const IrFunctionValueTargetSet *rhs_target_sets,
+    size_t rhs_target_set_count) {
+    const char *function_name = NULL;
+    size_t frame_index;
+
+    if (!ctx || !dest_scopes || !lhs_scopes || !rhs_scopes) {
+        return 0;
+    }
+    function_name = ir_lower_current_function_name(ctx);
+
+    for (frame_index = 0u; frame_index < dest_scopes->count; ++frame_index) {
+        IrLowerScope *dest_frame = &dest_scopes->frames[frame_index];
+        const IrLowerScope *lhs_frame = &lhs_scopes->frames[frame_index];
+        const IrLowerScope *rhs_frame = &rhs_scopes->frames[frame_index];
+        size_t binding_index;
+
+        for (binding_index = 0u; binding_index < dest_frame->count; ++binding_index) {
+            IrLowerBinding *dest_binding = &dest_frame->bindings[binding_index];
+            const IrLowerBinding *lhs_binding = &lhs_frame->bindings[binding_index];
+            const IrLowerBinding *rhs_binding = &rhs_frame->bindings[binding_index];
+            const char *lhs_target_name = NULL;
+            const char *rhs_target_name = NULL;
+            const IrFunctionValueTargetSet *merged_target_set = NULL;
+            size_t merged_index;
+
+            if (dest_binding->kind != IR_LOWER_BINDING_FUNCTION_LOCAL &&
+                dest_binding->kind != IR_LOWER_BINDING_CLOSURE_LOCAL) {
+                continue;
+            }
+
+            lhs_target_name =
+                ir_resolve_function_value_binding_const_target_name_from_snapshot(
+                    function_name,
+                    lhs_binding,
+                    lhs_target_sets,
+                    lhs_target_set_count);
+            rhs_target_name =
+                ir_resolve_function_value_binding_const_target_name_from_snapshot(
+                    function_name,
+                    rhs_binding,
+                    rhs_target_sets,
+                    rhs_target_set_count);
+
+            if (!lhs_target_name || !rhs_target_name ||
+                strcmp(lhs_target_name, rhs_target_name) != 0) {
+                dest_binding->has_const_value = 0;
+                dest_binding->const_value = 0;
+                continue;
+            }
+
+            merged_target_set =
+                ir_lower_find_function_value_target_set(ctx, dest_binding->name);
+            if (!merged_target_set || !merged_target_set->target_names) {
+                dest_binding->has_const_value = 0;
+                dest_binding->const_value = 0;
+                continue;
+            }
+
+            for (merged_index = 0u; merged_index < merged_target_set->target_count; ++merged_index) {
+                if (merged_target_set->target_names[merged_index] &&
+                    strcmp(merged_target_set->target_names[merged_index], lhs_target_name) == 0) {
+                    dest_binding->has_const_value = 1;
+                    dest_binding->const_value = (long long)(merged_index + 1u);
+                    break;
+                }
+            }
+            if (merged_index == merged_target_set->target_count) {
+                dest_binding->has_const_value = 0;
+                dest_binding->const_value = 0;
+            }
+        }
+    }
+
+    return 1;
 }
 
 static int ir_prepare_materialized_ternary_function_value_tags(IrLowerContext *ctx,
@@ -2158,6 +2354,7 @@ static int ir_try_build_returned_function_value_descriptor(
     const char *binding_name,
     const AstExpression *base_expr,
     IrLowerFunctionObjectDescriptor *out_descriptor) {
+    const char *current_function_name = NULL;
     IrLowerReturnedFunctionValueFamilyInfo family_info;
     IrLowerFunctionObjectDescriptor descriptor;
     IrLowerFunctionObjectDescriptor materialized_descriptor;
@@ -2170,27 +2367,28 @@ static int ir_try_build_returned_function_value_descriptor(
         !base_expr || base_expr->kind != AST_EXPR_CALL || !out_descriptor) {
         return 0;
     }
+    current_function_name = ir_lower_current_function_name(ctx);
     ir_init_function_object_descriptor(out_descriptor);
     ir_init_returned_function_value_family_info(&family_info);
     ir_init_function_object_descriptor(&descriptor);
     ir_init_function_object_descriptor(&materialized_descriptor);
 
     {
+        const AstExpression *returned_arg_expr = NULL;
         const AstExpression *returned_arg_base = NULL;
         IrLowerFunctionObjectDescriptor returned_parameter_descriptor;
 
         ir_init_function_object_descriptor(&returned_parameter_descriptor);
         if (ctx->ast_program &&
-            ir_try_resolve_returned_function_value_parameter_argument_info(
-                ctx->ast_program,
+            ir_try_get_recursive_returned_function_value_parameter_argument_expr(
                 ctx,
                 base_expr,
                 NULL,
-                &returned_arg_base,
                 NULL,
-                NULL,
-                NULL,
-                NULL) &&
+                &returned_arg_expr) &&
+            returned_arg_expr &&
+            (returned_arg_base =
+                ir_unwrap_function_value_wrapper_expression(returned_arg_expr)) &&
             returned_arg_base &&
             returned_arg_base->kind == AST_EXPR_IDENTIFIER &&
             returned_arg_base->as.identifier.name &&
@@ -2206,6 +2404,25 @@ static int ir_try_build_returned_function_value_descriptor(
     }
 
     if (!ir_try_analyze_returned_function_value_family(ctx, base_expr, &family_info)) {
+        if (ctx->error && ctx->error->message[0] == '\0') {
+            ir_set_error(ctx->error,
+                base_expr->line,
+                base_expr->column,
+                "IR-INT-145: returned function-value family analysis failed during local initialization");
+        }
+        return 0;
+    }
+    if (!ir_lower_refresh_current_function(
+            ctx,
+            current_function_name,
+            base_expr->line,
+            base_expr->column)) {
+        if (ctx->error && ctx->error->message[0] == '\0') {
+            ir_set_error(ctx->error,
+                base_expr->line,
+                base_expr->column,
+                "IR-INT-146: failed to refresh lowering function after returned function-value family analysis");
+        }
         return 0;
     }
     if (family_info.needs_tag_local &&
@@ -2216,6 +2433,12 @@ static int ir_try_build_returned_function_value_descriptor(
             family_info.target_count,
             &function_target_tag_local_id,
             family_info.is_closure_family ? NULL : &first_target_tag_value)) {
+        if (ctx->error && ctx->error->message[0] == '\0') {
+            ir_set_error(ctx->error,
+                base_expr->line,
+                base_expr->column,
+                "IR-INT-147: failed while preparing returned function-value tag locals during local initialization");
+        }
         goto cleanup;
     }
 
@@ -2249,11 +2472,11 @@ static int ir_try_build_returned_function_value_descriptor(
         goto cleanup;
     }
 
-    if (!ir_append_named_capture_local_slots(
-            ctx,
-            binding_name,
-            family_info.capture_count,
-            &capture_local_ids)) {
+        if (!ir_append_named_capture_local_slots(
+                ctx,
+                binding_name,
+                family_info.capture_count,
+                &capture_local_ids)) {
         ir_set_error(ctx->error,
             base_expr->line,
             base_expr->column,
@@ -2302,6 +2525,64 @@ static int ir_try_build_returned_function_value_descriptor(
             family_info.target_count,
             "__retclosure_declslot",
             &materialized_descriptor)) {
+        if (ctx->error && ctx->error->message[0] == '\0') {
+            ir_set_error(ctx->error,
+                base_expr->line,
+                base_expr->column,
+                "IR-INT-148: failed while materializing returned closure descriptor during local initialization");
+        }
+        goto cleanup;
+    }
+    if (!ir_lower_refresh_current_function(
+            ctx,
+            current_function_name,
+            base_expr->line,
+            base_expr->column)) {
+        if (ctx->error && ctx->error->message[0] == '\0') {
+            ir_set_error(ctx->error,
+                base_expr->line,
+                base_expr->column,
+                "IR-INT-149: failed to refresh lowering function after returned closure descriptor materialization");
+        }
+        goto cleanup;
+    }
+
+    if (!materialized_descriptor.is_closure_family &&
+        materialized_descriptor.dynamic_tag_local_id != (size_t)-1) {
+        if (!ir_copy_materialized_returned_payload_into_binding(
+                ctx,
+                function_target_tag_local_id,
+                NULL,
+                0u,
+                materialized_descriptor.owned_payload_local_ids,
+                materialized_descriptor.payload_slot_count) ||
+            !ir_init_function_object_descriptor_from_static_target_with_payload(
+                materialized_descriptor.direct_target_name,
+                0,
+                0,
+                0,
+                1,
+                NULL,
+                0u,
+                function_target_tag_local_id,
+                out_descriptor)) {
+            if (ctx->error && ctx->error->message[0] == '\0') {
+                ir_set_error(ctx->error,
+                    base_expr->line,
+                    base_expr->column,
+                    "IR-INT-150: failed while finalizing noncapturing returned descriptor payload during local initialization");
+            }
+            goto cleanup;
+        }
+        ir_finalize_returned_function_object_descriptor_metadata(
+            out_descriptor,
+            family_info.producer_external,
+            materialized_descriptor.dynamic_target_names,
+            materialized_descriptor.dynamic_target_count);
+        materialized_descriptor.dynamic_target_names = NULL;
+        materialized_descriptor.owned_dynamic_target_names = NULL;
+        family_info.target_names = NULL;
+        ok = 1;
         goto cleanup;
     }
 
@@ -2316,6 +2597,12 @@ static int ir_try_build_returned_function_value_descriptor(
             family_info.capture_count,
             function_target_tag_local_id,
             out_descriptor)) {
+        if (ctx->error && ctx->error->message[0] == '\0') {
+            ir_set_error(ctx->error,
+                base_expr->line,
+                base_expr->column,
+                "IR-INT-151: failed while seeding two-target returned closure descriptor during local initialization");
+        }
         goto cleanup;
     }
 
@@ -2331,6 +2618,12 @@ static int ir_try_build_returned_function_value_descriptor(
             family_info.payload_slot_count,
             &materialized_descriptor,
             family_info.target_count == 2u ? out_descriptor : &descriptor)) {
+        if (ctx->error && ctx->error->message[0] == '\0') {
+            ir_set_error(ctx->error,
+                base_expr->line,
+                base_expr->column,
+                "IR-INT-152: failed while finalizing materialized returned closure binding descriptor during local initialization");
+        }
         goto cleanup;
     }
 
@@ -2342,6 +2635,12 @@ static int ir_try_build_returned_function_value_descriptor(
     ok = 1;
 
 cleanup:
+    if (!ok &&
+        out_descriptor &&
+        capture_local_ids &&
+        out_descriptor->capture_local_ids == capture_local_ids) {
+        capture_local_ids = NULL;
+    }
     free((void *)materialized_descriptor.owned_payload_local_ids);
     free(capture_local_ids);
     if (!ok) {
@@ -2412,8 +2711,10 @@ static int ir_try_build_closure_literal_function_value_descriptor(
     char *closure_helper_name = NULL;
     size_t *capture_local_ids = NULL;
     size_t capture_count = 0u;
+    size_t payload_slot_count = 0u;
     IrLowerFunctionObjectDescriptor descriptor;
     size_t closure_capture_index;
+    size_t payload_slot_index = 0u;
 
     if (!ctx || !binding_name || binding_name[0] == '\0' || !stmt ||
         !base_expr || base_expr->kind != AST_EXPR_CLOSURE || !out_descriptor) {
@@ -2421,13 +2722,38 @@ static int ir_try_build_closure_literal_function_value_descriptor(
     }
     ir_init_function_object_descriptor(out_descriptor);
 
-    current_function_name =
-        ctx->function && ctx->function->name ? ctx->function->name : NULL;
+    current_function_name = ir_lower_current_function_name(ctx);
     capture_count = base_expr->as.closure.capture_name_count;
+    for (closure_capture_index = 0u;
+         closure_capture_index < capture_count;
+         ++closure_capture_index) {
+        const char *capture_name =
+            base_expr->as.closure.capture_names
+                ? base_expr->as.closure.capture_names[closure_capture_index]
+                : NULL;
+        size_t capture_slot_count = 1u;
+        int applied_function_capture = 0;
+
+        if (!capture_name || capture_name[0] == '\0') {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-LOWER-057: closure capture binding is not available as a lowered scalar local");
+            return 0;
+        }
+        if (!ir_try_resolve_identifier_function_value_capture_slot_count(
+                ctx,
+                capture_name,
+                &capture_slot_count,
+                &applied_function_capture)) {
+            return 0;
+        }
+        payload_slot_count += applied_function_capture ? capture_slot_count : 1u;
+    }
     if (!ir_append_named_capture_local_slots(
             ctx,
             binding_name,
-            capture_count,
+            payload_slot_count,
             &capture_local_ids)) {
         ir_set_error(ctx->error,
             stmt->line,
@@ -2446,6 +2772,7 @@ static int ir_try_build_closure_literal_function_value_descriptor(
         AstExpression capture_expr;
         IrValueRef capture_value;
         int applied_function_capture = 0;
+        size_t capture_slot_count = 1u;
 
         if (!capture_name || capture_name[0] == '\0') {
             free(capture_local_ids);
@@ -2465,25 +2792,38 @@ static int ir_try_build_closure_literal_function_value_descriptor(
             free(capture_local_ids);
             return 0;
         }
-        if (!ir_try_materialize_identifier_function_value_capture_slot(
+        if (!ir_try_resolve_identifier_function_value_capture_slot_count(
                 ctx,
                 capture_name,
-                capture_local_ids[closure_capture_index],
+                &capture_slot_count,
                 &applied_function_capture)) {
             free(capture_local_ids);
             return 0;
         }
-        if (!applied_function_capture &&
-            !ir_emit_mov(ctx,
-                ir_value_local(capture_local_ids[closure_capture_index]),
-                capture_value)) {
-            free(capture_local_ids);
-            return 0;
+        if (applied_function_capture) {
+            if (!ir_try_materialize_identifier_function_value_capture_slots(
+                    ctx,
+                    capture_name,
+                    &capture_local_ids[payload_slot_index],
+                    capture_slot_count,
+                    &applied_function_capture)) {
+                free(capture_local_ids);
+                return 0;
+            }
+            payload_slot_index += capture_slot_count;
+        } else {
+            if (!ir_emit_mov(ctx,
+                    ir_value_local(capture_local_ids[payload_slot_index]),
+                    capture_value)) {
+                free(capture_local_ids);
+                return 0;
+            }
+            payload_slot_index += 1u;
         }
     }
 
     if (!ir_build_closure_helper_name(
-            ctx->function && ctx->function->name ? ctx->function->name : "fn",
+            ir_lower_current_function_name(ctx) ? ir_lower_current_function_name(ctx) : "fn",
             binding_name,
             ((size_t)(stmt->line > 0 ? stmt->line : 0) << 16) |
                 (size_t)((stmt->column > 0 ? stmt->column : 0) + declarator_index),
@@ -2496,7 +2836,7 @@ static int ir_try_build_closure_literal_function_value_descriptor(
             closure_helper_name,
             (const char *const *)base_expr->as.closure.capture_names,
             capture_local_ids,
-            capture_count,
+            payload_slot_count,
             ctx->error)) {
         free(capture_local_ids);
         free(closure_helper_name);
@@ -2528,7 +2868,7 @@ static int ir_try_build_closure_literal_function_value_descriptor(
             0,
             0,
             capture_local_ids,
-            capture_count,
+            payload_slot_count,
             (size_t)-1,
             &descriptor)) {
         free(capture_local_ids);
@@ -2538,6 +2878,535 @@ static int ir_try_build_closure_literal_function_value_descriptor(
     *out_descriptor = descriptor;
     free(closure_helper_name);
     return 1;
+}
+
+static int ir_materialize_closure_literal_into_existing_function_binding(
+    IrLowerContext *ctx,
+    const char *binding_name,
+    const AstStatement *stmt,
+    const AstExpression *closure_expr,
+    const IrLowerBindingInfo *lhs_binding_info,
+    IrLowerFunctionObjectDescriptor *out_descriptor) {
+    const char *current_function_name = NULL;
+    char *closure_helper_name = NULL;
+    IrFunction *helper_function = NULL;
+    IrLowerFunctionObjectDescriptor descriptor;
+    size_t closure_capture_index;
+
+    if (!ctx || !binding_name || binding_name[0] == '\0' || !stmt ||
+        !closure_expr || closure_expr->kind != AST_EXPR_CLOSURE ||
+        !lhs_binding_info || lhs_binding_info->kind != IR_LOWER_BINDING_CLOSURE_LOCAL ||
+        !out_descriptor) {
+        return 0;
+    }
+    ir_init_function_object_descriptor(out_descriptor);
+    ir_init_function_object_descriptor(&descriptor);
+
+    if (lhs_binding_info->closure_capture_count != closure_expr->as.closure.capture_name_count ||
+        (lhs_binding_info->closure_capture_count > 0u &&
+            !lhs_binding_info->closure_capture_local_ids)) {
+        ir_set_error(ctx->error,
+            stmt->line,
+            stmt->column,
+            "IR-LOWER-063: function-value reassignment currently requires matching closure-local payload shapes");
+        return 0;
+    }
+
+    for (closure_capture_index = 0u;
+         closure_capture_index < lhs_binding_info->closure_capture_count;
+         ++closure_capture_index) {
+        const char *capture_name =
+            closure_expr->as.closure.capture_names
+                ? closure_expr->as.closure.capture_names[closure_capture_index]
+                : NULL;
+        AstExpression capture_expr;
+        IrValueRef capture_value;
+        int applied_function_capture = 0;
+
+        if (!capture_name || capture_name[0] == '\0') {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-LOWER-057: closure capture binding is not available as a lowered scalar local");
+            return 0;
+        }
+        memset(&capture_expr, 0, sizeof(capture_expr));
+        capture_expr.kind = AST_EXPR_IDENTIFIER;
+        capture_expr.line = closure_expr->line;
+        capture_expr.column = closure_expr->column;
+        capture_expr.as.identifier.name = (char *)capture_name;
+        capture_expr.as.identifier.name_length = strlen(capture_name);
+        if (!ir_lower_expression(ctx, &capture_expr, &capture_value)) {
+            return 0;
+        }
+        if (!ir_try_materialize_identifier_function_value_capture_slot(
+                ctx,
+                capture_name,
+                lhs_binding_info->closure_capture_local_ids[closure_capture_index],
+                &applied_function_capture)) {
+            return 0;
+        }
+        if (!applied_function_capture &&
+            !ir_emit_mov(ctx,
+                ir_value_local(lhs_binding_info->closure_capture_local_ids[closure_capture_index]),
+                capture_value)) {
+            return 0;
+        }
+    }
+
+    current_function_name = ir_lower_current_function_name(ctx);
+    if (!ir_build_closure_helper_name(
+            current_function_name ? current_function_name : "fn",
+            binding_name,
+            ((size_t)(stmt->line > 0 ? stmt->line : 0) << 16) |
+                (size_t)(stmt->column > 0 ? stmt->column : 0),
+            &closure_helper_name,
+            ctx->error) ||
+        !ir_lower_closure_helper_function_from_expr(
+            ctx,
+            closure_expr,
+            closure_helper_name,
+            (const char *const *)closure_expr->as.closure.capture_names,
+            lhs_binding_info->closure_capture_local_ids,
+            lhs_binding_info->closure_capture_count,
+            ctx->error) ||
+        !ir_lower_refresh_current_function(
+            ctx,
+            current_function_name,
+            stmt->line,
+            stmt->column)) {
+        free(closure_helper_name);
+        return 0;
+    }
+
+    helper_function =
+        (ctx->program && closure_helper_name)
+            ? ir_program_find_function_mut(ctx->program, closure_helper_name)
+            : NULL;
+    if (!helper_function) {
+        free(closure_helper_name);
+        ir_set_error(ctx->error,
+            stmt->line,
+            stmt->column,
+            "IR-INT-090: closure helper disappeared after lowering");
+        return 0;
+    }
+
+    if (!ir_init_function_object_descriptor_from_static_target_with_payload(
+            helper_function->name,
+            1,
+            0,
+            0,
+            0,
+            lhs_binding_info->closure_capture_local_ids,
+            lhs_binding_info->closure_capture_count,
+            lhs_binding_info->function_target_tag_local_id,
+            &descriptor)) {
+        free(closure_helper_name);
+        return 0;
+    }
+
+    *out_descriptor = descriptor;
+    free(closure_helper_name);
+    return 1;
+}
+
+static int ir_materialize_closure_literal_into_placeholder_function_binding(
+    IrLowerContext *ctx,
+    const char *binding_name,
+    const AstStatement *stmt,
+    const AstExpression *closure_expr,
+    const IrLowerBindingInfo *lhs_binding_info,
+    IrLowerFunctionObjectDescriptor *out_descriptor) {
+    const char *current_function_name = NULL;
+    char *closure_helper_name = NULL;
+    IrFunction *helper_function = NULL;
+    IrLowerFunctionObjectDescriptor descriptor;
+    size_t *capture_local_ids = NULL;
+    size_t closure_capture_index;
+    size_t capture_count = 0u;
+
+    if (!ctx || !binding_name || binding_name[0] == '\0' || !stmt ||
+        !closure_expr || closure_expr->kind != AST_EXPR_CLOSURE ||
+        !lhs_binding_info || lhs_binding_info->kind != IR_LOWER_BINDING_FUNCTION_LOCAL ||
+        !out_descriptor) {
+        return 0;
+    }
+    ir_init_function_object_descriptor(out_descriptor);
+    ir_init_function_object_descriptor(&descriptor);
+
+    capture_count = closure_expr->as.closure.capture_name_count;
+    if (capture_count > 0u &&
+        !ir_append_named_capture_local_slots(
+            ctx,
+            binding_name,
+            capture_count,
+            &capture_local_ids)) {
+        ir_set_error(ctx->error,
+            stmt->line,
+            stmt->column,
+            "IR-INT-089: out of memory while lowering closure captures");
+        return 0;
+    }
+
+    for (closure_capture_index = 0u; closure_capture_index < capture_count; ++closure_capture_index) {
+        const char *capture_name =
+            closure_expr->as.closure.capture_names
+                ? closure_expr->as.closure.capture_names[closure_capture_index]
+                : NULL;
+        AstExpression capture_expr;
+        IrValueRef capture_value;
+        int applied_function_capture = 0;
+
+        if (!capture_name || capture_name[0] == '\0') {
+            free(capture_local_ids);
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-LOWER-057: closure capture binding is not available as a lowered scalar local");
+            return 0;
+        }
+        memset(&capture_expr, 0, sizeof(capture_expr));
+        capture_expr.kind = AST_EXPR_IDENTIFIER;
+        capture_expr.line = closure_expr->line;
+        capture_expr.column = closure_expr->column;
+        capture_expr.as.identifier.name = (char *)capture_name;
+        capture_expr.as.identifier.name_length = strlen(capture_name);
+        if (!ir_lower_expression(ctx, &capture_expr, &capture_value) ||
+            !ir_try_materialize_identifier_function_value_capture_slot(
+                ctx,
+                capture_name,
+                capture_local_ids[closure_capture_index],
+                &applied_function_capture)) {
+            free(capture_local_ids);
+            return 0;
+        }
+        if (!applied_function_capture &&
+            !ir_emit_mov(ctx,
+                ir_value_local(capture_local_ids[closure_capture_index]),
+                capture_value)) {
+            free(capture_local_ids);
+            return 0;
+        }
+    }
+
+    current_function_name = ir_lower_current_function_name(ctx);
+    if (!ir_build_closure_helper_name(
+            current_function_name ? current_function_name : "fn",
+            binding_name,
+            ((size_t)(stmt->line > 0 ? stmt->line : 0) << 16) |
+                (size_t)(stmt->column > 0 ? stmt->column : 0),
+            &closure_helper_name,
+            ctx->error) ||
+        !ir_lower_closure_helper_function_from_expr(
+            ctx,
+            closure_expr,
+            closure_helper_name,
+            (const char *const *)closure_expr->as.closure.capture_names,
+            capture_local_ids,
+            capture_count,
+            ctx->error) ||
+        !ir_lower_refresh_current_function(
+            ctx,
+            current_function_name,
+            stmt->line,
+            stmt->column)) {
+        free(capture_local_ids);
+        free(closure_helper_name);
+        return 0;
+    }
+
+    helper_function =
+        (ctx->program && closure_helper_name)
+            ? ir_program_find_function_mut(ctx->program, closure_helper_name)
+            : NULL;
+    if (!helper_function) {
+        free(capture_local_ids);
+        free(closure_helper_name);
+        ir_set_error(ctx->error,
+            stmt->line,
+            stmt->column,
+            "IR-INT-090: closure helper disappeared after lowering");
+        return 0;
+    }
+
+    if (!ir_init_function_object_descriptor_from_static_target_with_payload(
+            helper_function->name,
+            1,
+            0,
+            0,
+            0,
+            capture_local_ids,
+            capture_count,
+            lhs_binding_info->function_target_tag_local_id,
+            &descriptor)) {
+        free(capture_local_ids);
+        free(closure_helper_name);
+        return 0;
+    }
+
+    *out_descriptor = descriptor;
+    free(closure_helper_name);
+    return 1;
+}
+
+static int ir_promote_placeholder_function_binding_to_closure_from_binding(
+    IrLowerContext *ctx,
+    const char *binding_name,
+    const char *source_binding_name,
+    const AstStatement *stmt,
+    const IrLowerBindingInfo *lhs_binding_info,
+    const IrLowerBindingInfo *rhs_binding_info,
+    const IrLowerFunctionObjectDescriptor *rhs_descriptor,
+    IrLowerFunctionObjectDescriptor *out_descriptor) {
+    size_t *capture_local_ids = NULL;
+    IrLowerFunctionObjectDescriptor descriptor;
+    size_t capture_index;
+
+    if (!ctx || !binding_name || binding_name[0] == '\0' ||
+        !source_binding_name || source_binding_name[0] == '\0' || !stmt ||
+        !lhs_binding_info || !rhs_binding_info || !rhs_descriptor ||
+        rhs_binding_info->kind != IR_LOWER_BINDING_CLOSURE_LOCAL ||
+        rhs_binding_info->closure_capture_count == 0u ||
+        !rhs_binding_info->closure_capture_local_ids ||
+        !out_descriptor) {
+        return 0;
+    }
+    ir_init_function_object_descriptor(out_descriptor);
+    ir_init_function_object_descriptor(&descriptor);
+
+    if (!ir_append_named_capture_local_slots(
+            ctx,
+            binding_name,
+            rhs_binding_info->closure_capture_count,
+            &capture_local_ids)) {
+        ir_set_error(ctx->error,
+            stmt->line,
+            stmt->column,
+            "IR-INT-089: out of memory while promoting declaration-only closure binding");
+        return 0;
+    }
+    for (capture_index = 0u; capture_index < rhs_binding_info->closure_capture_count; ++capture_index) {
+        if (!ir_emit_mov(
+                ctx,
+                ir_value_local(capture_local_ids[capture_index]),
+                ir_value_local(rhs_binding_info->closure_capture_local_ids[capture_index]))) {
+            free(capture_local_ids);
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-091: failed to copy closure payload during placeholder promotion");
+            return 0;
+        }
+    }
+
+    descriptor = *rhs_descriptor;
+    descriptor.capture_local_ids = capture_local_ids;
+    descriptor.capture_count = rhs_binding_info->closure_capture_count;
+    descriptor.dynamic_tag_local_id = lhs_binding_info->function_target_tag_local_id;
+    descriptor.payload_has_dynamic_tag =
+        lhs_binding_info->function_target_tag_local_id != (size_t)-1 &&
+        (!descriptor.is_closure_family || !descriptor.has_const_tag_value);
+    descriptor.payload_slot_count = descriptor.capture_count +
+        (descriptor.payload_has_dynamic_tag ? 1u : 0u);
+    if (rhs_binding_info->function_target_tag_local_id != (size_t)-1) {
+        long long lhs_tag_value = 0;
+
+        if (rhs_binding_info->has_const_value) {
+            if (!rhs_binding_info->type_name || rhs_binding_info->type_name[0] == '\0' ||
+                !ir_write_function_value_binding_tag_from_target(
+                    ctx,
+                    binding_name,
+                    rhs_binding_info->type_name,
+                    lhs_binding_info->function_target_tag_local_id,
+                    &lhs_tag_value)) {
+                free(capture_local_ids);
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-091: failed to remap closure-family tag during placeholder promotion");
+                return 0;
+            }
+            descriptor.has_const_tag_value = 1;
+            descriptor.const_tag_value = lhs_tag_value;
+            descriptor.payload_has_dynamic_tag =
+                lhs_binding_info->function_target_tag_local_id != (size_t)-1 &&
+                (!descriptor.is_closure_family || !descriptor.has_const_tag_value);
+            descriptor.payload_slot_count = descriptor.capture_count +
+                (descriptor.payload_has_dynamic_tag ? 1u : 0u);
+        } else if (!ir_write_function_value_binding_tag_from_local(
+                ctx,
+                binding_name,
+                source_binding_name,
+                lhs_binding_info->function_target_tag_local_id,
+                rhs_binding_info->function_target_tag_local_id)) {
+            free(capture_local_ids);
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-091: failed to copy dynamic closure-family binding during placeholder promotion");
+            return 0;
+        }
+    }
+
+    *out_descriptor = descriptor;
+    return 1;
+}
+
+static int ir_promote_placeholder_function_binding_to_closure_from_local_alias(
+    IrLowerContext *ctx,
+    const char *lhs_name,
+    const char *rhs_name,
+    const AstStatement *stmt,
+    const IrLowerBindingInfo *lhs_binding_info,
+    const IrLowerBindingInfo *rhs_binding_info,
+    const IrLowerFunctionObjectDescriptor *rhs_descriptor,
+    int *out_handled) {
+    IrLowerFunctionObjectDescriptor promoted_descriptor;
+
+    if (out_handled) {
+        *out_handled = 0;
+    }
+    if (!ctx || !lhs_name || lhs_name[0] == '\0' ||
+        !rhs_name || rhs_name[0] == '\0' || !stmt ||
+        !lhs_binding_info || !rhs_binding_info || !rhs_descriptor) {
+        return 0;
+    }
+
+    if (!ir_promote_placeholder_function_binding_to_closure_from_binding(
+            ctx,
+            lhs_name,
+            rhs_name,
+            stmt,
+            lhs_binding_info,
+            rhs_binding_info,
+            rhs_descriptor,
+            &promoted_descriptor)) {
+        return 0;
+    }
+    if (!ir_update_function_value_binding_transport_from_descriptor(
+            ctx,
+            lhs_name,
+            IR_LOWER_BINDING_CLOSURE_LOCAL,
+            &promoted_descriptor,
+            promoted_descriptor.capture_count,
+            promoted_descriptor.capture_local_ids,
+            lhs_binding_info->function_target_tag_local_id)) {
+        free((void *)promoted_descriptor.capture_local_ids);
+        return 0;
+    }
+    free((void *)promoted_descriptor.capture_local_ids);
+    if (out_handled) {
+        *out_handled = 1;
+    }
+    return 1;
+}
+
+static int ir_promote_placeholder_function_binding_to_returned_closure(
+    IrLowerContext *ctx,
+    const char *binding_name,
+    const AstExpression *rhs_base,
+    const IrLowerBindingInfo *lhs_binding_info,
+    IrLowerFunctionObjectDescriptor *out_descriptor) {
+    IrLowerReturnedFunctionValueFamilyInfo family_info;
+    IrLowerFunctionObjectDescriptor materialized_descriptor;
+    size_t *capture_local_ids = NULL;
+    int ok = 0;
+
+    if (!ctx || !binding_name || binding_name[0] == '\0' || !rhs_base ||
+        rhs_base->kind != AST_EXPR_CALL || !lhs_binding_info ||
+        lhs_binding_info->kind != IR_LOWER_BINDING_FUNCTION_LOCAL ||
+        lhs_binding_info->function_target_tag_local_id == (size_t)-1 ||
+        !out_descriptor) {
+        return 0;
+    }
+    ir_init_function_object_descriptor(out_descriptor);
+    ir_init_returned_function_value_family_info(&family_info);
+    ir_init_function_object_descriptor(&materialized_descriptor);
+
+    if (!ir_try_analyze_returned_function_value_family(ctx, rhs_base, &family_info) ||
+        !family_info.is_closure_family ||
+        family_info.capture_count == 0u) {
+        goto cleanup;
+    }
+    if (!ir_append_named_capture_local_slots(
+            ctx,
+            binding_name,
+            family_info.capture_count,
+            &capture_local_ids)) {
+        ir_set_error(ctx->error,
+            rhs_base->line,
+            rhs_base->column,
+            "IR-INT-089: out of memory while promoting declaration-only returned closure binding");
+        goto cleanup;
+    }
+
+    if (family_info.target_count <= 1u) {
+        if ((family_info.capture_count > 0u &&
+                !ir_lower_call_into_returned_closure_slots(
+                    ctx,
+                    rhs_base,
+                    family_info.producer_external,
+                    capture_local_ids[0],
+                    family_info.capture_count)) ||
+            !ir_init_function_object_descriptor_from_static_target_with_payload(
+                family_info.primary_target_name,
+                1,
+                0,
+                0,
+                1,
+                capture_local_ids,
+                family_info.capture_count,
+                lhs_binding_info->function_target_tag_local_id,
+                out_descriptor)) {
+            goto cleanup;
+        }
+        ir_finalize_returned_function_object_descriptor_metadata(
+            out_descriptor,
+            family_info.producer_external,
+            family_info.target_names,
+            family_info.target_count);
+        capture_local_ids = NULL;
+        family_info.target_names = NULL;
+        ok = 1;
+        goto cleanup;
+    }
+
+    if (!ir_materialize_returned_function_object_descriptor(
+            ctx,
+            rhs_base,
+            family_info.producer_external,
+            1,
+            family_info.primary_target_name,
+            family_info.target_names,
+            family_info.target_count,
+            "__retclosure_declslot",
+            &materialized_descriptor) ||
+        !ir_finalize_materialized_returned_closure_binding_descriptor(
+            ctx,
+            family_info.producer_external,
+            family_info.primary_target_name,
+            family_info.target_names,
+            family_info.target_count,
+            lhs_binding_info->function_target_tag_local_id,
+            capture_local_ids,
+            family_info.capture_count,
+            family_info.payload_slot_count,
+            &materialized_descriptor,
+            out_descriptor)) {
+        goto cleanup;
+    }
+
+    family_info.target_names = NULL;
+    capture_local_ids = NULL;
+    ok = 1;
+
+cleanup:
+    free(capture_local_ids);
+    free((void *)materialized_descriptor.owned_payload_local_ids);
+    free((void *)materialized_descriptor.dynamic_target_names);
+    ir_free_returned_function_value_family_info(&family_info);
+    return ok;
 }
 
 static int ir_try_build_ternary_function_value_descriptor(
@@ -2571,8 +3440,7 @@ static int ir_try_build_ternary_function_value_descriptor(
             "IR-LOWER-055: local function-value declaration requires direct function identifier, closure literal, direct function-valued return call initializer, or matching identifier ternary");
         return 0;
     }
-    current_function_name =
-        ctx->function && ctx->function->name ? ctx->function->name : NULL;
+    current_function_name = ir_lower_current_function_name(ctx);
     if (!ir_lower_refresh_current_function(
             ctx,
             current_function_name,
@@ -3391,13 +4259,53 @@ static int ir_lower_declaration_names(IrLowerContext *ctx,
             const AstExpression *base_expr = NULL;
             const AstExpression *passthrough_expr = NULL;
             IrLowerFunctionObjectDescriptor descriptor;
+            IrLowerBindingInfo existing_binding_info;
             int descriptor_owns_capture_local_ids = 0;
 
             ir_init_function_object_descriptor(&descriptor);
+            memset(&existing_binding_info, 0, sizeof(existing_binding_info));
             if (!ir_lower_emit_function_value_wrapper_side_effects(ctx, initializer_expr)) {
                 return 0;
             }
             base_expr = ir_unwrap_function_value_wrapper_expression(initializer_expr);
+
+            if (!initializer_expr || !base_expr) {
+                size_t function_target_tag_local_id = (size_t)-1;
+                char tag_local_name[256];
+
+                snprintf(tag_local_name, sizeof(tag_local_name), "%s$ftag", name);
+                if (!ir_function_append_local(
+                        ctx->function,
+                        tag_local_name,
+                        0,
+                        &function_target_tag_local_id,
+                        ctx->error) ||
+                    !ir_lower_scope_add_binding_with_metadata(
+                        &ctx->scopes,
+                        name,
+                        (size_t)-1,
+                        IR_LOWER_BINDING_FUNCTION_LOCAL,
+                        0u,
+                        NULL,
+                        0u,
+                        0u,
+                        "",
+                        0u,
+                        NULL,
+                        function_target_tag_local_id,
+                        stmt->declaration_is_const,
+                        0,
+                        0,
+                        0)) {
+                    ir_set_error(ctx->error,
+                        stmt->line,
+                        stmt->column,
+                        "IR-INT-017: failed to record deferred local function-value '%s' during IR lowering",
+                        name);
+                    return 0;
+                }
+                continue;
+            }
 
             if (base_expr && base_expr->kind == AST_EXPR_CALL &&
                 ir_try_resolve_exact_returned_function_value_parameter_passthrough_expr(
@@ -3473,6 +4381,22 @@ static int ir_lower_declaration_names(IrLowerContext *ctx,
                         name,
                         base_expr,
                         &descriptor)) {
+                    if (ir_lower_scope_lookup_binding(
+                            &ctx->scopes,
+                            name,
+                            &existing_binding_info) &&
+                        existing_binding_info.kind == IR_LOWER_BINDING_FUNCTION_LOCAL &&
+                        existing_binding_info.function_target_tag_local_id != (size_t)-1 &&
+                        existing_binding_info.closure_capture_count == 0u &&
+                        (!existing_binding_info.type_name || existing_binding_info.type_name[0] == '\0') &&
+                        ir_promote_placeholder_function_binding_to_returned_closure(
+                            ctx,
+                            name,
+                            base_expr,
+                            &existing_binding_info,
+                            &descriptor)) {
+                        descriptor_owns_capture_local_ids = 1;
+                    } else {
                     if (ctx->error && ctx->error->message[0] == '\0') {
                         ir_set_error(ctx->error,
                             stmt->line,
@@ -3480,8 +4404,11 @@ static int ir_lower_declaration_names(IrLowerContext *ctx,
                             "IR-LOWER-055: local function-value declaration requires direct function identifier, closure literal, or direct function-valued return call initializer");
                     }
                     return 0;
+                    }
                 }
-                descriptor_owns_capture_local_ids = 1;
+                if (!descriptor_owns_capture_local_ids) {
+                    descriptor_owns_capture_local_ids = 1;
+                }
             } else if (!base_expr || base_expr->kind != AST_EXPR_IDENTIFIER || !base_expr->as.identifier.name) {
                 ir_set_error(ctx->error,
                     stmt->line,
@@ -3913,9 +4840,6 @@ static int ir_try_lower_unused_returned_function_value_passthrough_call_statemen
     const AstExpression *expr = NULL;
     const AstExpression *base = NULL;
     const AstExpression *returned_arg_expr = NULL;
-    const AstExpression *returned_arg_base = NULL;
-    const char *returned_target_name = NULL;
-    IrLowerBindingInfo returned_binding_info;
 
     if (out_handled) {
         *out_handled = 0;
@@ -3931,28 +4855,13 @@ static int ir_try_lower_unused_returned_function_value_passthrough_call_statemen
         return 1;
     }
 
-    memset(&returned_binding_info, 0, sizeof(returned_binding_info));
-    if (!ir_try_resolve_returned_function_value_parameter_argument_info(
-            ctx->ast_program,
+    if (!ir_try_get_recursive_returned_function_value_parameter_argument_expr(
             ctx,
             base,
-            &returned_arg_expr,
-            &returned_arg_base,
             NULL,
             NULL,
-            &returned_target_name,
-            NULL) ||
-        !returned_arg_expr ||
-        !returned_arg_base ||
-        returned_arg_base->kind != AST_EXPR_IDENTIFIER ||
-        !returned_arg_base->as.identifier.name ||
-        !returned_target_name || returned_target_name[0] == '\0' ||
-        !ir_lower_scope_lookup_binding(
-            &ctx->scopes,
-            returned_arg_base->as.identifier.name,
-            &returned_binding_info) ||
-        (returned_binding_info.kind != IR_LOWER_BINDING_FUNCTION_LOCAL &&
-            returned_binding_info.kind != IR_LOWER_BINDING_CLOSURE_LOCAL)) {
+            &returned_arg_expr) ||
+        !returned_arg_expr) {
         return 1;
     }
 
@@ -4203,6 +5112,10 @@ static int ir_try_lower_function_value_assignment_statement(IrLowerContext *ctx,
         }
         {
             IrLowerFunctionObjectDescriptor ternary_descriptor;
+            const char *dynamic_target_names[2];
+
+            dynamic_target_names[0] = ternary_info.then_target_name;
+            dynamic_target_names[1] = ternary_info.else_target_name;
 
             if (!ir_init_function_object_descriptor_from_static_target_with_payload(
                     ternary_info.then_target_name,
@@ -4217,8 +5130,30 @@ static int ir_try_lower_function_value_assignment_statement(IrLowerContext *ctx,
                         ? lhs_binding_info.closure_capture_count
                         : 0u,
                     lhs_binding_info.function_target_tag_local_id,
-                    &ternary_descriptor) ||
-                !ir_update_function_value_binding_transport_from_descriptor(
+                    &ternary_descriptor)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-091: failed to build ternary function-value descriptor during reassignment");
+                return 0;
+            }
+
+            ternary_descriptor.dynamic_target_names = dynamic_target_names;
+            ternary_descriptor.dynamic_target_count = 2u;
+            ternary_descriptor.has_dynamic_family =
+                lhs_binding_info.function_target_tag_local_id != (size_t)-1;
+            ternary_descriptor.has_const_tag_value = 0;
+            ternary_descriptor.const_tag_value = 0;
+            ternary_descriptor.payload_has_dynamic_tag =
+                lhs_binding_info.function_target_tag_local_id != (size_t)-1 &&
+                !(lhs_binding_info.kind == IR_LOWER_BINDING_CLOSURE_LOCAL);
+            ternary_descriptor.payload_slot_count =
+                (lhs_binding_info.kind == IR_LOWER_BINDING_CLOSURE_LOCAL
+                    ? lhs_binding_info.closure_capture_count
+                    : 0u) +
+                (ternary_descriptor.payload_has_dynamic_tag ? 1u : 0u);
+
+            if (!ir_update_function_value_binding_transport_from_descriptor(
                     ctx,
                     lhs_name,
                     lhs_binding_info.kind,
@@ -4236,6 +5171,57 @@ static int ir_try_lower_function_value_assignment_statement(IrLowerContext *ctx,
                     "IR-INT-091: failed to update ternary function-value binding during reassignment");
                 return 0;
             }
+        }
+        if (out_handled) {
+            *out_handled = 1;
+        }
+        return 1;
+    }
+
+    if (rhs_base->kind == AST_EXPR_CLOSURE) {
+        IrLowerFunctionObjectDescriptor closure_descriptor;
+        int promote_placeholder_binding =
+            lhs_binding_info.kind == IR_LOWER_BINDING_FUNCTION_LOCAL &&
+            lhs_binding_info.function_target_tag_local_id != (size_t)-1 &&
+            lhs_binding_info.closure_capture_count == 0u &&
+            (!lhs_binding_info.type_name || lhs_binding_info.type_name[0] == '\0');
+
+        if (!(promote_placeholder_binding
+                ? ir_materialize_closure_literal_into_placeholder_function_binding(
+                    ctx,
+                    lhs_name,
+                    stmt,
+                    rhs_base,
+                    &lhs_binding_info,
+                    &closure_descriptor)
+                : ir_materialize_closure_literal_into_existing_function_binding(
+                    ctx,
+                    lhs_name,
+                    stmt,
+                    rhs_base,
+                    &lhs_binding_info,
+                    &closure_descriptor))) {
+            return 0;
+        }
+        if (!ir_update_function_value_binding_transport_from_descriptor(
+                ctx,
+                lhs_name,
+                IR_LOWER_BINDING_CLOSURE_LOCAL,
+                &closure_descriptor,
+                closure_descriptor.capture_count,
+                closure_descriptor.capture_local_ids,
+                lhs_binding_info.function_target_tag_local_id)) {
+            if (promote_placeholder_binding && closure_descriptor.capture_local_ids) {
+                free((void *)closure_descriptor.capture_local_ids);
+            }
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-091: failed to update closure binding during reassignment");
+            return 0;
+        }
+        if (promote_placeholder_binding && closure_descriptor.capture_local_ids) {
+            free((void *)closure_descriptor.capture_local_ids);
         }
         if (out_handled) {
             *out_handled = 1;
@@ -4278,9 +5264,50 @@ static int ir_try_lower_function_value_assignment_statement(IrLowerContext *ctx,
             rhs_base,
             &rhs_returned_descriptor)) {
         size_t capture_index;
+        int promote_placeholder_to_returned_closure =
+            lhs_binding_info.kind == IR_LOWER_BINDING_FUNCTION_LOCAL &&
+            lhs_binding_info.function_target_tag_local_id != (size_t)-1 &&
+            lhs_binding_info.closure_capture_count == 0u &&
+            (!lhs_binding_info.type_name || lhs_binding_info.type_name[0] == '\0');
 
         rhs_returned_descriptor_ready = 1;
         if (rhs_returned_descriptor.is_closure_family) {
+            if (promote_placeholder_to_returned_closure) {
+            if (!ir_promote_placeholder_function_binding_to_returned_closure(
+                    ctx,
+                    lhs_name,
+                    rhs_base,
+                    &lhs_binding_info,
+                        &rhs_returned_descriptor)) {
+                    free((void *)rhs_returned_descriptor.capture_local_ids);
+                    free((void *)rhs_returned_descriptor.dynamic_target_names);
+                    return 0;
+                }
+                if (!ir_update_function_value_binding_transport_from_descriptor(
+                        ctx,
+                        lhs_name,
+                        IR_LOWER_BINDING_CLOSURE_LOCAL,
+                        &rhs_returned_descriptor,
+                        rhs_returned_descriptor.capture_count,
+                        rhs_returned_descriptor.capture_local_ids,
+                        lhs_binding_info.function_target_tag_local_id)) {
+                    if (ctx->error && ctx->error->message[0] == '\0') {
+                        ir_set_error(ctx->error,
+                            stmt->line,
+                            stmt->column,
+                            "IR-INT-091: failed to update returned closure placeholder binding during reassignment");
+                    }
+                    free((void *)rhs_returned_descriptor.capture_local_ids);
+                    free((void *)rhs_returned_descriptor.dynamic_target_names);
+                    return 0;
+                }
+                free((void *)rhs_returned_descriptor.capture_local_ids);
+                free((void *)rhs_returned_descriptor.dynamic_target_names);
+                if (out_handled) {
+                    *out_handled = 1;
+                }
+                return 1;
+            }
             if (lhs_binding_info.kind != IR_LOWER_BINDING_CLOSURE_LOCAL ||
                 lhs_binding_info.closure_capture_count != rhs_returned_descriptor.capture_count ||
                 (rhs_returned_descriptor.capture_count > 0u &&
@@ -4374,6 +5401,12 @@ static int ir_try_lower_function_value_assignment_statement(IrLowerContext *ctx,
         rhs_binding_info.type_name && rhs_binding_info.type_name[0] != '\0') {
         IrLowerFunctionObjectDescriptor rhs_descriptor;
         int copied_from_binding = 0;
+        int promote_placeholder_to_closure =
+            lhs_binding_info.kind == IR_LOWER_BINDING_FUNCTION_LOCAL &&
+            lhs_binding_info.function_target_tag_local_id != (size_t)-1 &&
+            lhs_binding_info.closure_capture_count == 0u &&
+            (!lhs_binding_info.type_name || lhs_binding_info.type_name[0] == '\0') &&
+            rhs_binding_info.kind == IR_LOWER_BINDING_CLOSURE_LOCAL;
 
         if ((rhs_binding_info.kind == IR_LOWER_BINDING_FUNCTION_LOCAL ||
                 rhs_binding_info.kind == IR_LOWER_BINDING_CLOSURE_LOCAL) &&
@@ -4386,6 +5419,30 @@ static int ir_try_lower_function_value_assignment_statement(IrLowerContext *ctx,
                 stmt->column,
                 "IR-INT-091: failed to recover function-value binding descriptor during reassignment");
             return 0;
+        }
+
+        if (promote_placeholder_to_closure) {
+            if (!ir_promote_placeholder_function_binding_to_closure_from_local_alias(
+                    ctx,
+                    lhs_name,
+                    rhs_name,
+                    stmt,
+                    &lhs_binding_info,
+                    &rhs_binding_info,
+                    &rhs_descriptor,
+                    &copied_from_binding)) {
+                if (ctx->error && ctx->error->message[0] == '\0') {
+                    ir_set_error(ctx->error,
+                        stmt->line,
+                        stmt->column,
+                        "IR-INT-091: failed while promoting placeholder closure alias during reassignment");
+                }
+                return 0;
+            }
+            if (out_handled) {
+                *out_handled = 1;
+            }
+            return 1;
         }
 
         if (ir_try_copy_function_value_binding_from_binding_descriptor(
@@ -5817,6 +6874,15 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
     IrLowerScopeStack entry_scopes;
     IrLowerScopeStack then_scopes;
     IrLowerScopeStack else_scopes;
+    IrFunctionValueTargetSet *entry_target_sets = NULL;
+    IrFunctionValueTargetSet *then_target_sets = NULL;
+    IrFunctionValueTargetSet *else_target_sets = NULL;
+    size_t entry_target_set_count = 0u;
+    size_t then_target_set_count = 0u;
+    size_t else_target_set_count = 0u;
+    size_t entry_target_set_capacity = 0u;
+    size_t then_target_set_capacity = 0u;
+    size_t else_target_set_capacity = 0u;
     int has_else;
     int condition_known = 0;
     int condition_truthy = 0;
@@ -5885,7 +6951,27 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
             "IR-INT-019: failed to snapshot if-branch scope state during IR lowering");
         goto cleanup;
     }
-
+    if (!ir_lower_function_value_target_sets_clone(
+            ctx,
+            &entry_target_sets,
+            &entry_target_set_count,
+            &entry_target_set_capacity) ||
+        !ir_lower_function_value_target_sets_clone(
+            ctx,
+            &then_target_sets,
+            &then_target_set_count,
+            &then_target_set_capacity) ||
+        !ir_lower_function_value_target_sets_clone(
+            ctx,
+            &else_target_sets,
+            &else_target_set_count,
+            &else_target_set_capacity)) {
+        ir_set_error(ctx->error,
+            stmt->line,
+            stmt->column,
+            "IR-INT-019: failed to snapshot if-branch function-value target state during IR lowering");
+        goto cleanup;
+    }
     if (!ir_function_append_block(ctx->function, &then_block_id, NULL, ctx->error)) {
         goto cleanup;
     }
@@ -5906,6 +6992,15 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
     ir_lower_scope_stack_free(&ctx->scopes);
     ctx->scopes = then_scopes;
     memset(&then_scopes, 0, sizeof(then_scopes));
+    ir_lower_function_value_target_sets_free(
+        ctx->function_value_target_sets,
+        ctx->function_value_target_set_count);
+    ctx->function_value_target_sets = then_target_sets;
+    ctx->function_value_target_set_count = then_target_set_count;
+    ctx->function_value_target_set_capacity = then_target_set_capacity;
+    then_target_sets = NULL;
+    then_target_set_count = 0u;
+    then_target_set_capacity = 0u;
     ctx->block_id = then_block_id;
     ctx->has_block = 1;
     if (stmt->child_count >= 1 && !ir_lower_statement(ctx, stmt->children[0])) {
@@ -5917,11 +7012,26 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
     }
     then_scopes = ctx->scopes;
     memset(&ctx->scopes, 0, sizeof(ctx->scopes));
+    then_target_sets = ctx->function_value_target_sets;
+    then_target_set_count = ctx->function_value_target_set_count;
+    then_target_set_capacity = ctx->function_value_target_set_capacity;
+    ctx->function_value_target_sets = NULL;
+    ctx->function_value_target_set_count = 0u;
+    ctx->function_value_target_set_capacity = 0u;
 
     if (has_else) {
         ir_lower_scope_stack_free(&ctx->scopes);
         ctx->scopes = else_scopes;
         memset(&else_scopes, 0, sizeof(else_scopes));
+        ir_lower_function_value_target_sets_free(
+            ctx->function_value_target_sets,
+            ctx->function_value_target_set_count);
+        ctx->function_value_target_sets = else_target_sets;
+        ctx->function_value_target_set_count = else_target_set_count;
+        ctx->function_value_target_set_capacity = else_target_set_capacity;
+        else_target_sets = NULL;
+        else_target_set_count = 0u;
+        else_target_set_capacity = 0u;
         ctx->block_id = else_block_id;
         ctx->has_block = 1;
         if (!ir_lower_statement(ctx, stmt->children[1])) {
@@ -5933,6 +7043,12 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
         }
         else_scopes = ctx->scopes;
         memset(&ctx->scopes, 0, sizeof(ctx->scopes));
+        else_target_sets = ctx->function_value_target_sets;
+        else_target_set_count = ctx->function_value_target_set_count;
+        else_target_set_capacity = ctx->function_value_target_set_capacity;
+        ctx->function_value_target_sets = NULL;
+        ctx->function_value_target_set_count = 0u;
+        ctx->function_value_target_set_capacity = 0u;
 
         if (then_fallthrough || else_fallthrough) {
             IrBasicBlock *then_exit_block;
@@ -5959,25 +7075,118 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
 
         if (then_fallthrough && else_fallthrough) {
             if (!ir_lower_scope_stack_clone(&entry_scopes, &ctx->scopes) ||
-                !ir_lower_scope_stack_merge_const_facts(&ctx->scopes, &then_scopes, &else_scopes)) {
+                !ir_lower_scope_stack_merge_const_facts(&ctx->scopes, &then_scopes, &else_scopes) ||
+                !ir_lower_function_value_target_sets_merge_union(
+                    &ctx->function_value_target_sets,
+                    &ctx->function_value_target_set_count,
+                    &ctx->function_value_target_set_capacity,
+                    then_target_sets,
+                    then_target_set_count,
+                    else_target_sets,
+                    else_target_set_count)) {
                 ir_set_error(ctx->error,
                     stmt->line,
                     stmt->column,
                     "IR-INT-019: failed to merge if-branch scope state during IR lowering");
                 goto cleanup;
             }
+            if (!ir_reconcile_function_value_binding_const_facts_after_merge(
+                    ctx,
+                    &ctx->scopes,
+                    &then_scopes,
+                    &else_scopes,
+                    then_target_sets,
+                    then_target_set_count,
+                    else_target_sets,
+                    else_target_set_count)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-019: failed to reconcile merged function-value branch facts during IR lowering");
+                goto cleanup;
+            }
         } else if (then_fallthrough) {
             ctx->scopes = then_scopes;
             memset(&then_scopes, 0, sizeof(then_scopes));
+            if (!ir_lower_function_value_target_sets_merge_union(
+                    &ctx->function_value_target_sets,
+                    &ctx->function_value_target_set_count,
+                    &ctx->function_value_target_set_capacity,
+                    entry_target_sets,
+                    entry_target_set_count,
+                    then_target_sets,
+                    then_target_set_count)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-019: failed to restore if-then function-value target state during IR lowering");
+                goto cleanup;
+            }
+            if (!ir_reconcile_function_value_binding_const_facts_after_merge(
+                    ctx,
+                    &ctx->scopes,
+                    &then_scopes,
+                    &entry_scopes,
+                    then_target_sets,
+                    then_target_set_count,
+                    entry_target_sets,
+                    entry_target_set_count)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-019: failed to reconcile if-then merged function-value facts during IR lowering");
+                goto cleanup;
+            }
         } else if (else_fallthrough) {
             ctx->scopes = else_scopes;
             memset(&else_scopes, 0, sizeof(else_scopes));
+            if (!ir_lower_function_value_target_sets_merge_union(
+                    &ctx->function_value_target_sets,
+                    &ctx->function_value_target_set_count,
+                    &ctx->function_value_target_set_capacity,
+                    entry_target_sets,
+                    entry_target_set_count,
+                    else_target_sets,
+                    else_target_set_count)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-019: failed to restore if-else function-value target state during IR lowering");
+                goto cleanup;
+            }
+            if (!ir_reconcile_function_value_binding_const_facts_after_merge(
+                    ctx,
+                    &ctx->scopes,
+                    &else_scopes,
+                    &entry_scopes,
+                    else_target_sets,
+                    else_target_set_count,
+                    entry_target_sets,
+                    entry_target_set_count)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-019: failed to reconcile if-else merged function-value facts during IR lowering");
+                goto cleanup;
+            }
         } else {
             if (!ir_lower_scope_stack_clone(&entry_scopes, &ctx->scopes)) {
                 ir_set_error(ctx->error,
                     stmt->line,
                     stmt->column,
                     "IR-INT-019: failed to restore if-branch scope state during IR lowering");
+                goto cleanup;
+            }
+            if (!ir_lower_function_value_target_sets_clone_raw(
+                    entry_target_sets,
+                    entry_target_set_count,
+                    &ctx->function_value_target_sets,
+                    &ctx->function_value_target_set_count,
+                    &ctx->function_value_target_set_capacity)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-019: failed to restore if-branch function-value target state during IR lowering");
                 goto cleanup;
             }
         }
@@ -5993,11 +7202,34 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
 
         if (then_fallthrough) {
             if (!ir_lower_scope_stack_clone(&entry_scopes, &ctx->scopes) ||
-                !ir_lower_scope_stack_merge_const_facts(&ctx->scopes, &then_scopes, &entry_scopes)) {
+                !ir_lower_scope_stack_merge_const_facts(&ctx->scopes, &then_scopes, &entry_scopes) ||
+                !ir_lower_function_value_target_sets_merge_union(
+                    &ctx->function_value_target_sets,
+                    &ctx->function_value_target_set_count,
+                    &ctx->function_value_target_set_capacity,
+                    entry_target_sets,
+                    entry_target_set_count,
+                    then_target_sets,
+                    then_target_set_count)) {
                 ir_set_error(ctx->error,
                     stmt->line,
                     stmt->column,
                     "IR-INT-019: failed to merge if/no-else scope state during IR lowering");
+                goto cleanup;
+            }
+            if (!ir_reconcile_function_value_binding_const_facts_after_merge(
+                    ctx,
+                    &ctx->scopes,
+                    &then_scopes,
+                    &entry_scopes,
+                    then_target_sets,
+                    then_target_set_count,
+                    entry_target_sets,
+                    entry_target_set_count)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-019: failed to reconcile if/no-else merged function-value facts during IR lowering");
                 goto cleanup;
             }
         } else {
@@ -6006,6 +7238,18 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
                     stmt->line,
                     stmt->column,
                     "IR-INT-019: failed to restore if scope state during IR lowering");
+                goto cleanup;
+            }
+            if (!ir_lower_function_value_target_sets_clone_raw(
+                    entry_target_sets,
+                    entry_target_set_count,
+                    &ctx->function_value_target_sets,
+                    &ctx->function_value_target_set_count,
+                    &ctx->function_value_target_set_capacity)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-019: failed to restore if function-value target state during IR lowering");
                 goto cleanup;
             }
         }
@@ -6017,6 +7261,9 @@ cleanup:
     ir_lower_scope_stack_free(&entry_scopes);
     ir_lower_scope_stack_free(&then_scopes);
     ir_lower_scope_stack_free(&else_scopes);
+    ir_lower_function_value_target_sets_free(entry_target_sets, entry_target_set_count);
+    ir_lower_function_value_target_sets_free(then_target_sets, then_target_set_count);
+    ir_lower_function_value_target_sets_free(else_target_sets, else_target_set_count);
     return ok;
 }
 
@@ -6025,6 +7272,13 @@ static int ir_lower_statement(IrLowerContext *ctx, const AstStatement *stmt) {
     IrBasicBlock *block;
 
     if (!ctx || !stmt) {
+        return 0;
+    }
+    if (!ir_lower_refresh_current_function(
+            ctx,
+            ir_lower_current_function_name(ctx),
+            stmt->line,
+            stmt->column)) {
         return 0;
     }
     if (!ctx->has_block) {

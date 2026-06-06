@@ -52,6 +52,7 @@ typedef enum {
 } SemanticAggregateKind;
 
 typedef struct SemanticTypeDescriptor SemanticTypeDescriptor;
+typedef struct SemanticFunctionShape SemanticFunctionShape;
 
 struct SemanticTypeDescriptor {
     SemanticTypeKind kind;
@@ -60,6 +61,20 @@ struct SemanticTypeDescriptor {
     size_t array_rank;
     AstExpression **array_extent_exprs;
     AstFunctionReturnType function_return_type;
+    size_t parameter_count;
+    const int *parameter_value_kinds;
+    const AstFunctionReturnType *parameter_function_return_types;
+    const size_t *parameter_function_parameter_counts;
+    const int *const *parameter_function_parameter_value_kinds;
+    const AstFunctionReturnType *const *parameter_function_parameter_return_types;
+    const size_t *const *parameter_function_parameter_parameter_counts;
+    const int *const *const *parameter_function_parameter_parameter_value_kinds;
+    const AstFunctionReturnType *const *const *parameter_function_parameter_parameter_return_types;
+    const size_t *const *const *parameter_function_parameter_parameter_parameter_counts;
+};
+
+struct SemanticFunctionShape {
+    AstFunctionReturnType return_type;
     size_t parameter_count;
     const int *parameter_value_kinds;
     const AstFunctionReturnType *parameter_function_return_types;
@@ -187,6 +202,16 @@ static int semantic_extension_function_value_initializer_expr_matches_expected(
     const AstExternal *current_func,
     const SemanticTypeDescriptor *expected_type,
     int *out_is_closure_backed);
+static int semantic_extension_resolve_local_function_value_binding_with_expected_type(
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const AstExternal *current_func,
+    const char *name,
+    size_t max_parameter_count,
+    const SemanticTypeDescriptor *expected_type,
+    int *out_is_closure_backed,
+    const char **out_resolved_name);
 static int semantic_find_named_function_parameter_type_descriptor(const AstExternal *func,
     const char *name,
     size_t *out_index,
@@ -222,6 +247,32 @@ static int semantic_make_function_type_descriptor(
     const AstFunctionReturnType *const *const *parameter_function_parameter_parameter_return_types,
     const size_t *const *const *parameter_function_parameter_parameter_parameter_counts,
     SemanticTypeDescriptor *out_type);
+static int semantic_type_descriptor_as_function_shape(
+    const SemanticTypeDescriptor *type,
+    SemanticFunctionShape *out_shape);
+static void semantic_populate_function_type_descriptor(
+    SemanticTypeDescriptor *out_type,
+    AstFunctionReturnType return_type,
+    const char *named_type_name,
+    size_t parameter_count,
+    const int *parameter_value_kinds,
+    const AstFunctionReturnType *parameter_function_return_types,
+    const size_t *parameter_function_parameter_counts,
+    const int *const *parameter_function_parameter_value_kinds,
+    const AstFunctionReturnType *const *parameter_function_parameter_return_types,
+    const size_t *const *parameter_function_parameter_parameter_counts);
+static void semantic_populate_function_type_descriptor_from_ast_signature_view(
+    SemanticTypeDescriptor *out_type,
+    const AstFunctionSignatureView *view);
+static void semantic_populate_function_type_descriptor_from_shape(
+    SemanticTypeDescriptor *out_type,
+    const SemanticFunctionShape *shape,
+    const char *named_type_name);
+static int semantic_build_nested_function_shape(const SemanticFunctionShape *shape,
+    size_t param_index,
+    SemanticFunctionShape *out_shape);
+static int semantic_function_shapes_are_compatible(const SemanticFunctionShape *lhs,
+    const SemanticFunctionShape *rhs);
 static int semantic_top_level_declarations_have_compatible_types(const AstExternal *lhs,
     const AstExternal *rhs);
 static SemanticFunctionSignatureMatchKind semantic_function_declaration_signature_match_kind(

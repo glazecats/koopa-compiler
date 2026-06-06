@@ -93,6 +93,32 @@ typedef enum {
 
 typedef struct AstExpression AstExpression;
 typedef struct AstStatement AstStatement;
+typedef struct AstFunctionSignature AstFunctionSignature;
+typedef struct AstFunctionSignatureView AstFunctionSignatureView;
+
+struct AstFunctionSignature {
+    AstFunctionReturnType return_type;
+    char *return_type_name;
+    size_t parameter_count;
+    int *parameter_value_kinds;
+    char **parameter_type_names;
+    AstFunctionSignature **parameter_function_signatures;
+};
+
+struct AstFunctionSignatureView {
+    const AstFunctionSignature *signature;
+    AstFunctionReturnType return_type;
+    const char *return_type_name;
+    size_t parameter_count;
+    const int *parameter_value_kinds;
+    const char *const *parameter_type_names;
+    const AstFunctionSignature *const *parameter_function_signatures;
+    const AstFunctionReturnType *parameter_function_return_types;
+    const size_t *parameter_function_parameter_counts;
+    const int *const *parameter_function_parameter_value_kinds;
+    const AstFunctionReturnType *const *parameter_function_parameter_return_types;
+    const size_t *const *parameter_function_parameter_parameter_counts;
+};
 
 struct AstExpression {
     AstExpressionKind kind;
@@ -149,6 +175,7 @@ struct AstExpression {
         struct {
             char **capture_names;
             size_t capture_name_count;
+            AstFunctionSignature *signature;
             AstFunctionReturnType return_type;
             char *return_type_name;
             size_t parameter_count;
@@ -176,6 +203,7 @@ struct AstStatement {
     int *declaration_value_kinds;
     size_t *declaration_array_ranks;
     AstExpression ***declaration_array_extent_exprs;
+    AstFunctionSignature **declaration_function_signatures;
     AstFunctionReturnType *declaration_function_return_types;
     size_t *declaration_function_parameter_counts;
     int **declaration_function_parameter_value_kinds;
@@ -207,6 +235,7 @@ typedef struct {
     AstExternalKind kind;
     AstFunctionReturnType function_return_type;
     char *function_return_type_name;
+    AstFunctionSignature *function_return_signature;
     int has_function_return_signature;
     AstFunctionReturnType function_return_function_return_type;
     char *function_return_function_return_type_name;
@@ -233,6 +262,7 @@ typedef struct {
     char **parameter_type_names;
     size_t *parameter_array_ranks;
     AstExpression ***parameter_array_extent_exprs;
+    AstFunctionSignature **parameter_function_signatures;
     AstFunctionReturnType *parameter_function_return_types;
     size_t *parameter_function_parameter_counts;
     int **parameter_function_parameter_value_kinds;
@@ -267,6 +297,7 @@ typedef struct {
 
 void ast_program_init(AstProgram *program);
 void ast_program_free(AstProgram *program);
+int ast_program_attach_function_signature_nodes(AstProgram *program);
 
 /*
  * Adds a top-level external declaration/function to program.
@@ -276,6 +307,23 @@ void ast_program_free(AstProgram *program);
 int ast_program_add_external(AstProgram *program, AstExternalKind kind, const Token *name_token);
 
 const char *ast_external_kind_name(AstExternalKind kind);
+
+int ast_external_get_function_signature_view(const AstExternal *external,
+    AstFunctionSignatureView *out_view);
+int ast_external_get_function_return_signature_view(const AstExternal *external,
+    AstFunctionSignatureView *out_view);
+int ast_external_get_parameter_function_signature_view(const AstExternal *external,
+    size_t param_index,
+    AstFunctionSignatureView *out_view);
+int ast_statement_get_declaration_function_signature_view(const AstStatement *stmt,
+    size_t declaration_index,
+    AstFunctionSignatureView *out_view);
+int ast_expression_get_closure_signature_view(const AstExpression *expr,
+    AstFunctionSignatureView *out_view);
+int ast_function_signature_view_get_parameter_function_signature_view(
+    const AstFunctionSignatureView *view,
+    size_t param_index,
+    AstFunctionSignatureView *out_view);
 
 void ast_expression_free(AstExpression *expr);
 

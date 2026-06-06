@@ -462,7 +462,7 @@ static int parse_initializer_expression(Parser *p, AstExpression **out_expr, con
 static AstStatement *alloc_ast_statement(Parser *p,
     AstStatementKind kind,
     const Token *anchor_tok) {
-    AstStatement *stmt = (AstStatement *)malloc(sizeof(AstStatement));
+    AstStatement *stmt = (AstStatement *)calloc(1u, sizeof(AstStatement));
 
     if (!stmt) {
         set_error(p,
@@ -481,6 +481,7 @@ static AstStatement *alloc_ast_statement(Parser *p,
     stmt->declaration_value_kinds = NULL;
     stmt->declaration_array_ranks = NULL;
     stmt->declaration_array_extent_exprs = NULL;
+    stmt->declaration_function_signatures = NULL;
     stmt->declaration_function_return_types = NULL;
     stmt->declaration_function_parameter_counts = NULL;
     stmt->declaration_function_parameter_value_kinds = NULL;

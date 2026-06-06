@@ -27,9 +27,10 @@ static int ir_verify_value_ref(const IrProgram *program,
             ir_set_error(error,
                 0,
                 0,
-                "IR-VERIFY-002: %s references local.%zu outside local table",
+                "IR-VERIFY-002: %s references local.%zu outside local table in '%s'",
                 role ? role : "value",
-                value.id);
+                value.id,
+                function->name ? function->name : "<anon>");
             return 0;
         }
         return 1;
@@ -1708,6 +1709,19 @@ static int ir_verify_function(const IrProgram *program, const IrFunction *functi
                                 instruction->as.call_indirect.args[arg_index],
                                 "call_indirect argument",
                                 error)) {
+                            if (error && error->message[0] != '\0') {
+                                char prior[sizeof(error->message)];
+                                snprintf(prior, sizeof(prior), "%s", error->message);
+                                ir_set_error(error,
+                                    0,
+                                    0,
+                                    "IR-VERIFY-002: bb.%zu instruction %zu call_indirect arg %zu invalid in '%s': %s",
+                                    block->id,
+                                    j,
+                                    arg_index,
+                                    function->name ? function->name : "<anon>",
+                                    prior);
+                            }
                             return 0;
                         }
                     }

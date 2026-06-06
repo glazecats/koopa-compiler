@@ -208,6 +208,7 @@ static int ir_lower_scope_lookup_binding(const IrLowerScopeStack *stack,
             const IrLowerBinding *binding = &frame->bindings[i - 1];
             if (strcmp(binding->name, name) == 0) {
                 if (out_info) {
+                    out_info->name = binding->name;
                     out_info->local_id = binding->local_id;
                     out_info->kind = binding->kind;
                     out_info->array_rank = binding->array_rank;
@@ -251,6 +252,50 @@ static int ir_lower_scope_lookup_binding_by_local_id(const IrLowerScopeStack *st
                 continue;
             }
             if (out_info) {
+                out_info->name = binding->name;
+                out_info->local_id = binding->local_id;
+                out_info->kind = binding->kind;
+                out_info->array_rank = binding->array_rank;
+                out_info->array_extents = binding->array_extents;
+                out_info->pair_second_local_id = binding->pair_second_local_id;
+                out_info->aggregate_slot_count = binding->aggregate_slot_count;
+                out_info->type_name = binding->type_name;
+                out_info->closure_capture_count = binding->closure_capture_count;
+                out_info->closure_capture_local_ids = binding->closure_capture_local_ids;
+                out_info->function_target_tag_local_id = binding->function_target_tag_local_id;
+                out_info->is_const = binding->is_const;
+                out_info->has_const_value = binding->has_const_value;
+                out_info->const_value = binding->const_value;
+                out_info->from_returned_function_value_call =
+                    binding->from_returned_function_value_call;
+            }
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int ir_lower_scope_lookup_function_value_binding_by_tag_local_id(const IrLowerScopeStack *stack,
+    size_t tag_local_id,
+    IrLowerBindingInfo *out_info) {
+    size_t frame_index;
+
+    if (!stack || tag_local_id == (size_t)-1) {
+        return 0;
+    }
+
+    for (frame_index = stack->count; frame_index > 0; --frame_index) {
+        size_t i;
+        const IrLowerScope *frame = &stack->frames[frame_index - 1];
+
+        for (i = frame->count; i > 0; --i) {
+            const IrLowerBinding *binding = &frame->bindings[i - 1];
+            if (binding->function_target_tag_local_id != tag_local_id) {
+                continue;
+            }
+            if (out_info) {
+                out_info->name = binding->name;
                 out_info->local_id = binding->local_id;
                 out_info->kind = binding->kind;
                 out_info->array_rank = binding->array_rank;
@@ -376,16 +421,172 @@ static void ir_lower_function_value_target_sets_free(IrFunctionValueTargetSet *s
     free(sets);
 }
 
+static int ir_lower_function_value_target_sets_clone_raw(
+    const IrFunctionValueTargetSet *src_sets,
+    size_t src_count,
+    IrFunctionValueTargetSet **out_sets,
+    size_t *out_count,
+    size_t *out_capacity) {
+    IrFunctionValueTargetSet *clone = NULL;
+    size_t index;
+
+    if (out_sets) {
+        *out_sets = NULL;
+    }
+    if (out_count) {
+        *out_count = 0u;
+    }
+    if (out_capacity) {
+        *out_capacity = 0u;
+    }
+    if (!out_sets || !out_count || !out_capacity) {
+        return 0;
+    }
+
+    if (src_count == 0u) {
+        return 1;
+    }
+
+    clone = (IrFunctionValueTargetSet *)calloc(src_count, sizeof(IrFunctionValueTargetSet));
+    if (!clone) {
+        return 0;
+    }
+
+    for (index = 0u; index < src_count; ++index) {
+        const IrFunctionValueTargetSet *src = &src_sets[index];
+        IrFunctionValueTargetSet *dest = &clone[index];
+
+        dest->function_name = src->function_name;
+        dest->binding_name = src->binding_name;
+        dest->target_count = src->target_count;
+        dest->target_capacity = src->target_count;
+        if (src->target_count == 0u) {
+            continue;
+        }
+        dest->target_names = (const char **)calloc(src->target_count, sizeof(const char *));
+        if (!dest->target_names) {
+            ir_lower_function_value_target_sets_free(clone, index + 1u);
+            return 0;
+        }
+        memcpy(dest->target_names,
+            src->target_names,
+            src->target_count * sizeof(const char *));
+    }
+
+    *out_sets = clone;
+    *out_count = src_count;
+    *out_capacity = src_count;
+    return 1;
+}
+
+static int ir_lower_function_value_target_sets_clone(
+    const IrLowerContext *ctx,
+    IrFunctionValueTargetSet **out_sets,
+    size_t *out_count,
+    size_t *out_capacity) {
+    if (!ctx) {
+        return 0;
+    }
+    return ir_lower_function_value_target_sets_clone_raw(
+        ctx->function_value_target_sets,
+        ctx->function_value_target_set_count,
+        out_sets,
+        out_count,
+        out_capacity);
+}
+
+static int ir_lower_function_value_target_sets_merge_union(
+    IrFunctionValueTargetSet **out_sets,
+    size_t *out_count,
+    size_t *out_capacity,
+    const IrFunctionValueTargetSet *lhs_sets,
+    size_t lhs_count,
+    const IrFunctionValueTargetSet *rhs_sets,
+    size_t rhs_count) {
+    IrLowerContext merge_ctx;
+    size_t index;
+
+    if (out_sets) {
+        *out_sets = NULL;
+    }
+    if (out_count) {
+        *out_count = 0u;
+    }
+    if (out_capacity) {
+        *out_capacity = 0u;
+    }
+    if (!out_sets || !out_count || !out_capacity) {
+        return 0;
+    }
+
+    memset(&merge_ctx, 0, sizeof(merge_ctx));
+
+    for (index = 0u; index < lhs_count; ++index) {
+        size_t target_index;
+        const IrFunctionValueTargetSet *set = &lhs_sets[index];
+
+        merge_ctx.current_function_name = set->function_name;
+
+        for (target_index = 0u; target_index < set->target_count; ++target_index) {
+            if (!set->binding_name || !set->target_names ||
+                !set->target_names[target_index] ||
+                !ir_lower_register_function_value_target(
+                    &merge_ctx,
+                    set->binding_name,
+                    set->target_names[target_index],
+                    NULL)) {
+                ir_lower_function_value_target_sets_free(
+                    merge_ctx.function_value_target_sets,
+                    merge_ctx.function_value_target_set_count);
+                return 0;
+            }
+        }
+    }
+
+    for (index = 0u; index < rhs_count; ++index) {
+        size_t target_index;
+        const IrFunctionValueTargetSet *set = &rhs_sets[index];
+
+        merge_ctx.current_function_name = set->function_name;
+
+        for (target_index = 0u; target_index < set->target_count; ++target_index) {
+            if (!set->binding_name || !set->target_names ||
+                !set->target_names[target_index] ||
+                !ir_lower_register_function_value_target(
+                    &merge_ctx,
+                    set->binding_name,
+                    set->target_names[target_index],
+                    NULL)) {
+                ir_lower_function_value_target_sets_free(
+                    merge_ctx.function_value_target_sets,
+                    merge_ctx.function_value_target_set_count);
+                return 0;
+            }
+        }
+    }
+
+    *out_sets = merge_ctx.function_value_target_sets;
+    *out_count = merge_ctx.function_value_target_set_count;
+    *out_capacity = merge_ctx.function_value_target_set_capacity;
+    return 1;
+}
+
 static IrFunctionValueTargetSet *ir_lower_find_function_value_target_set(
     const IrLowerContext *ctx,
     const char *binding_name) {
     size_t index;
+    const char *function_name = NULL;
 
     if (!ctx || !binding_name || binding_name[0] == '\0') {
         return NULL;
     }
+    function_name =
+        (ctx->current_function_name && ctx->current_function_name[0] != '\0')
+            ? ctx->current_function_name
+            : (ctx->function && ctx->function->name ? ctx->function->name : NULL);
     for (index = 0u; index < ctx->function_value_target_set_count; ++index) {
         if (ctx->function_value_target_sets[index].binding_name &&
+            ctx->function_value_target_sets[index].function_name == function_name &&
             strcmp(ctx->function_value_target_sets[index].binding_name, binding_name) == 0) {
             return &ctx->function_value_target_sets[index];
         }
@@ -430,6 +631,10 @@ static int ir_lower_register_function_value_target(IrLowerContext *ctx,
         }
         set = &ctx->function_value_target_sets[ctx->function_value_target_set_count++];
         memset(set, 0, sizeof(*set));
+        set->function_name =
+            (ctx->current_function_name && ctx->current_function_name[0] != '\0')
+                ? ctx->current_function_name
+                : (ctx->function && ctx->function->name ? ctx->function->name : NULL);
         set->binding_name = binding_name;
     }
 

@@ -1606,6 +1606,59 @@ cleanup:
     return ok;
 }
 
+static int test_machine_ir_translation_only_preserves_mixed_dynamic_closure_function_argument_consumers(void) {
+    static const char *source =
+        "int compose(int f(int), int g(int), int x){ return f(g(x)); }\n"
+        "int compose2(int f(int), int g(int), int x){ return g(f(x)); }\n"
+        "int idh(int h(int f(int), int g(int), int x))(int f(int), int g(int), int x){ return h; }\n"
+        "int choose(int c)(int f(int), int g(int), int x){ int h(int f(int), int g(int), int x)=compose; int k(int f(int), int g(int), int x)=compose2; if(c) h=k; return h; }\n"
+        "int pick(int c, int f(int))(int){ int a(int)=closure [f] int (int y){ return f(y); }; int b(int)=closure [f] int (int y){ return f(f(y)); }; if(c) a=b; return a; }\n"
+        "int make(int x)(int){ return closure [x] int (int y){ return x+y; }; }\n"
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return idh(choose(getint()))(pick(getint(), add1), make(3), 4); }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: mixed dynamic closure consumer translation-only setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "call choose(") ||
+        !strstr(actual_text, "call pick__fv_1_add1(") ||
+        !strstr(actual_text, "call make(") ||
+        !strstr(actual_text, "call __fnwrap_pick__fv_1_add1__closure_a_") ||
+        !strstr(actual_text, "call __fnwrap_pick__fv_1_add1__closure_b_") ||
+        !strstr(actual_text, "call __fnwrap_closure_make__retclosure_") ||
+        strstr(actual_text, "compose__fv_") ||
+        strstr(actual_text, "compose2__fv_")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: mixed dynamic closure consumer translation-only dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_machine_ir_translation_only_lowers_extension_float_global_literal_runtime_init(void) {
     ValueSsaProgram program;
     ValueSsaError value_error;
@@ -16560,6 +16613,9 @@ int main(void) {
         }
         if (strstr("MACHINE-IR-FLOAT-SOURCE-TRANSPORT", filter) != NULL) {
             return test_machine_ir_translation_only_lowers_extension_float_transport() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-MIXED-DYNAMIC-CLOSURE-CONSUMERS", filter) != NULL) {
+            return test_machine_ir_translation_only_preserves_mixed_dynamic_closure_function_argument_consumers() ? 0 : 1;
         }
         if (strstr("MACHINE-IR-FLOAT-GLOBAL-LITERAL-RUNTIME-INIT", filter) != NULL) {
             return test_machine_ir_translation_only_lowers_extension_float_global_literal_runtime_init() ? 0 : 1;

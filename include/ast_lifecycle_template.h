@@ -13,6 +13,30 @@
 
 AST_LIFECYCLE_STATIC void AST_LIFECYCLE_EXPRESSION_FREE_FN(AstExpression *expr);
 
+AST_LIFECYCLE_STATIC void ast_function_signature_free_internal(AstFunctionSignature *signature) {
+    size_t i;
+
+    if (!signature) {
+        return;
+    }
+
+    free(signature->return_type_name);
+    if (signature->parameter_type_names) {
+        for (i = 0; i < signature->parameter_count; ++i) {
+            free(signature->parameter_type_names[i]);
+        }
+    }
+    if (signature->parameter_function_signatures) {
+        for (i = 0; i < signature->parameter_count; ++i) {
+            ast_function_signature_free_internal(signature->parameter_function_signatures[i]);
+        }
+    }
+    free(signature->parameter_value_kinds);
+    free(signature->parameter_type_names);
+    free(signature->parameter_function_signatures);
+    free(signature);
+}
+
 AST_LIFECYCLE_STATIC void AST_LIFECYCLE_STATEMENT_FREE_FN(AstStatement *stmt) {
     size_t i;
 
@@ -54,6 +78,12 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_STATEMENT_FREE_FN(AstStatement *stmt) {
     free(stmt->declaration_type_names);
     free(stmt->declaration_array_ranks);
     free(stmt->declaration_array_extent_exprs);
+    if (stmt->declaration_function_signatures) {
+        for (i = 0; i < stmt->declaration_name_count; ++i) {
+            ast_function_signature_free_internal(stmt->declaration_function_signatures[i]);
+        }
+    }
+    free(stmt->declaration_function_signatures);
     free(stmt->declaration_function_return_types);
     free(stmt->declaration_function_parameter_counts);
     if (stmt->declaration_function_parameter_value_kinds) {
@@ -120,6 +150,7 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_PROGRAM_CLEAR_FN(AstProgram *program) {
         size_t j;
         free(program->externals[i].name);
         free(program->externals[i].function_return_type_name);
+        ast_function_signature_free_internal(program->externals[i].function_return_signature);
         free(program->externals[i].function_return_function_return_type_name);
         free(program->externals[i].function_return_function_parameter_value_kinds);
         free(program->externals[i].function_return_function_parameter_return_types);
@@ -188,6 +219,13 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_PROGRAM_CLEAR_FN(AstProgram *program) {
         }
         free(program->externals[i].parameter_array_ranks);
         free(program->externals[i].parameter_function_return_types);
+        if (program->externals[i].parameter_function_signatures) {
+            for (j = 0; j < program->externals[i].parameter_count; ++j) {
+                ast_function_signature_free_internal(
+                    program->externals[i].parameter_function_signatures[j]);
+            }
+        }
+        free(program->externals[i].parameter_function_signatures);
         free(program->externals[i].parameter_function_parameter_counts);
         free(program->externals[i].parameter_function_parameter_value_kinds);
         free(program->externals[i].parameter_function_parameter_return_types);
@@ -262,6 +300,7 @@ AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *progr
     external.kind = kind;
     external.function_return_type = AST_FUNCTION_RETURN_INT;
     external.function_return_type_name = NULL;
+    external.function_return_signature = NULL;
     external.has_function_return_signature = 0;
     external.function_return_function_return_type = AST_FUNCTION_RETURN_INT;
     external.function_return_function_return_type_name = NULL;
@@ -288,6 +327,7 @@ AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *progr
     external.parameter_type_names = NULL;
     external.parameter_array_ranks = NULL;
     external.parameter_array_extent_exprs = NULL;
+    external.parameter_function_signatures = NULL;
     external.parameter_function_return_types = NULL;
     external.parameter_function_parameter_counts = NULL;
     external.parameter_function_parameter_value_kinds = NULL;
@@ -388,6 +428,7 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_EXPRESSION_FREE_FN(AstExpression *expr) 
                 free(expr->as.closure.parameter_names[i]);
             }
         }
+        ast_function_signature_free_internal(expr->as.closure.signature);
         if (expr->as.closure.parameter_type_names) {
             for (i = 0; i < expr->as.closure.parameter_count; ++i) {
                 free(expr->as.closure.parameter_type_names[i]);
