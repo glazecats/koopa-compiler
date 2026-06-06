@@ -8,6 +8,21 @@
 \usepackage{hyperref}
 \usepackage{xcolor}
 \usepackage{listings}
+\usepackage{fancyhdr}
+
+\setlength{\headheight}{13.6pt}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\kaishu\nouppercase{\leftmark}}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+\fancypagestyle{plain}{
+  \fancyhf{}
+  \fancyfoot[C]{\thepage}
+  \renewcommand{\headrulewidth}{0pt}
+  \renewcommand{\footrulewidth}{0pt}
+}
 
 \hypersetup{
   colorlinks=true,
@@ -29,7 +44,8 @@
 \newcommand{\nextstage}{\;\longrightarrow\;}
 
 \title{基于 SysY 的多模式编译器设计与实现报告}
-\author{（朱宏泽 / 2400012623）}
+\author{（朱宏泽 / 2400012623）\\
+\small 项目仓库：\href{https://github.com/glazecats/koopa-compiler}{glazecats/koopa-compiler}}
 \date{\today}
 
 \begin{document}
