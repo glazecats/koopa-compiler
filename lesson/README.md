@@ -2,18 +2,20 @@
 
 这份 `lesson/README.md` 的目标，不是只列文件名，而是给整个 `lesson/` 目录一张总地图。
 
-现在这套 lesson 基本可以按三条主线理解：
+现在这套 lesson 基本可以按四条主线理解：
 
 1. `core`
    - 源程序怎么被理解成前中端 IR
-2. `ssa`
+2. `language`
+   - 当前 `-extension` 语言特性怎么沿着 parser / semantic / IR / backend 保守落地
+3. `ssa`
    - lower IR 之后，SSA / allocator / machine-register-model 怎么长
-3. `machine`
+4. `machine`
    - machine/backend 主线怎么从 machine IR 一路走到最终 journal
 
 如果把整条仓库学习路径压成一句话，可以先记成：
 
-`source text -> lexer -> parser -> AST -> semantic -> canonical IR -> IR passes -> lower IR -> SSA -> machine lowering -> object -> runtime -> observe -> journal`
+`source text -> lexer -> parser -> AST -> semantic -> canonical IR -> IR passes -> lower IR -> language-feature slices / SSA -> machine lowering -> object -> runtime -> observe -> journal`
 
 当前最终 backend 目标方向仍然是 `RISC-V`。
 
@@ -47,6 +49,8 @@ lesson 里会出现：
 
 - `core/`
   - 前端与基础 IR 主线
+- `language/`
+  - 当前 language-feature round / `-extension` 主线
 - `ssa/`
   - `value_ssa` / `memory_ssa` / allocator / machine-register-model / SSA execution support
 - `machine/`
@@ -67,9 +71,11 @@ lesson 里会出现：
 
 1. `core`
    - 先把程序读懂
-2. `ssa`
+2. `language`
+   - 再看当前 feature round 在这些基础层上打开了什么
+3. `ssa`
    - 再把 lower IR 整理成更适合后端的 SSA / allocator 形态
-3. `machine`
+4. `machine`
    - 最后把它一路推进成 machine/backend artifact
 
 ---
@@ -87,49 +93,73 @@ lesson 里会出现：
 7. `core/ir_pass_lesson.md`
 8. `core/lower_ir_lesson.md`
 9. `core/tests_lesson.md`
-10. `ssa/README.md`
-11. `ssa/value_ssa_lesson.md`
-12. `ssa/value_ssa_pass_lesson.md`
-13. `ssa/value_ssa_alloc_lesson.md`
-14. `ssa/value_ssa_machine_lesson.md`
-15. `ssa/value_ssa_interp_lesson.md`
-16. `ssa/memory_ssa_lesson.md`
-17. `ssa/memory_ssa_pass_lesson.md`
-18. `machine/README.md`
-19. `machine/lowering/machine_ir_lesson.md`
-20. `machine/lowering/machine_select_lesson.md`
-21. `machine/lowering/machine_layout_lesson.md`
-22. `machine/lowering/machine_emit_lesson.md`
-23. `machine/lowering/machine_encode_lesson.md`
-24. `machine/object/machine_bytes_lesson.md`
-25. `machine/object/machine_object_lesson.md`
-26. `machine/object/machine_reloc_lesson.md`
-27. `machine/object/machine_container_lesson.md`
-28. `machine/object/machine_elf_lesson.md`
-29. `machine/runtime/machine_image_lesson.md`
-30. `machine/runtime/machine_exec_lesson.md`
-31. `machine/runtime/machine_load_lesson.md`
-32. `machine/runtime/machine_runtime_lesson.md`
-33. `machine/runtime/machine_launch_lesson.md`
-34. `machine/runtime/machine_step_lesson.md`
-35. `machine/runtime/machine_decode_lesson.md`
-36. `machine/runtime/machine_payload_decode_lesson.md`
-37. `machine/runtime/machine_interp_lesson.md`
-38. `machine/runtime/machine_transition_lesson.md`
-39. `machine/runtime/machine_state_lesson.md`
-40. `machine/runtime/machine_mutation_lesson.md`
-41. `machine/runtime/machine_writeback_lesson.md`
-42. `machine/runtime/machine_commit_lesson.md`
-43. `machine/runtime/machine_apply_lesson.md`
-44. `machine/observe/machine_observe_lesson.md`
-45. `machine/observe/machine_delta_lesson.md`
-46. `machine/observe/machine_trace_lesson.md`
-47. `machine/observe/machine_event_lesson.md`
-48. `machine/observe/machine_outcome_lesson.md`
-49. `machine/observe/machine_history_lesson.md`
-50. `machine/observe/machine_timeline_lesson.md`
-51. `machine/observe/machine_log_lesson.md`
-52. `machine/observe/machine_journal_lesson.md`
+10. `language/README.md`
+11. `language/extension_mode_lesson.md`
+12. `language/defer_family_lesson.md`
+13. `language/function_values_lesson.md`
+14. `language/function_value_callee_lowering_lesson.md`
+15. `language/higher_order_callable_lesson.md`
+16. `language/closure_object_lesson.md`
+17. `language/returned_callable_lesson.md`
+18. `language/returned_closure_transport_lesson.md`
+19. `language/callable_object_ir_lesson.md`
+20. `language/closure_capture_callable_lesson.md`
+21. `language/generic_function_values_lesson.md`
+22. `language/recursive_signature_lesson.md`
+23. `language/function_implementation_map_lesson.md`
+24. `language/function_family_table_lesson.md`
+25. `language/function_supported_code_lesson.md`
+26. `language/function_evaluation_reuse_lesson.md`
+27. `language/function_checkpoints_lesson.md`
+28. `language/function_terminology_lesson.md`
+29. `language/aggregate_lesson.md`
+30. `language/aggregate_boundary_lesson.md`
+31. `language/type_system_lesson.md`
+32. `language/float_lesson.md`
+33. `language/float_followup_lesson.md`
+34. `ssa/README.md`
+35. `ssa/value_ssa_lesson.md`
+36. `ssa/value_ssa_pass_lesson.md`
+37. `ssa/value_ssa_alloc_lesson.md`
+38. `ssa/value_ssa_machine_lesson.md`
+39. `ssa/value_ssa_interp_lesson.md`
+40. `ssa/memory_ssa_lesson.md`
+41. `ssa/memory_ssa_pass_lesson.md`
+42. `machine/README.md`
+43. `machine/lowering/machine_ir_lesson.md`
+44. `machine/lowering/machine_select_lesson.md`
+45. `machine/lowering/machine_layout_lesson.md`
+46. `machine/lowering/machine_emit_lesson.md`
+47. `machine/lowering/machine_encode_lesson.md`
+48. `machine/object/machine_bytes_lesson.md`
+49. `machine/object/machine_object_lesson.md`
+50. `machine/object/machine_reloc_lesson.md`
+51. `machine/object/machine_container_lesson.md`
+52. `machine/object/machine_elf_lesson.md`
+53. `machine/runtime/machine_image_lesson.md`
+54. `machine/runtime/machine_exec_lesson.md`
+55. `machine/runtime/machine_load_lesson.md`
+56. `machine/runtime/machine_runtime_lesson.md`
+57. `machine/runtime/machine_launch_lesson.md`
+58. `machine/runtime/machine_step_lesson.md`
+59. `machine/runtime/machine_decode_lesson.md`
+60. `machine/runtime/machine_payload_decode_lesson.md`
+61. `machine/runtime/machine_interp_lesson.md`
+62. `machine/runtime/machine_transition_lesson.md`
+63. `machine/runtime/machine_state_lesson.md`
+64. `machine/runtime/machine_mutation_lesson.md`
+65. `machine/runtime/machine_writeback_lesson.md`
+66. `machine/runtime/machine_commit_lesson.md`
+67. `machine/runtime/machine_apply_lesson.md`
+68. `machine/observe/machine_observe_lesson.md`
+69. `machine/observe/machine_delta_lesson.md`
+70. `machine/observe/machine_trace_lesson.md`
+71. `machine/observe/machine_event_lesson.md`
+72. `machine/observe/machine_outcome_lesson.md`
+73. `machine/observe/machine_history_lesson.md`
+74. `machine/observe/machine_timeline_lesson.md`
+75. `machine/observe/machine_log_lesson.md`
+76. `machine/observe/machine_journal_lesson.md`
 
 这个顺序的好处是：
 
@@ -158,16 +188,36 @@ lesson 里会出现：
 5. `core/semantic_lesson.md`
 6. `core/ir_lesson.md`
 7. `core/lower_ir_lesson.md`
-8. `ssa/README.md`
-9. `ssa/value_ssa_lesson.md`
-10. `ssa/value_ssa_machine_lesson.md`
-11. `machine/README.md`
-12. `machine/lowering/machine_ir_lesson.md`
-13. `machine/lowering/machine_select_lesson.md`
-14. `machine/object/machine_elf_lesson.md`
-15. `machine/runtime/machine_launch_lesson.md`
-16. `machine/observe/machine_outcome_lesson.md`
-17. `machine/observe/machine_journal_lesson.md`
+8. `language/README.md`
+9. `language/defer_family_lesson.md`
+10. `language/function_values_lesson.md`
+11. `language/function_value_callee_lowering_lesson.md`
+12. `language/higher_order_callable_lesson.md`
+13. `language/closure_object_lesson.md`
+14. `language/returned_callable_lesson.md`
+15. `language/returned_closure_transport_lesson.md`
+16. `language/callable_object_ir_lesson.md`
+17. `language/closure_capture_callable_lesson.md`
+18. `language/recursive_signature_lesson.md`
+19. `language/function_implementation_map_lesson.md`
+20. `language/function_family_table_lesson.md`
+21. `language/function_supported_code_lesson.md`
+22. `language/function_evaluation_reuse_lesson.md`
+23. `language/function_checkpoints_lesson.md`
+24. `language/function_terminology_lesson.md`
+25. `language/aggregate_lesson.md`
+26. `language/type_system_lesson.md`
+27. `language/float_lesson.md`
+28. `ssa/README.md`
+29. `ssa/value_ssa_lesson.md`
+30. `ssa/value_ssa_machine_lesson.md`
+31. `machine/README.md`
+32. `machine/lowering/machine_ir_lesson.md`
+33. `machine/lowering/machine_select_lesson.md`
+34. `machine/object/machine_elf_lesson.md`
+35. `machine/runtime/machine_launch_lesson.md`
+36. `machine/observe/machine_outcome_lesson.md`
+37. `machine/observe/machine_journal_lesson.md`
 
 这条路线的目标不是把所有细节一次读完，而是先建立这几个大图景：
 
@@ -185,20 +235,65 @@ lesson 里会出现：
 3. `core/ir_pass_lesson.md`
 4. `core/lower_ir_lesson.md`
 5. `core/tests_lesson.md`
-6. `ssa/README.md`
-7. `ssa/value_ssa_lesson.md`
-8. `ssa/value_ssa_pass_lesson.md`
-9. `ssa/value_ssa_alloc_lesson.md`
-10. `ssa/value_ssa_machine_lesson.md`
-11. `ssa/memory_ssa_lesson.md`
-12. `ssa/memory_ssa_pass_lesson.md`
-13. `machine/README.md`
-14. 然后按你正在改的那条 machine 子线继续下钻
+6. `language/README.md`
+7. `language/extension_mode_lesson.md`
+8. 再按你正在改的 language 子线读 `defer / function_values / callee_lowering / closure_object / returned_callable / closure_capture_callable / generic_function_values / recursive_signature / aggregate / type_system / float`
+9. `ssa/README.md`
+10. `ssa/value_ssa_lesson.md`
+11. `ssa/value_ssa_pass_lesson.md`
+12. `ssa/value_ssa_alloc_lesson.md`
+13. `ssa/value_ssa_machine_lesson.md`
+14. `ssa/memory_ssa_lesson.md`
+15. `ssa/memory_ssa_pass_lesson.md`
+16. `machine/README.md`
+17. 然后按你正在改的那条 machine 子线继续下钻
 
 这条路线的重点不是“从最简单开始”，而是：
 
 - 先把真正影响实现边界的 IR / lower IR / SSA / tests 搞清楚
 - 再顺着 machine 子线对照真实目录、测试、计划文档去读
+
+### 3.2.1 如果你主要想看“怎么实现”
+
+如果你不是在系统学习，而是在看：
+
+- 这些 feature 到底怎么 lower
+- payload/slot/helper/object 到底怎么传
+- 现在哪些 surface 在锁这些实现
+
+那我更推荐这条偏“实现讲义”的短路线：
+
+1. `language/README.md`
+2. `language/extension_mode_lesson.md`
+3. `core/tests_lesson.md`
+4. `language/function_values_lesson.md`
+5. `language/function_value_callee_lowering_lesson.md`
+6. `language/higher_order_callable_lesson.md`
+7. `language/returned_callable_lesson.md`
+8. `language/returned_closure_transport_lesson.md`
+9. `language/callable_object_ir_lesson.md`
+10. `language/closure_capture_callable_lesson.md`
+11. `language/function_family_table_lesson.md`
+12. `language/function_supported_code_lesson.md`
+13. `language/function_evaluation_reuse_lesson.md`
+14. `language/function_implementation_map_lesson.md`
+15. `language/function_checkpoints_lesson.md`
+16. `language/function_terminology_lesson.md`
+17. `language/closure_object_lesson.md`
+18. `language/type_system_lesson.md`
+19. `language/aggregate_boundary_lesson.md`
+20. `language/float_lesson.md`
+21. `language/float_followup_lesson.md`
+
+这条路线的统一问题其实就是：
+
+```text
+feature source shape
+  -> semantic gate
+  -> structural lowering
+  -> payload / helper / slot / object transport
+  -> optimized-shape checkpoint
+```
 
 ### 3.3 查模块路线
 
@@ -220,6 +315,9 @@ lesson 里会出现：
 - 想查 SSA：
   - `ssa/README.md`
   - 对应的 `value_ssa_*` 或 `memory_ssa_*`
+- 想查当前 extension 语言特性：
+  - `language/README.md`
+  - 对应的 `defer / function_values / callee_lowering / closure_object / returned_callable / closure_capture_callable / generic_function_values / recursive_signature / aggregate / type_system / float`
 - 想查 backend lowering：
   - `machine/lowering/README.md`
   - 对应模块及其前后一篇
@@ -280,6 +378,16 @@ lesson 里会出现：
 先读：
 
 1. `core/tests_lesson.md`
+
+如果你是在读 `language/*`，这里再补一句最有用的路标：
+
+- 想看一个 language feature 现在是不是“真闭合”
+  - 不要只看 parser/semantic
+  - 至少再对照：
+    - `ir_regression`
+    - `lower_ir_regression`
+    - `compiler_driver`
+    - 如果是 callable/closure 线，再看 `extension-runtime`
 2. 然后回去看你正在读的那篇 lesson 里提到的 test 名字
 
 ---

@@ -96,6 +96,12 @@
 - `tests/machine/object/machine_container/machine_container_test.c`
 - `tests/machine/object/machine_elf/machine_elf_test.c`
 
+如果按当前 `docs/language` 主线去读，这篇现在还应该明确再多记一块：
+
+- `-extension` / language-feature round
+  - 已经不是 parser-only 小试验
+  - 而是有完整 semantic / IR / lower-IR / ValueSSA / machine-report / compiler-driver 回归面的正式语言线
+
 如果只看你刚提到的这轮最新前端新增点，最值得单独记住的测试入口现在已经分成两轮：
 
 - `tests/lexer/lexer_regression_test.c`
@@ -200,6 +206,151 @@ $$
   - `call` barrier 下 caller-clobber vs spill persistence
   - must-agree / disagreeing join
   - mixed path / mixed resource precision
+
+如果只按当前 `docs/language/*.md` 来看，tests 里还应该再把 language-feature line 直接看成一组：
+
+- defer / function-exit defer / captured defer / unless
+  - parser / semantic / compiler-driver 都有 focused witness
+- non-capturing function values / closure / returned closure / closure-captures-callable / mixed returned callable consumers
+  - semantic、IR、lower-IR、ValueSSA、compiler-driver 都已经有不少 source-driven witness
+- pair / struct / aggregate boundary
+  - parser / semantic / compiler-driver witness 已经形成一条小主线
+- float
+  - 已经不是单点 witness，而是一大串 transport / condition / compare / helper-backed arithmetic / explicit conversion / ternary / recursive pure-float family
+
+## 1.1 `-extension` 测试地图：按实现主线怎么看
+
+如果你现在读的是 `lesson/language/*`，最实用的不是“按目录把所有测试文件扫一遍”，而是按实现主线看：
+
+### 前门 admission
+
+这里回答的是：
+
+`这个 source shape 到底有没有真的先被 parser/semantic 接住`
+
+最该先看：
+
+1. `tests/parser/parser_regression_test.c`
+2. `tests/semantic/semantic_regression_test.c`
+
+重点 family：
+
+- `defer / fndefer / capdefer / unless`
+- function-valued parameter / recursive function-type
+- closure literal / direct closure actual argument / declaration-only placeholder
+- `pair / struct / aggregate param/return`
+- `float` direct root / ternary / recursive pure-float gate
+
+### 结构 lowering
+
+这里回答的是：
+
+`语义上放行之后，canonical IR / lower IR 到底有没有把它诚实翻译下去`
+
+最该看：
+
+1. `tests/ir/ir_regression_test.c`
+2. `tests/lower_ir/lower_ir_regression_test.c`
+
+重点 family：
+
+- `defer` replay / `fndefer` replay / `capdefer` snapshot
+- function-value specialization helper shape
+- returned payload slots
+- `shape + fn_make + call_indirect`
+- aggregate hidden slot / hidden return slot
+- float helper call / truthiness / compare bridge
+
+### 后半段 shape 锁定
+
+这里回答的是：
+
+`ValueSSA/default-path/机器侧后半段有没有把当前 kept shape 弄坏`
+
+最该看：
+
+1. `tests/value_ssa/value_ssa_regression_test.c`
+2. `tests/machine/lowering/machine_ir/machine_ir_test.c`
+3. `tests/machine/lowering/machine_select/machine_select_test.c`
+
+重点 family：
+
+- translation-only dump 还看不看得到 helper/slot/object path
+- default optimized path 能不能合法折叠
+- 合法折叠后有没有把 feature contract 弄丢
+
+### 用户面/运行面
+
+这里回答的是：
+
+`真正从 compiler-driver 或 extension runtime 看，这条 feature 现在是不是闭合了`
+
+最该看：
+
+1. `tests/compiler/compiler_driver_test.c`
+2. extension runtime 相关 harness / 目标
+
+最常见的当前语言线闭合标准，就是：
+
+```text
+parser green
+semantic green
+IR green
+lower-IR green
+compiler-driver green
+extension-runtime green
+```
+
+这也是为什么现在 `NEXT_STEPS` 里会反复出现：
+
+- `compiler-driver`
+- `extension-runtime`
+- `canonical-IR`
+- `lower-IR`
+
+它们不是重复罗列，而是在明确：
+
+`这个 feature 的哪一层已经真正闭合`
+
+如果只想快速建立 `-extension` 这条线的“测试地图”，现在最实用的读法可以压成：
+
+1. `tests/parser/parser_regression_test.c`
+   - 看 feature surface 有没有真的被 parser 接住
+2. `tests/semantic/semantic_regression_test.c`
+   - 看 mode gate、语义边界、reject matrix
+3. `tests/ir/ir_regression_test.c` / `tests/lower_ir/lower_ir_regression_test.c`
+   - 看 structural lowering 到底是不是 honest
+4. `tests/value_ssa/value_ssa_regression_test.c`
+   - 看 translation-only / default-path 两条后半段 surface 是不是都被锁住
+5. `tests/compiler/compiler_driver_test.c`
+   - 看 user-facing `-extension` 编译/运行 witness
+
+再往实现讲义一点压，可以直接记成：
+
+```text
+parser/semantic
+  -> source shape admission
+
+ir/lower-ir
+  -> structural honesty
+
+value-ssa/machine-report
+  -> optimized-shape honesty
+
+compiler-driver/extension-runtime
+  -> user-visible closure
+```
+
+这张图和现在 `lesson/language/*` 的很多课是直接对应的：
+
+- `function_value_callee_lowering`
+  - admission -> specialization shape -> compiler/extension runtime
+- `returned_callable`
+  - payload -> rebuild -> `fn_make + call_indirect` -> downstream fold allowance
+- `aggregate_boundary`
+  - hidden slot / hidden return slot -> call chain
+- `float_followup`
+  - family gate -> helper-backed lowering -> optimized-shape legality
 
 如果把“这轮 void/builtin/backend 中游同步”压成一组最该点名的测试名，我会推荐直接记这几个：
 

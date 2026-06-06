@@ -6,6 +6,11 @@
 
 如果你把 `lesson/machine/` 理解成 backend 主线，那么 `lesson/core/` 就是它前面的地基。
 
+如果按当前仓库阶段来读，还要再多记一句：
+
+- `lesson/core/` 讲的是稳定前中端地基
+- `lesson/language/` 讲的是当前 language-feature round 在这些地基上新增了什么
+
 可以先把这条线粗记成：
 
 1. `lexer`
@@ -216,6 +221,33 @@
 1. `tests_lesson.md`
 
 这三段是最稳的节奏，不容易被后面的 backend 细节淹掉。
+
+### 第四阶段：如果你在看当前 `-extension` 语言线
+
+读：
+
+1. `../language/README.md`
+2. `../language/extension_mode_lesson.md`
+3. 再按你关心的子线读：
+   - `defer_family_lesson.md`
+   - `function_values_lesson.md`
+   - `function_value_callee_lowering_lesson.md`
+   - `closure_object_lesson.md`
+   - `returned_callable_lesson.md`
+   - `closure_capture_callable_lesson.md`
+   - `generic_function_values_lesson.md`
+   - `aggregate_lesson.md`
+   - `aggregate_boundary_lesson.md`
+   - `type_system_lesson.md`
+   - `float_lesson.md`
+   - `float_followup_lesson.md`
+
+这样会更容易把：
+
+- core 的稳定基础能力
+- 和当前 language-feature round 的保守扩张
+
+分开理解。
 
 ---
 
