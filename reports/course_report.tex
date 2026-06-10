@@ -689,12 +689,13 @@ blocker_recolored = yes
 blocker_new_color = 1
 \end{lstlisting}
 
-对应 regression 也会通过 query helper 断言：对 \texttt{ssa.0} 使用了 eviction，
-blocker 是 \texttt{ssa.2}，并且 blocker 被 recolor 到 \texttt{color=1}。所以这个例子
-更适合放在 optimistic-colored 的位置：它说明 \texttt{spill-remove} 只是 planner 的风险
-预测，最终 select 仍然可以通过局部 recolor 把值救回寄存器。
+对应 regression 会断言：\texttt{ssa.0} 走了 eviction，blocker 是 \texttt{ssa.2}，
+且被 recolor 到 \texttt{color=1}。所以它主要说明 optimistic-colored：\texttt{spill-remove}
+只是 planner 的风险预测，select 还能用局部 recolor 救回寄存器；但选择
+\texttt{ssa.2} 而不是 \texttt{ssa.1}，并不是单纯按 id 兜底：两种 recolor 都能形成 family 共色，
+\texttt{ssa.2}/\texttt{ssa.5} 的共色 weight=3，高于 \texttt{ssa.1}/\texttt{ssa.3} 的 weight=1。
 
-真正体现 family-aware 的地方，可以看下面这个 witness。这个 witness 在测试中名为
+更加直接体现 family-aware 的地方，可以看下面这个 witness。这个 witness 在测试中名为
 \path|manual_main_family|，它把颜色数压到 2，并且让目标值
 \texttt{ssa.0} 同时面对两个可牺牲的 blocker：
 
