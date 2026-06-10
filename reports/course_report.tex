@@ -28,7 +28,8 @@
   colorlinks=true,
   linkcolor=blue!60!black,
   urlcolor=blue!60!black,
-  citecolor=blue!60!black
+  citecolor=blue!60!black,
+  linktoc=all
 }
 
 \lstdefinestyle{code}{
@@ -49,6 +50,12 @@
 \date{\today}
 
 \begin{document}
+
+\pagenumbering{Roman}
+\pdfbookmark[1]{目录}{toc}
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
 
 \maketitle
 
